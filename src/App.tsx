@@ -7,11 +7,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
+  signInWithRedirect,
   GoogleAuthProvider, 
   signOut,
   User as FirebaseUser,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   updateProfile
 } from 'firebase/auth';
 import { GoogleGenAI } from "@google/genai";
@@ -720,7 +722,13 @@ export default function App() {
     setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
+      // Check if running in Capacitor (mobile app)
+      const isNative = (window as any).Capacitor?.isNativePlatform();
+      if (isNative) {
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider);
+      }
     } catch (error: any) {
       if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
         console.error("Login failed:", error);
@@ -1195,6 +1203,26 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!email) {
+      toast.error("Veuillez saisir votre adresse email pour réinitialiser le mot de passe.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      toast.success("Un email de réinitialisation a été envoyé à votre adresse.");
+    } catch (error: any) {
+      console.error("Reset password error:", error);
+      let message = "Une erreur est survenue.";
+      if (error.code === 'auth/user-not-found') message = "Aucun utilisateur trouvé avec cet email.";
+      if (error.code === 'auth/invalid-email') message = "Adresse email invalide.";
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-emerald-950 relative overflow-hidden p-4">
       {/* Dynamic Background */}
@@ -1259,6 +1287,17 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
               placeholder="••••••••"
               required
             />
+            {!isSignup && (
+              <div className="flex justify-end mt-2">
+                <button 
+                  type="button" 
+                  onClick={handleResetPassword}
+                  className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  Mot de passe oublié ?
+                </button>
+              </div>
+            )}
           </div>
           <button 
             type="submit"
@@ -1988,7 +2027,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                   Scanner une ordonnance
                 </button>
               </div>
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" capture="environment" className="hidden" />
             </div>
 
             {prescriptions.length === 0 ? (
@@ -4918,6 +4957,7 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                   <input 
                     type="file" 
                     accept="image/*" 
+                    capture="environment"
                     className="hidden" 
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
