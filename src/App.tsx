@@ -1665,7 +1665,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       (async () => {
         try {
           const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-2.5-flash",
             contents: {
               parts: [
                 {
@@ -1689,9 +1689,9 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
           } else {
             throw new Error("Aucun texte extrait de l'ordonnance.");
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Gemini OCR failed:", err);
-          toast.error("L'analyse automatique a échoué. Un pharmacien traitera votre ordonnance manuellement.");
+          toast.error(`L'analyse automatique a échoué: ${err.message || "Erreur inconnue"}. Un pharmacien traitera votre ordonnance manuellement.`);
           await updateDoc(doc(db, 'prescriptions', docRef.id), {
             extractedData: "Erreur d'analyse automatique. Traitement manuel requis."
           });
