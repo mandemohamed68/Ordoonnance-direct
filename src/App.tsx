@@ -76,6 +76,7 @@ import { toast } from 'sonner';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { sendSMS } from './utils/sms';
+import { Capacitor } from '@capacitor/core';
 
 // Fix Leaflet default icon issue
 // @ts-ignore
@@ -723,7 +724,7 @@ export default function App() {
     const provider = new GoogleAuthProvider();
     try {
       // Check if running in Capacitor (mobile app)
-      const isNative = (window as any).Capacitor?.isNativePlatform();
+      const isNative = Capacitor.isNativePlatform();
       if (isNative) {
         await signInWithRedirect(auth, provider);
       } else {
