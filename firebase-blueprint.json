@@ -1,0 +1,159 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile for patient, pharmacist, or delivery person.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["patient", "pharmacist", "delivery", "admin"] },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "pharmacyId": { "type": "string", "description": "Only for pharmacists." }
+      },
+      "required": ["uid", "name", "role"]
+    },
+    "Pharmacy": {
+      "title": "Pharmacy",
+      "description": "Registered pharmacy details.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "location": { "type": "object", "properties": { "lat": { "type": "number" }, "lng": { "type": "number" } } },
+        "phone": { "type": "string" },
+        "licenseNumber": { "type": "string" },
+        "isOnDuty": { "type": "boolean", "description": "Whether the pharmacy is on duty (de garde)." }
+      },
+      "required": ["id", "name", "address"]
+    },
+    "Prescription": {
+      "title": "Prescription",
+      "description": "Prescription uploaded by patient.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "patientId": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "extractedData": { "type": "string", "description": "JSON string of extracted meds." },
+        "selectedMedications": { "type": "array", "items": { "type": "string" } },
+        "requestType": { "type": "string", "enum": ["all", "partial"] },
+        "status": { "type": "string", "enum": ["pending", "validated", "rejected", "rejected_by_limit"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lockedBy": { "type": "string" },
+        "lockedAt": { "type": "string", "format": "date-time" },
+        "rejectedBy": { "type": "array", "items": { "type": "string" } },
+        "rejectionCount": { "type": "integer" }
+      },
+      "required": ["id", "patientId", "imageUrl", "status"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Medication order and delivery tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "prescriptionId": { "type": "string" },
+        "patientId": { "type": "string" },
+        "pharmacistId": { "type": "string" },
+        "deliveryId": { "type": "string" },
+        "deliveryPersonName": { "type": "string" },
+        "deliveryPersonPhone": { "type": "string" },
+        "deliveryPersonPhoto": { "type": "string" },
+        "pickupCode": { "type": "string" },
+        "deliveryCode": { "type": "string" },
+        "isHandedOver": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["pending_quote", "paid", "preparing", "ready", "delivering", "completed", "quote_rejected"] },
+        "deliveryMethod": { "type": "string", "enum": ["delivery", "pickup"] },
+        "items": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "price": { "type": "number" }, "quantity": { "type": "integer" } } } },
+        "totalAmount": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "rejectedBy": { "type": "array", "items": { "type": "string" }, "description": "Delivery person UIDs who rejected this mission." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "patientId", "status", "createdAt"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings.",
+      "type": "object",
+      "properties": {
+        "dayDeliveryFee": { "type": "number" },
+        "nightDeliveryFee": { "type": "number" },
+        "nightStartHour": { "type": "integer", "description": "Hour when night rate starts (0-23)." },
+        "nightEndHour": { "type": "integer", "description": "Hour when night rate ends (0-23)." }
+      },
+      "required": ["dayDeliveryFee", "nightDeliveryFee", "nightStartHour", "nightEndHour"]
+    },
+    "SupportMessage": {
+      "title": "SupportMessage",
+      "description": "Message in a support chat.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "isAdmin": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chatId", "senderId", "text", "isAdmin", "createdAt"]
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "Funds withdrawal request.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed", "rejected"] },
+        "method": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "status", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial transaction record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["credit", "debit"] },
+        "description": { "type": "string" },
+        "orderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "type", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "read": { "type": "boolean" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles." },
+    "/pharmacies/{pharmacyId}": { "schema": "Pharmacy", "description": "Pharmacy registry." },
+    "/prescriptions/{prescriptionId}": { "schema": "Prescription", "description": "Patient prescriptions." },
+    "/orders/{orderId}": { "schema": "Order", "description": "Order tracking." },
+    "/settings/{settingId}": { "schema": "Settings", "description": "Global settings." },
+    "/support_messages/{messageId}": { "schema": "SupportMessage", "description": "Support chat messages." },
+    "/withdrawals/{withdrawalId}": { "schema": "Withdrawal", "description": "Withdrawal requests." },
+    "/transactions/{transactionId}": { "schema": "Transaction", "description": "Wallet transactions." },
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications." }
+  }
+}

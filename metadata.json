@@ -1,0 +1,8 @@
+{
+  "name": "Ordonnance Direct",
+  "description": "Plateforme de télé-exécution d'ordonnances avec livraison à domicile au Burkina Faso.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}

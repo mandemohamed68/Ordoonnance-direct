@@ -1,0 +1,314 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: uid
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required, < 100 chars)
+    //   - email: string (optional, format: email)
+    //   - role: string (required, enum: ['patient', 'pharmacist', 'delivery'])
+    //   - phone: string (optional)
+    //   - address: string (optional)
+    //   - pharmacyId: string (optional, for pharmacists)
+    //
+    // Collection: pharmacies
+    // Document ID: pharmacyId
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, < 200 chars)
+    //   - address: string (required, < 500 chars)
+    //   - location: map (optional, {lat: number, lng: number})
+    //   - phone: string (optional)
+    //   - licenseNumber: string (optional)
+    //
+    // Collection: prescriptions
+    // Document ID: prescriptionId
+    // Fields:
+    //   - id: string (required)
+    //   - patientId: string (required)
+    //   - imageUrl: string (required, starts with https://)
+    //   - extractedData: string (optional, < 5000 chars)
+    //   - status: string (required, enum: ['pending', 'validated', 'rejected'])
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: orders
+    // Document ID: orderId
+    // Fields:
+    //   - id: string (required)
+    //   - prescriptionId: string (optional)
+    //   - patientId: string (required)
+    //   - pharmacistId: string (optional)
+    //   - deliveryId: string (optional)
+    //   - status: string (required, enum: ['pending_quote', 'paid', 'preparing', 'ready', 'delivering', 'completed'])
+    //   - items: list (optional, max 50 items)
+    //   - totalAmount: number (optional, >= 0)
+    //   - deliveryFee: number (optional, >= 0)
+    //   - createdAt: timestamp (required)
+    //   - updatedAt: timestamp (required)
+    //
+    // Collection: support_messages
+    // Document ID: messageId
+    // Fields:
+    //   - chatId: string (required, usually user.uid)
+    //   - senderId: string (required)
+    //   - senderName: string (optional)
+    //   - text: string (required, < 2000 chars)
+    //   - isAdmin: boolean (required)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Efficient role check that avoids recursive get() calls when possible
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "mandemohamed68@gmail.com" ||
+        request.auth.token.email == "nmetechnologiegroup@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getUserRole() in ['admin', 'super-admin'])
+      );
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "mandemohamed68@gmail.com" ||
+        request.auth.token.email == "nmetechnologiegroup@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getUserRole() == 'super-admin')
+      );
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isNewDocOwner() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserRole() == role &&
+             (!('status' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active');
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:image/.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'role']) &&
+             data.uid is string &&
+             data.role is string &&
+             (!('name' in data) || data.name is string) &&
+             (!('email' in data) || data.email is string) &&
+             (!('walletBalance' in data) || data.walletBalance is number) &&
+             (!('status' in data) || data.status is string) &&
+             (!('location' in data) || data.location is map) &&
+             (!('lastLocationUpdate' in data) || data.lastLocationUpdate is timestamp) &&
+             (!('photoUrl' in data) || data.photoUrl is string) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('address' in data) || data.address is string) &&
+             (!('fcmToken' in data) || data.fcmToken is string) &&
+             (!('pharmacyId' in data) || data.pharmacyId is string) &&
+             (!('pharmacyName' in data) || data.pharmacyName is string) &&
+             (!('pharmacyLocation' in data) || data.pharmacyLocation is string) &&
+             (!('authorizationNumber' in data) || data.authorizationNumber is string) &&
+             (!('permissions' in data) || data.permissions is list) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidPharmacy(data) {
+      return data.keys().hasAll(['id', 'name', 'address']) &&
+             data.name is string && data.name.size() < 200 &&
+             data.address is string && data.address.size() < 500 &&
+             (!('isOnDuty' in data) || data.isOnDuty is bool);
+    }
+
+    function isValidPrescription(data) {
+      return data.keys().hasAll(['patientId', 'imageUrl', 'status', 'createdAt']) &&
+             data.patientId is string &&
+             isValidUrl(data.imageUrl) &&
+             data.status in ['draft', 'submitted', 'validated', 'rejected', 'rejected_by_limit'] &&
+             data.createdAt is timestamp &&
+             (!('requestType' in data) || data.requestType in ['all', 'partial']) &&
+             (!('rejectionCount' in data) || data.rejectionCount is int);
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['patientId', 'status', 'createdAt']) &&
+             data.status in ['pending_quote', 'paid', 'preparing', 'ready', 'delivering', 'completed', 'quote_rejected'] &&
+             (!('deliveryMethod' in data) || data.deliveryMethod in ['delivery', 'pickup']) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidSupportMessage(data) {
+      return data.keys().hasAll(['chatId', 'senderId', 'text', 'isAdmin', 'createdAt']) &&
+             data.chatId is string &&
+             data.senderId is string &&
+             data.text is string && data.text.size() < 2000 &&
+             data.isAdmin is bool &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // 1. Owner can always read their own profile
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // 2. Pharmacists and delivery persons can read profiles for order fulfillment
+      allow read: if isAuthenticated() && (hasRole('pharmacist') || hasRole('delivery'));
+      
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == request.auth.uid && 
+                    (
+                      request.resource.data.status == 'pending' || 
+                      (request.resource.data.status == 'active' && (request.resource.data.role == 'patient' || isAdmin()))
+                    ) && 
+                    (request.resource.data.role != 'admin' || isAdmin()) && 
+                    (request.resource.data.role != 'super-admin' || isSuperAdmin());
+      
+      allow update: if (isAdmin() && isValidUser(request.resource.data)) || 
+                    (isOwner(userId) && isValidUser(request.resource.data) && 
+                     request.resource.data.uid == resource.data.uid && 
+                     request.resource.data.role == resource.data.role && 
+                     (
+                       request.resource.data.status == resource.data.status || 
+                       (resource.data.role == 'patient' && resource.data.status == 'pending' && request.resource.data.status == 'active')
+                     )
+                    );
+      allow delete: if isAdmin();
+    }
+
+    match /pharmacies/{pharmacyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /prescriptions/{prescriptionId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        resource.data.patientId == request.auth.uid || 
+        hasRole('pharmacist')
+      );
+      allow create: if isAuthenticated() && isValidPrescription(request.resource.data) && request.resource.data.patientId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (isOwner(resource.data.patientId) && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'requestType', 'selectedMedications', 'hospitalLocation', 'patientName', 'lockedBy', 'lockedAt', 'extractedData'])) ||
+        (hasRole('pharmacist') && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'extractedData', 'lockedBy', 'lockedAt', 'rejectedBy', 'rejectionCount']))
+      );
+      allow delete: if isAdmin() || (isOwner(resource.data.patientId) && (!('status' in resource.data) || resource.data.status != 'paid'));
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.pharmacistId == request.auth.uid ||
+        resource.data.deliveryId == request.auth.uid ||
+        (hasRole('pharmacist') && resource.data.status in ['pending_quote', 'paid', 'preparing', 'ready']) ||
+        (hasRole('delivery') && resource.data.status in ['paid', 'preparing', 'ready', 'delivering'])
+      );
+      allow create: if isAuthenticated() && isValidOrder(request.resource.data) && (
+        request.resource.data.patientId == request.auth.uid ||
+        (hasRole('pharmacist') && request.resource.data.pharmacistId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (resource.data.patientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryMethod', 'deliveryFee', 'serviceFee', 'totalAmount', 'updatedAt', 'history', 'paymentMethod', 'paymentPhone', 'paymentStatus', 'medicationTotal', 'pharmacyAmount', 'deliveryAmount', 'platformFee'])) ||
+        (hasRole('pharmacist') && (
+          resource.data.pharmacistId == request.auth.uid || !('pharmacistId' in resource.data)
+        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'items', 'totalAmount', 'updatedAt', 'pharmacistId', 'pharmacistName', 'pharmacyName', 'pharmacyLocation', 'isHandedOver', 'history'])) ||
+        (hasRole('delivery') && (
+          resource.data.deliveryId == request.auth.uid || !('deliveryId' in resource.data)
+        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'deliveryId', 'deliveryPersonName', 'deliveryPersonPhone', 'deliveryPersonPhoto', 'pickupCode', 'deliveryCode', 'isHandedOver', 'history', 'rejectedBy', 'deliveryLocation']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow read: if isAuthenticated() && (isAdmin() || isDocOwner());
+      allow create: if isAuthenticated() && isNewDocOwner();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (isAdmin() || isDocOwner());
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (isAdmin() || isDocOwner());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (isAdmin() || isDocOwner());
+      allow delete: if isAdmin() || (isAuthenticated() && isDocOwner());
+    }
+
+    match /scripts/{scriptId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /system_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /support_messages/{messageId} {
+      allow read: if isAuthenticated() && (
+        resource.data.chatId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuthenticated() && 
+                    isValidSupportMessage(request.resource.data) && (
+                      request.resource.data.chatId == request.auth.uid || isAdmin()
+                    );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}
