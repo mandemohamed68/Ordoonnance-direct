@@ -790,15 +790,8 @@ export default function App() {
       setProfile(newProfile);
       setViewMode(role);
       
-      // Notify admins of new pending user
-      if (newProfile.status === 'pending') {
-        const adminsQ = query(collection(db, 'users'), where('role', 'in', ['admin', 'super-admin']));
-        getDocs(adminsQ).then(snap => {
-          snap.forEach(adminDoc => {
-            createNotification(adminDoc.id, "Nouvel utilisateur", `L'utilisateur ${newProfile.name} (${newProfile.role}) est en attente d'activation.`, 'system');
-          });
-        });
-      }
+      // Note: We cannot notify admins from the client side securely without exposing admin profiles.
+      // In a production app, this should be handled by a Cloud Function triggered by user creation.
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
     }
