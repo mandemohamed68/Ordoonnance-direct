@@ -3,7 +3,7 @@ import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestor
 import { db } from '../firebase';
 import { Transaction, UserProfile } from '../types';
 import { Download, TrendingUp, TrendingDown, Calendar } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export const ReportsView = ({ profile }: { profile: UserProfile }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);

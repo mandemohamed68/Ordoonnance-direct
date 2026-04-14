@@ -1,6 +1,5 @@
 {
 	"appId": "com.ordonnance_direct.app",
 	"appName": "OrdonnanceDirectApp",
-	"webDir": "dist",
-	"bundledWebRuntime": false
+	"webDir": "dist"
 }

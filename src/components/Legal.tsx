@@ -1,6 +1,6 @@
 import React from 'react';
 import { Shield, FileText, ArrowLeft } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export const Legal = ({ onBack }: { onBack: () => void }) => {
   return (
