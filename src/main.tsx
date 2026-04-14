@@ -22,9 +22,9 @@ try {
     <StrictMode>
       <ErrorBoundary>
         <App />
-        <Toaster position="top-center" richColors />
+        <Toaster position="top-right" richColors />
       </ErrorBoundary>
-    </StrictMode>,
+    </StrictMode>
   );
   console.log('main.tsx: Render call finished');
 } catch (error) {

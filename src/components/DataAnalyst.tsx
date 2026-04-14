@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { BarChart3, TrendingUp, Users, Package, DollarSign, Calendar, Download, Filter, RefreshCw } from 'lucide-react';
 import { collection, query, onSnapshot, getDocs, orderBy, limit, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserProfile, Order, Transaction } from '../types';
-import { formatDate } from '../App';
+import { formatDate } from '../utils/shared';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 export const DataAnalyst = () => {

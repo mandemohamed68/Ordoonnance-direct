@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { Terminal as TerminalIcon, Play, Square, Save, Clock, Trash2, Plus, ChevronRight } from 'lucide-react';
 import { collection, query, onSnapshot, setDoc, doc, deleteDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';

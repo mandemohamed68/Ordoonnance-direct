@@ -20,7 +20,13 @@
       window.addEventListener('error', function(event) {
         var errorLog = document.getElementById('error-log');
         if (errorLog) {
-          errorLog.innerHTML += '<br/>' + event.message + ' at ' + event.filename + ':' + event.lineno;
+          errorLog.innerHTML += '<br/>Error: ' + event.message + ' at ' + event.filename + ':' + event.lineno;
+        }
+      });
+      window.addEventListener('unhandledrejection', function(event) {
+        var errorLog = document.getElementById('error-log');
+        if (errorLog) {
+          errorLog.innerHTML += '<br/>Promise Rejection: ' + (event.reason ? (event.reason.message || event.reason) : 'Unknown');
         }
       });
       console.log('HTML Root Ready. Loading main.tsx...');
