@@ -145,3 +145,81 @@ export const compressImage = (file: File, maxWidth = 1024, maxHeight = 1024, qua
   });
 };
 
+/**
+ * Calculates the currently active on-call group based on the rotation settings and current date.
+ */
+export const getCurrentOnCallGroup = (baseMondayDate: string, baseGroup: number): number => {
+  if (!baseMondayDate || !baseGroup) return 1;
+
+  const baseDate = new Date(baseMondayDate);
+  // Ensure baseDate is set to midnight to avoid timezone issues
+  baseDate.setHours(0, 0, 0, 0);
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  // Calculate difference in days
+  const diffTime = Math.abs(now.getTime() - baseDate.getTime());
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  // Calculate difference in weeks
+  const diffWeeks = Math.floor(diffDays / 7);
+
+  // Calculate current group
+  // If now is before baseDate, we subtract weeks, otherwise we add weeks
+  let currentGroup = baseGroup;
+  if (now < baseDate) {
+    currentGroup = ((baseGroup - 1 - (diffWeeks % 4) + 4) % 4) + 1;
+  } else {
+    currentGroup = ((baseGroup - 1 + diffWeeks) % 4) + 1;
+  }
+
+  return currentGroup;
+};
+
+/**
+ * Determines if the current time falls within the on-call hours for a given city.
+ */
+export const isCityOnCallNow = (startTime: string, endTime: string): boolean => {
+  if (!startTime || !endTime) return false;
+
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  const currentTimeInMinutes = currentHour * 60 + currentMinute;
+
+  const [startHour, startMinute] = startTime.split(':').map(Number);
+  const startTimeInMinutes = startHour * 60 + startMinute;
+
+  const [endHour, endMinute] = endTime.split(':').map(Number);
+  const endTimeInMinutes = endHour * 60 + endMinute;
+
+  if (startTimeInMinutes < endTimeInMinutes) {
+    // Normal case: e.g., 08:00 to 19:00
+    return currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes;
+  } else {
+    // Overnight case: e.g., 19:00 to 08:00
+    return currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes <= endTimeInMinutes;
+  }
+};
+
+/**
+ * Calculates the distance between two coordinates in kilometers using the Haversine formula.
+ */
+export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in km
+  return d;
+};
+
+const deg2rad = (deg: number): number => {
+  return deg * (Math.PI / 180);
+};
+

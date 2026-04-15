@@ -131,6 +131,8 @@ service cloud.firestore {
              (!('name' in data) || data.name is string) &&
              (!('email' in data) || data.email is string) &&
              (!('walletBalance' in data) || data.walletBalance is number) &&
+             (!('pharmacistBalance' in data) || data.pharmacistBalance is number) &&
+             (!('deliveryBalance' in data) || data.deliveryBalance is number) &&
              (!('status' in data) || data.status is string) &&
              (!('location' in data) || data.location is map) &&
              (!('lastLocationUpdate' in data) || data.lastLocationUpdate is timestamp) &&
@@ -144,14 +146,34 @@ service cloud.firestore {
              (!('pharmacyLocation' in data) || data.pharmacyLocation is string) &&
              (!('authorizationNumber' in data) || data.authorizationNumber is string) &&
              (!('permissions' in data) || data.permissions is list) &&
+             (!('cityId' in data) || data.cityId is string) &&
+             (!('groupId' in data) || data.groupId is string) &&
              (!('createdAt' in data) || data.createdAt is timestamp);
     }
 
     function isValidPharmacy(data) {
-      return data.keys().hasAll(['id', 'name', 'address']) &&
+      return data.keys().hasAll(['id', 'name', 'address', 'cityId', 'groupId']) &&
              data.name is string && data.name.size() < 200 &&
              data.address is string && data.address.size() < 500 &&
+             data.cityId is string &&
+             data.groupId is string &&
              (!('isOnDuty' in data) || data.isOnDuty is bool);
+    }
+
+    function isValidCity(data) {
+      return data.keys().hasAll(['id', 'name', 'onCallStartTime', 'onCallEndTime', 'status']) &&
+             data.id is string &&
+             data.name is string &&
+             data.onCallStartTime is string &&
+             data.onCallEndTime is string &&
+             data.status in ['active', 'suspended'];
+    }
+
+    function isValidRotation(data) {
+      return data.keys().hasAll(['id', 'baseMondayDate', 'baseGroup']) &&
+             data.id is string &&
+             data.baseMondayDate is string &&
+             data.baseGroup is int && data.baseGroup >= 1 && data.baseGroup <= 4;
     }
 
     function isValidPrescription(data) {
@@ -297,6 +319,20 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if isAuthenticated();
       allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /cities/{cityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidCity(request.resource.data);
+      allow update: if isAdmin() && isValidCity(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /on_call_rotation/{rotationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidRotation(request.resource.data);
+      allow update: if isAdmin() && isValidRotation(request.resource.data);
       allow delete: if isAdmin();
     }
 

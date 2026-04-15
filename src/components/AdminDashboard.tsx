@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase';
-import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog } from '../types';
+import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { logTransaction, createNotification, formatDate, isSuperAdminEmail } from '../utils/shared';
@@ -17,6 +17,8 @@ import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
 import { DataAnalyst } from './DataAnalyst';
 import { PHARMACIES_OUAGA } from '../data/pharmacies_ouaga';
+
+import { PullToRefresh } from './PullToRefresh';
 
 const calculateDeliveryFee = (settings: Settings | null) => {
   if (!settings) return 0;
@@ -150,7 +152,14 @@ const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
 };
 
 export function AdminDashboard({ profile, settings }: { profile: UserProfile, settings: Settings | null }) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall'>('overview');
+  const [cities, setCities] = useState<City[]>([]);
+  const [rotation, setRotation] = useState<OnCallRotation | null>(null);
+  const [showCityModal, setShowCityModal] = useState(false);
+  const [editingCity, setEditingCity] = useState<City | null>(null);
+  const [newCity, setNewCity] = useState<Partial<City>>({ name: '', onCallStartTime: '19:00', onCallEndTime: '08:00', status: 'active' });
+  const [showRotationModal, setShowRotationModal] = useState(false);
+  const [editRotation, setEditRotation] = useState<Partial<OnCallRotation>>({ baseMondayDate: '', baseGroup: 1 });
   const [editSettings, setEditSettings] = useState<Settings | null>(settings ? {
     ...settings,
     commissionPercentage: settings.commissionPercentage || 10,
@@ -219,9 +228,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [adminReply, setAdminReply] = useState('');
 
-  const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '' });
+  const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '' });
   const [addingPharmacy, setAddingPharmacy] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '' });
   const [addingUser, setAddingUser] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
 
@@ -271,6 +280,8 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         chunk.forEach(doc => {
           batch.update(doc.ref, { 
             walletBalance: 0,
+            pharmacistBalance: 0,
+            deliveryBalance: 0,
             pharmacyId: null,
             pharmacyName: null,
             pharmacyLocation: null,
@@ -426,6 +437,21 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     };
   }, []);
 
+  useEffect(() => {
+    const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
+      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+    });
+    const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
+      if (docSnap.exists()) {
+        setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
+      }
+    });
+    return () => {
+      unsubCities();
+      unsubRotation();
+    };
+  }, []);
+
   const handleSeedPharmacies = async () => {
     if (!confirm(`Voulez-vous importer ${PHARMACIES_OUAGA.length} pharmacies de Ouagadougou ?`)) return;
     
@@ -484,7 +510,10 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
 
   const handleAddPharmacy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPharmacy.name || !newPharmacy.address) return;
+    if (!newPharmacy.name || !newPharmacy.address || !newPharmacy.cityId || !newPharmacy.groupId) {
+      toast.error("Veuillez remplir tous les champs obligatoires.");
+      return;
+    }
     setAddingPharmacy(true);
     try {
       const id = newPharmacy.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
@@ -495,7 +524,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         isOnDuty: false,
         createdAt: serverTimestamp()
       });
-      setNewPharmacy({ name: '', address: '', phone: '', locality: '' });
+      setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '' });
       toast.success("Pharmacie ajoutée !");
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'pharmacies');
@@ -521,12 +550,16 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         role: newUser.role,
         status: 'active',
         walletBalance: 0,
+        pharmacistBalance: 0,
+        deliveryBalance: 0,
         createdAt: serverTimestamp()
       };
 
       if (newUser.role === 'pharmacist') {
         userData.pharmacyName = newUser.pharmacyName;
         userData.address = newUser.address;
+        userData.cityId = newUser.cityId;
+        userData.groupId = newUser.groupId;
         if (newUser.lat && newUser.lng) {
           userData.location = {
             lat: parseFloat(newUser.lat),
@@ -538,7 +571,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       }
 
       await setDoc(doc(db, 'users', uid), userData);
-      setNewUser({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '' });
+      setNewUser({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '' });
       toast.success("Utilisateur créé avec succès.");
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `users`);
@@ -616,6 +649,62 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     }
   };
 
+  const handleSaveCity = async () => {
+    if (!newCity.name || !newCity.onCallStartTime || !newCity.onCallEndTime) {
+      toast.error("Veuillez remplir tous les champs obligatoires.");
+      return;
+    }
+    try {
+      const cityId = editingCity?.id || 'city_' + Date.now().toString(36);
+      const cityData = {
+        ...newCity,
+        id: cityId,
+      };
+      await setDoc(doc(db, 'cities', cityId), cityData);
+      await addSystemLog(editingCity ? 'UPDATE_CITY' : 'CREATE_CITY', `Ville ${newCity.name} ${editingCity ? 'mise à jour' : 'créée'}`);
+      toast.success(`Ville ${editingCity ? 'mise à jour' : 'créée'} avec succès !`);
+      setShowCityModal(false);
+      setEditingCity(null);
+      setNewCity({ name: '', onCallStartTime: '19:00', onCallEndTime: '08:00', status: 'active' });
+    } catch (error) {
+      console.error("Save city error:", error);
+      toast.error("Erreur lors de l'enregistrement de la ville.");
+    }
+  };
+
+  const handleDeleteCity = async (cityId: string) => {
+    if (!confirm("Voulez-vous vraiment supprimer cette ville ?")) return;
+    try {
+      await deleteDoc(doc(db, 'cities', cityId));
+      await addSystemLog('DELETE_CITY', `Ville ${cityId} supprimée`);
+      toast.success("Ville supprimée.");
+    } catch (error) {
+      console.error("Delete city error:", error);
+      toast.error("Erreur lors de la suppression.");
+    }
+  };
+
+  const handleSaveRotation = async () => {
+    if (!editRotation.baseMondayDate || !editRotation.baseGroup) {
+      toast.error("Veuillez remplir tous les champs.");
+      return;
+    }
+    try {
+      await setDoc(doc(db, 'on_call_rotation', 'global'), {
+        id: 'global',
+        baseMondayDate: editRotation.baseMondayDate,
+        baseGroup: Number(editRotation.baseGroup)
+      });
+      await addSystemLog('UPDATE_ROTATION', `Rotation de garde mise à jour : Groupe ${editRotation.baseGroup} le ${editRotation.baseMondayDate}`);
+      toast.success("Rotation mise à jour !");
+      setShowRotationModal(false);
+    } catch (error) {
+      console.error("Save rotation error:", error);
+      toast.error("Erreur lors de la mise à jour de la rotation.");
+    }
+  };
+
+
   const sendAdminReply = async (chatId: string) => {
     if (!adminReply.trim()) return;
     try {
@@ -659,8 +748,12 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       if (status === 'rejected') {
         const user = users.find(u => u.uid === withdrawal.userId);
         if (user) {
-          // Refund the user's wallet balance since the withdrawal was rejected
+          // Refund the user's specific role balance since the withdrawal was rejected
+          const balanceField = withdrawal.userRole === 'pharmacist' ? 'pharmacistBalance' : 
+                              withdrawal.userRole === 'delivery' ? 'deliveryBalance' : 'walletBalance';
+          
           await updateDoc(doc(db, 'users', user.uid), {
+            [balanceField]: increment(withdrawal.amount),
             walletBalance: increment(withdrawal.amount)
           });
           await logTransaction(user.uid, user.name, user.role, withdrawal.amount, 'credit', `Remboursement suite au rejet du retrait`, withdrawalId);
@@ -743,8 +836,11 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   }
 
   return (
-    <>
-    <div className="space-y-12 pb-20">
+    <PullToRefresh onRefresh={async () => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      toast.success("Données actualisées");
+    }}>
+      <div className="space-y-12 pb-20">
       <div className="flex flex-col md:flex-row gap-8">
         <div className="w-full md:w-64 flex-shrink-0">
           <div className="sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm">
@@ -753,6 +849,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               { id: 'approvals', label: 'Approbations', icon: ShieldCheck, color: 'text-amber-600', bg: 'bg-amber-50' },
               { id: 'users', label: 'Utilisateurs', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
               { id: 'pharmacies', label: 'Pharmacies', icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+              { id: 'oncall', label: 'Gardes & Villes', icon: Navigation, color: 'text-indigo-600', bg: 'bg-indigo-50' },
               { id: 'orders', label: 'Commandes', icon: Truck, color: 'text-amber-600', bg: 'bg-amber-50' },
               { id: 'history', label: 'Historique', icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
               { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-rose-600', bg: 'bg-rose-50' },
@@ -1114,9 +1211,15 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       </select>
                     </td>
                     <td className="p-6">
-                      <div className="flex flex-col">
+                      <div className="flex flex-col gap-1">
                         <span className="font-bold text-slate-900">{(user.walletBalance || 0).toLocaleString()} F</span>
-                        {user.role !== 'patient' && (
+                        {user.pharmacistBalance !== undefined && user.pharmacistBalance > 0 && (
+                          <span className="text-[10px] text-emerald-600 font-bold uppercase">Pharmacie: {user.pharmacistBalance.toLocaleString()} F</span>
+                        )}
+                        {user.deliveryBalance !== undefined && user.deliveryBalance > 0 && (
+                          <span className="text-[10px] text-blue-600 font-bold uppercase">Livreur: {user.deliveryBalance.toLocaleString()} F</span>
+                        )}
+                        {user.role !== 'patient' && !user.pharmacistBalance && !user.deliveryBalance && (
                           <span className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Gains cumulés</span>
                         )}
                       </div>
@@ -1226,6 +1329,37 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
                     placeholder="Ex: Pharmacie de la Paix"
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville</label>
+                    <select 
+                      required
+                      value={newUser.cityId || ''}
+                      onChange={(e) => setNewUser({...newUser, cityId: e.target.value})}
+                      className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    >
+                      <option value="">Sélectionner une ville</option>
+                      {cities.map(city => (
+                        <option key={city.id} value={city.id}>{city.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe de garde</label>
+                    <select 
+                      required
+                      value={newUser.groupId || ''}
+                      onChange={(e) => setNewUser({...newUser, groupId: e.target.value})}
+                      className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    >
+                      <option value="">Sélectionner un groupe</option>
+                      <option value="1">Groupe 1</option>
+                      <option value="2">Groupe 2</option>
+                      <option value="3">Groupe 3</option>
+                      <option value="4">Groupe 4</option>
+                    </select>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -1411,16 +1545,36 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   placeholder="Ex: +226 25 30 00 00"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Localité / Ville</label>
-                <input 
-                  type="text" 
-                  required
-                  value={newPharmacy.locality}
-                  onChange={(e) => setNewPharmacy({...newPharmacy, locality: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  placeholder="Ex: Ouagadougou"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville</label>
+                  <select 
+                    required
+                    value={newPharmacy.cityId || ''}
+                    onChange={(e) => setNewPharmacy({...newPharmacy, cityId: e.target.value})}
+                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+                  >
+                    <option value="">Sélectionner une ville</option>
+                    {cities.map(city => (
+                      <option key={city.id} value={city.id}>{city.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe de garde</label>
+                  <select 
+                    required
+                    value={newPharmacy.groupId || ''}
+                    onChange={(e) => setNewPharmacy({...newPharmacy, groupId: e.target.value})}
+                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+                  >
+                    <option value="">Sélectionner un groupe</option>
+                    <option value="1">Groupe 1</option>
+                    <option value="2">Groupe 2</option>
+                    <option value="3">Groupe 3</option>
+                    <option value="4">Groupe 4</option>
+                  </select>
+                </div>
               </div>
               <button 
                 type="submit"
@@ -1431,6 +1585,106 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               </button>
             </form>
           </div>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'oncall' && (
+          <motion.div
+            key="oncall"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="w-full"
+          >
+            <div className="space-y-8">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-black text-slate-900 flex items-center gap-3">
+                  <Navigation className="text-indigo-600" size={28} />
+                  Gestion des Gardes & Villes
+                </h2>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={() => setShowRotationModal(true)}
+                    className="bg-indigo-100 text-indigo-700 px-6 py-3 rounded-2xl font-bold hover:bg-indigo-200 transition-colors flex items-center gap-2"
+                  >
+                    <SettingsIcon size={20} /> Configurer la Rotation
+                  </button>
+                  <button 
+                    onClick={() => { setEditingCity(null); setNewCity({ name: '', onCallStartTime: '19:00', onCallEndTime: '08:00', status: 'active' }); setShowCityModal(true); }}
+                    className="bg-primary text-white px-6 py-3 rounded-2xl font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20"
+                  >
+                    <Plus size={20} /> Ajouter une Ville
+                  </button>
+                </div>
+              </div>
+
+              {rotation && (
+                <div className="bg-indigo-50 p-6 rounded-3xl border border-indigo-100 flex items-center gap-6">
+                  <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
+                    <Activity size={32} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-indigo-900">Rotation Actuelle</h3>
+                    <p className="text-indigo-700">
+                      Semaine de référence : <strong>{rotation.baseMondayDate}</strong> (Groupe {rotation.baseGroup})
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="p-6 text-xs font-bold text-slate-400 uppercase tracking-widest">Ville</th>
+                      <th className="p-6 text-xs font-bold text-slate-400 uppercase tracking-widest">Horaires de Garde</th>
+                      <th className="p-6 text-xs font-bold text-slate-400 uppercase tracking-widest">Statut</th>
+                      <th className="p-6 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {cities.map(city => (
+                      <tr key={city.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="p-6">
+                          <p className="font-bold text-slate-900">{city.name}</p>
+                        </td>
+                        <td className="p-6">
+                          <p className="text-slate-600 font-medium">{city.onCallStartTime} - {city.onCallEndTime}</p>
+                        </td>
+                        <td className="p-6">
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                            city.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            {city.status === 'active' ? 'Active' : 'Suspendue'}
+                          </span>
+                        </td>
+                        <td className="p-6 text-right">
+                          <button 
+                            onClick={() => { setEditingCity(city); setNewCity(city); setShowCityModal(true); }}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors mr-2"
+                            title="Modifier"
+                          >
+                            <SettingsIcon size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteCity(city.id)}
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Supprimer"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {cities.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="p-8 text-center text-slate-500">Aucune ville enregistrée.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </motion.div>
         )}
@@ -3340,7 +3594,151 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     </motion.div>
   )}
 </AnimatePresence>
-</>
+
+<AnimatePresence>
+  {showCityModal && (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl"
+      >
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-2xl font-black text-slate-900">
+            {editingCity ? 'Modifier la Ville' : 'Ajouter une Ville'}
+          </h3>
+          <button onClick={() => setShowCityModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de la ville</label>
+            <input 
+              type="text" 
+              value={newCity.name}
+              onChange={(e) => setNewCity({...newCity, name: e.target.value})}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              placeholder="Ex: Ouagadougou"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Heure de début</label>
+              <input 
+                type="time" 
+                value={newCity.onCallStartTime}
+                onChange={(e) => setNewCity({...newCity, onCallStartTime: e.target.value})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Heure de fin</label>
+              <input 
+                type="time" 
+                value={newCity.onCallEndTime}
+                onChange={(e) => setNewCity({...newCity, onCallEndTime: e.target.value})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Statut</label>
+            <select
+              value={newCity.status}
+              onChange={(e) => setNewCity({...newCity, status: e.target.value as 'active' | 'suspended'})}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+            >
+              <option value="active">Active</option>
+              <option value="suspended">Suspendue</option>
+            </select>
+          </div>
+
+          <button 
+            onClick={handleSaveCity}
+            className="w-full bg-primary text-white py-4 rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+          >
+            Enregistrer
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )}
+</AnimatePresence>
+
+<AnimatePresence>
+  {showRotationModal && (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl"
+      >
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-2xl font-black text-slate-900">
+            Configurer la Rotation
+          </h3>
+          <button onClick={() => setShowRotationModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 mb-6">
+            <p className="text-sm text-indigo-800">
+              Définissez une semaine de référence (un lundi) et le groupe qui était de garde cette semaine-là. Le système calculera automatiquement les rotations suivantes.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Lundi de référence</label>
+            <input 
+              type="date" 
+              value={editRotation.baseMondayDate}
+              onChange={(e) => setEditRotation({...editRotation, baseMondayDate: e.target.value})}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe de garde (1 à 4)</label>
+            <select
+              value={editRotation.baseGroup}
+              onChange={(e) => setEditRotation({...editRotation, baseGroup: Number(e.target.value)})}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+            >
+              <option value={1}>Groupe 1</option>
+              <option value={2}>Groupe 2</option>
+              <option value={3}>Groupe 3</option>
+              <option value={4}>Groupe 4</option>
+            </select>
+          </div>
+
+          <button 
+            onClick={handleSaveRotation}
+            className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20"
+          >
+            Enregistrer la rotation
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )}
+</AnimatePresence>
+  </PullToRefresh>
   );
 }
 

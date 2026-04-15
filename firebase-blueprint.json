@@ -8,10 +8,12 @@
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["patient", "pharmacist", "delivery", "admin"] },
+        "role": { "type": "string", "enum": ["patient", "pharmacist", "delivery", "admin", "super-admin"] },
         "phone": { "type": "string" },
         "address": { "type": "string" },
-        "pharmacyId": { "type": "string", "description": "Only for pharmacists." }
+        "pharmacyId": { "type": "string", "description": "Only for pharmacists." },
+        "cityId": { "type": "string", "description": "City for pharmacists and patients." },
+        "groupId": { "type": "string", "description": "On-call group (1-4) for pharmacists." }
       },
       "required": ["uid", "name", "role"]
     },
@@ -26,9 +28,35 @@
         "location": { "type": "object", "properties": { "lat": { "type": "number" }, "lng": { "type": "number" } } },
         "phone": { "type": "string" },
         "licenseNumber": { "type": "string" },
+        "cityId": { "type": "string" },
+        "groupId": { "type": "string", "description": "On-call group (1-4)." },
         "isOnDuty": { "type": "boolean", "description": "Whether the pharmacy is on duty (de garde)." }
       },
-      "required": ["id", "name", "address"]
+      "required": ["id", "name", "address", "cityId", "groupId"]
+    },
+    "City": {
+      "title": "City",
+      "description": "City configuration for on-call hours.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "onCallStartTime": { "type": "string", "description": "Format HH:mm" },
+        "onCallEndTime": { "type": "string", "description": "Format HH:mm" },
+        "status": { "type": "string", "enum": ["active", "suspended"] }
+      },
+      "required": ["id", "name", "onCallStartTime", "onCallEndTime", "status"]
+    },
+    "OnCallRotation": {
+      "title": "OnCallRotation",
+      "description": "Global on-call rotation settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "baseMondayDate": { "type": "string", "format": "date", "description": "The Monday used as reference for rotation." },
+        "baseGroup": { "type": "integer", "description": "The group that was on call during baseMondayDate (1-4)." }
+      },
+      "required": ["id", "baseMondayDate", "baseGroup"]
     },
     "Prescription": {
       "title": "Prescription",
@@ -154,6 +182,8 @@
     "/support_messages/{messageId}": { "schema": "SupportMessage", "description": "Support chat messages." },
     "/withdrawals/{withdrawalId}": { "schema": "Withdrawal", "description": "Withdrawal requests." },
     "/transactions/{transactionId}": { "schema": "Transaction", "description": "Wallet transactions." },
-    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications." }
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications." },
+    "/cities/{cityId}": { "schema": "City", "description": "City configurations." },
+    "/on_call_rotation/{rotationId}": { "schema": "OnCallRotation", "description": "Global rotation settings." }
   }
 }

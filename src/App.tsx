@@ -37,7 +37,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest } from './types';
+import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest, City, OnCallRotation } from './types';
 import { 
   Camera, 
   Upload, 
@@ -68,15 +68,20 @@ import {
   Save,
   Bell,
   BellOff,
-  Building2
+  Building2,
+  Navigation
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage } from './utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance } from './utils/shared';
 import { Capacitor } from '@capacitor/core';
+import { PullToRefresh } from './components/PullToRefresh';
+import { AdminDashboard } from './components/AdminDashboard';
+import { Legal } from './components/Legal';
+import { ReportsView } from './components/ReportsView';
 
 // Fix Leaflet default icon issue
 // @ts-ignore
@@ -317,6 +322,9 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [viewMode, setViewMode] = useState<UserRole | null>(null);
   const activeRole = (profile?.role === 'super-admin' && viewMode && viewMode !== 'super-admin') ? viewMode : profile?.role;
+  const effectiveProfile = (profile?.role === 'super-admin' && viewMode && viewMode !== 'super-admin') 
+    ? { ...profile, role: viewMode as UserRole } 
+    : profile;
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -414,6 +422,19 @@ export default function App() {
   }, [profile, viewMode]);
 
   useEffect(() => {
+    // Native mobile initializations
+    if (Capacitor.isNativePlatform()) {
+      import('@capacitor/splash-screen').then(({ SplashScreen }) => {
+        SplashScreen.hide();
+      });
+      
+      import('@capacitor/status-bar').then(({ StatusBar }) => {
+        StatusBar.setBackgroundColor({ color: '#059669' }); // emerald-600
+      });
+    }
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
@@ -463,6 +484,8 @@ export default function App() {
                 email: firebaseUser.email,
                 role: 'super-admin',
                 walletBalance: 0,
+                pharmacistBalance: 0,
+                deliveryBalance: 0,
                 status: 'active',
                 createdAt: serverTimestamp()
               };
@@ -610,6 +633,8 @@ export default function App() {
       email: user.email || '',
       role: role,
       walletBalance: 0,
+      pharmacistBalance: 0,
+      deliveryBalance: 0,
       status: (role === 'admin' || role === 'patient' || role === 'super-admin') ? 'active' : 'pending',
       ...extraData
     };
@@ -800,27 +825,50 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-12 relative z-10">
         <AnimatePresence mode="wait">
-          {(() => {
-            const effectiveProfile = (profile.role === 'super-admin' && viewMode && viewMode !== 'super-admin') 
-              ? { ...profile, role: viewMode } 
-              : profile;
-            const activeRole = effectiveProfile.role;
-
-            return (
-              <motion.div
-                key={activeRole}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.5, ease: "circOut" }}
-              >
-                {activeRole === 'patient' && <PatientDashboard profile={effectiveProfile} settings={settings} location={location} />}
-                {activeRole === 'pharmacist' && <PharmacistDashboard profile={effectiveProfile} settings={settings} />}
-                {activeRole === 'delivery' && <DeliveryDashboard profile={effectiveProfile} settings={settings} />}
-                {(activeRole === 'admin' || activeRole === 'super-admin') && <AdminDashboard profile={effectiveProfile} settings={settings} />}
-              </motion.div>
-            );
-          })()}
+          {activeRole === 'patient' && (
+            <motion.div
+              key="patient"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5, ease: "circOut" }}
+            >
+              <PatientDashboard profile={effectiveProfile!} settings={settings} location={location} />
+            </motion.div>
+          )}
+          {activeRole === 'pharmacist' && (
+            <motion.div
+              key="pharmacist"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5, ease: "circOut" }}
+            >
+              <PharmacistDashboard profile={effectiveProfile!} settings={settings} />
+            </motion.div>
+          )}
+          {activeRole === 'delivery' && (
+            <motion.div
+              key="delivery"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5, ease: "circOut" }}
+            >
+              <DeliveryDashboard profile={effectiveProfile!} settings={settings} />
+            </motion.div>
+          )}
+          {(activeRole === 'admin' || activeRole === 'super-admin') && (
+            <motion.div
+              key="admin"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5, ease: "circOut" }}
+            >
+              <AdminDashboard profile={effectiveProfile!} settings={settings} />
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
@@ -1178,10 +1226,6 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
   );
 }
 
-import { AdminDashboard } from './components/AdminDashboard';
-import { Legal } from './components/Legal';
-import { ReportsView } from './components/ReportsView';
-
 function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, extraData: any) => void, isAdmin: boolean }) {
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [formData, setFormData] = useState({
@@ -1385,6 +1429,17 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
   );
 }
 
+function ImageViewerModal({ imageUrl, onClose }: { imageUrl: string, onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm z-[300] flex items-center justify-center p-4" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 text-white hover:text-slate-300 bg-slate-800/50 rounded-full p-2">
+        <X size={24} />
+      </button>
+      <img src={imageUrl} alt="Prescription Full" className="max-w-full max-h-[90vh] object-contain rounded-xl" onClick={(e) => e.stopPropagation()} />
+    </div>
+  );
+}
+
 // --- Patient Dashboard ---
 
 function PatientDashboard({ profile, settings, location }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null }) {
@@ -1402,8 +1457,29 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'orange' | 'moov' | 'telecel' | 'card' | 'bank' | null>(null);
   const [paymentPhone, setPaymentPhone] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentStep, setPaymentStep] = useState<'method' | 'phone' | 'otp' | 'processing' | 'success'>('method');
+  const [paymentOtp, setPaymentOtp] = useState('');
+  const [paymentInvoiceId, setPaymentInvoiceId] = useState('');
   const [showMapForOrder, setShowMapForOrder] = useState<Order | null>(null);
   const [pharmacySearch, setPharmacySearch] = useState('');
+  const [cities, setCities] = useState<City[]>([]);
+  const [rotation, setRotation] = useState<OnCallRotation | null>(null);
+  const [viewImage, setViewImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
+      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+    });
+    const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
+      if (docSnap.exists()) {
+        setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
+      }
+    });
+    return () => {
+      unsubCities();
+      unsubRotation();
+    };
+  }, []);
 
   const handleDeletePrescription = async (id: string) => {
     try {
@@ -1569,12 +1645,8 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     setShowPaymentModal(order);
   };
 
-  const processPayment = async (method: 'orange' | 'moov' | 'telecel' | 'card' | 'bank') => {
+  const simulatePayment = async (method: 'card' | 'bank') => {
     if (!showPaymentModal) return;
-    if (method !== 'card' && method !== 'bank' && !paymentPhone) {
-      toast.error("Veuillez entrer votre numéro de téléphone.");
-      return;
-    }
     setIsProcessingPayment(true);
     
     try {
@@ -1609,7 +1681,6 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       await updateDoc(doc(db, 'orders', order.id), {
         status: 'paid',
         paymentMethod: method,
-        paymentPhone: (method !== 'card' && method !== 'bank') ? paymentPhone : null,
         paymentStatus: 'completed',
         medicationTotal,
         deliveryFee,
@@ -1622,35 +1693,170 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
         history: arrayUnion({
           status: 'paid',
           timestamp: new Date().toISOString(),
-          label: `Paiement effectué via ${method === 'card' ? 'Carte Bancaire' : method.toUpperCase()}`
+          label: `Paiement effectué via ${method === 'card' ? 'Carte Bancaire' : 'Virement Bancaire'}`
         })
       });
 
-      // Update prescription status to 'paid' to prevent deletion
       if (order.prescriptionId) {
         await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
-          status: 'paid'
+          status: 'paid',
+          lockedBy: null,
+          lockedAt: null
         });
       }
 
-      // Notify patient and pharmacist
       await createNotification(order.patientId, "Paiement confirmé", `Votre paiement de ${totalToPay} FCFA pour la commande #${order.id.slice(-6).toUpperCase()} a été reçu.`, 'payment', order.id);
       if (order.pharmacistId) {
         await createNotification(order.pharmacistId, "Nouveau paiement", `Le patient a payé la commande #${order.id.slice(-6).toUpperCase()}. Vous pouvez commencer la préparation.`, 'payment', order.id);
       }
       
-      // If delivery is requested, notify drivers
       if (order.deliveryMethod === 'delivery') {
         await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une commande est prête pour livraison à ${order.hospitalLocation}.`, order.id);
       }
-      
-      toast.success("Paiement réussi ! La pharmacie prépare votre commande.");
+
       setShowPaymentModal(null);
       setSelectedPaymentMethod(null);
       setPaymentPhone('');
+      toast.success("Paiement effectué avec succès !");
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${showPaymentModal.id}`);
       toast.error("Erreur lors du paiement.");
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  const initPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
+    if (!showPaymentModal) return;
+    if (!paymentPhone) {
+      toast.error("Veuillez entrer votre numéro de téléphone.");
+      return;
+    }
+    setIsProcessingPayment(true);
+    setPaymentStep('processing');
+    
+    try {
+      const response = await fetch('/api/payment/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: showPaymentModal.totalAmount,
+          phone: paymentPhone,
+          email: profile.email,
+          method: method
+        })
+      });
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+
+      setPaymentInvoiceId(data.invoiceId);
+      setPaymentStep('otp');
+    } catch (error) {
+      toast.error("Erreur lors de l'initialisation du paiement.");
+      console.error(error);
+      setPaymentStep('phone');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  const performPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
+    if (!showPaymentModal || !paymentInvoiceId || !paymentOtp) return;
+    setIsProcessingPayment(true);
+    setPaymentStep('processing');
+    
+    try {
+      const response = await fetch('/api/payment/perform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceId: paymentInvoiceId,
+          phone: paymentPhone,
+          otp: paymentOtp,
+          method: method
+        })
+      });
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+
+      const order = showPaymentModal;
+      // Calculate splits (Economic Model)
+      const medicationTotal = order.medicationTotal || 0;
+      const deliveryFee = order.deliveryFee || 0;
+      const serviceFee = order.serviceFee !== undefined ? order.serviceFee : (settings?.serviceFee || 0);
+      
+      const pharmacyCommission = settings?.commissionPercentage || 10;
+      const deliveryCommission = settings?.deliveryCommissionPercentage || 15;
+      
+      const platformMedFee = Math.round(medicationTotal * (pharmacyCommission / 100));
+      const platformDeliveryFee = Math.round(deliveryFee * (deliveryCommission / 100));
+      
+      const pharmacyAmount = medicationTotal - platformMedFee;
+      const deliveryAmount = deliveryFee - platformDeliveryFee;
+      const totalPlatformFee = platformMedFee + platformDeliveryFee + serviceFee;
+      
+      const totalToPay = order.totalAmount || (medicationTotal + deliveryFee + serviceFee);
+
+      const finalPharmacyAmount = isNaN(pharmacyAmount) ? 0 : pharmacyAmount;
+      const finalDeliveryAmount = isNaN(deliveryAmount) ? 0 : deliveryAmount;
+      const finalPlatformFee = isNaN(totalPlatformFee) ? 0 : totalPlatformFee;
+
+      await updateDoc(doc(db, 'orders', order.id), {
+        status: 'paid',
+        paymentMethod: method,
+        paymentPhone: paymentPhone,
+        paymentStatus: 'completed',
+        sappayInvoiceId: paymentInvoiceId,
+        medicationTotal,
+        deliveryFee,
+        serviceFee,
+        totalAmount: totalToPay,
+        pharmacyAmount: finalPharmacyAmount,
+        deliveryAmount: finalDeliveryAmount,
+        platformFee: finalPlatformFee,
+        updatedAt: serverTimestamp(),
+        history: arrayUnion({
+          status: 'paid',
+          timestamp: new Date().toISOString(),
+          label: `Paiement effectué via ${method.toUpperCase()}`
+        })
+      });
+
+      if (order.prescriptionId) {
+        await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
+          status: 'paid',
+          lockedBy: null,
+          lockedAt: null
+        });
+      }
+
+      await createNotification(order.patientId, "Paiement confirmé", `Votre paiement de ${totalToPay} FCFA pour la commande #${order.id.slice(-6).toUpperCase()} a été reçu.`, 'payment', order.id);
+      if (order.pharmacistId) {
+        await createNotification(order.pharmacistId, "Nouveau paiement", `Le patient a payé la commande #${order.id.slice(-6).toUpperCase()}. Vous pouvez commencer la préparation.`, 'payment', order.id);
+      }
+      
+      if (order.deliveryMethod === 'delivery') {
+        await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une commande est prête pour livraison à ${order.hospitalLocation}.`, order.id);
+      }
+
+      setPaymentStep('success');
+      toast.success("Paiement effectué avec succès !");
+      
+      setTimeout(() => {
+        setShowPaymentModal(null);
+        setSelectedPaymentMethod(null);
+        setPaymentStep('method');
+        setPaymentPhone('');
+        setPaymentOtp('');
+        setPaymentInvoiceId('');
+      }, 2000);
+      
+    } catch (error) {
+      toast.error("Erreur lors du paiement. Vérifiez votre code OTP.");
+      console.error(error);
+      setPaymentStep('otp');
     } finally {
       setIsProcessingPayment(false);
     }
@@ -1734,7 +1940,14 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
   };
 
   return (
-    <div className="space-y-12 pb-20 relative">
+    <PullToRefresh onRefresh={async () => {
+      // Refreshing logic - most data is real-time via onSnapshot, 
+      // but we can force a small delay or re-fetch static settings if needed
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      toast.success("Données actualisées");
+    }}>
+      <div className="space-y-12 pb-20 relative">
+      {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
       {/* Background Decorative Element */}
       <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
       
@@ -1870,8 +2083,14 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     animate={{ opacity: 1, scale: 1 }}
                     className="medical-card p-8 group"
                   >
-                    <div className="relative aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 bg-slate-50 shadow-inner">
-                      <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out" />
+                    <div 
+                      className="relative aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 bg-slate-50 shadow-inner cursor-pointer"
+                      onClick={() => setViewImage(p.imageUrl)}
+                    >
+                      <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={32} />
+                      </div>
                       <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
                         {(() => {
                           const associatedOrder = orders.find(o => o.prescriptionId === p.id);
@@ -2078,6 +2297,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                         </span>
                       </div>
                       
+                      {o.prescriptionImageUrl && (
+                        <div 
+                          className="w-full h-32 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 mb-4 cursor-pointer relative group"
+                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                        >
+                          <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                            <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={24} />
+                          </div>
+                        </div>
+                      )}
+
                       <div className="space-y-2 mb-4">
                         {o.items?.map((item, i) => (
                           <div key={`${item.name}-${i}`} className="flex flex-col text-sm bg-slate-50/50 p-3 rounded-2xl border border-slate-100/50">
@@ -2274,45 +2505,79 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {pharmacies
-                .filter(ph => 
-                  ph.name.toLowerCase().includes(pharmacySearch.toLowerCase()) || 
-                  ph.address.toLowerCase().includes(pharmacySearch.toLowerCase()) ||
-                  (ph as any).locality?.toLowerCase().includes(pharmacySearch.toLowerCase())
-                )
-                .map((ph) => (
-                <div key={ph.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 hover:border-primary/30 transition-all">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
-                      <Plus size={24} />
+                .filter(ph => {
+                  const matchesSearch = ph.name.toLowerCase().includes(pharmacySearch.toLowerCase()) || 
+                                        ph.address.toLowerCase().includes(pharmacySearch.toLowerCase()) ||
+                                        (ph as any).locality?.toLowerCase().includes(pharmacySearch.toLowerCase());
+                  
+                  // On-call logic
+                  const city = cities.find(c => c.id === ph.cityId);
+                  if (!city) return matchesSearch; // If no city assigned, just use search filter
+                  
+                  const isOnCallNow = isCityOnCallNow(city.onCallStartTime, city.onCallEndTime);
+                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation.baseMondayDate, rotation.baseGroup) : 1;
+                  const isMyGroupOnCall = ph.groupId === currentGroup.toString();
+
+                  // Only show pharmacies that are currently on call
+                  return matchesSearch && isOnCallNow && isMyGroupOnCall;
+                })
+                .sort((a, b) => {
+                  if (!location) return 0;
+                  const distA = a.location ? calculateDistance(location.lat, location.lng, a.location.lat, a.location.lng) : Infinity;
+                  const distB = b.location ? calculateDistance(location.lat, location.lng, b.location.lat, b.location.lng) : Infinity;
+                  return distA - distB;
+                })
+                .map((ph) => {
+                  const distance = location && ph.location ? calculateDistance(location.lat, location.lng, ph.location.lat, ph.location.lng) : null;
+                  return (
+                  <div key={ph.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 hover:border-primary/30 transition-all">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+                        <Plus size={24} />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {distance !== null && (
+                          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
+                            {distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`}
+                          </span>
+                        )}
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700`}>
+                          Ouvert
+                        </span>
+                      </div>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700`}>
-                      Ouvert
-                    </span>
+                    <h4 className="font-bold text-lg mb-1">{ph.name}</h4>
+                    <p className="text-slate-500 text-sm flex items-center gap-1 mb-4">
+                      <MapPin size={14} /> {ph.address}
+                    </p>
+                    <div className="flex gap-2">
+                      {ph.phone && (
+                        <a href={`tel:${ph.phone}`} className="flex-1 py-2.5 bg-slate-50 text-slate-700 rounded-xl text-center text-sm font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2">
+                          <Phone size={14} /> Appeler
+                        </a>
+                      )}
+                      <button className="flex-1 py-2.5 bg-primary/10 text-primary rounded-xl text-sm font-bold hover:bg-primary/20 transition-all">
+                        Itinéraire
+                      </button>
+                    </div>
                   </div>
-                  <h4 className="font-bold text-lg mb-1">{ph.name}</h4>
-                  <p className="text-slate-500 text-sm flex items-center gap-1 mb-4">
-                    <MapPin size={14} /> {ph.address}
-                  </p>
-                  <div className="flex gap-2">
-                    {ph.phone && (
-                      <a href={`tel:${ph.phone}`} className="flex-1 py-2.5 bg-slate-50 text-slate-700 rounded-xl text-center text-sm font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2">
-                        <Phone size={14} /> Appeler
-                      </a>
-                    )}
-                    <button className="flex-1 py-2.5 bg-primary/10 text-primary rounded-xl text-sm font-bold hover:bg-primary/20 transition-all">
-                      Itinéraire
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {pharmacies.length === 0 && (
+                );
+              })}
+              {pharmacies.filter(ph => {
+                  const city = cities.find(c => c.id === ph.cityId);
+                  if (!city) return true;
+                  const isOnCallNow = isCityOnCallNow(city.onCallStartTime, city.onCallEndTime);
+                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation.baseMondayDate, rotation.baseGroup) : 1;
+                  const isMyGroupOnCall = ph.groupId === currentGroup.toString();
+                  return isOnCallNow && isMyGroupOnCall;
+                }).length === 0 && (
                 <div className="col-span-full bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                   <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                   <div className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
                     <LogoIcon size={48} />
                   </div>
-                  <p className="text-slate-900 font-black text-2xl mb-2">Aucune pharmacie</p>
-                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Il n'y a pas encore de pharmacies partenaires enregistrées sur la plateforme.</p>
+                  <p className="text-slate-900 font-black text-2xl mb-2">Aucune pharmacie de garde</p>
+                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Il n'y a actuellement aucune pharmacie de garde disponible dans votre zone.</p>
                 </div>
               )}
             </div>
@@ -2384,69 +2649,121 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                   </>
                 )}
 
-                {selectedPaymentMethod && selectedPaymentMethod !== 'card' && (
+                {selectedPaymentMethod && selectedPaymentMethod !== 'bank' && selectedPaymentMethod !== 'card' && (
                   <div className="space-y-4 text-left animate-in fade-in slide-in-from-bottom-4">
                     <div className="flex items-center justify-between mb-4">
                       <p className="font-bold text-slate-900 flex items-center gap-2">
-                        <button onClick={() => setSelectedPaymentMethod(null)} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronRight className="rotate-180" size={16}/></button>
+                        <button onClick={() => {
+                          setSelectedPaymentMethod(null);
+                          setPaymentStep('method');
+                        }} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronRight className="rotate-180" size={16}/></button>
                         Paiement {selectedPaymentMethod.toUpperCase()}
                       </p>
                     </div>
                     
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Numéro de téléphone</label>
-                      <input 
-                        type="tel" 
-                        placeholder="Ex: 0102030405"
-                        value={paymentPhone}
-                        onChange={(e) => setPaymentPhone(e.target.value)}
-                        className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold focus:border-primary outline-none transition-all"
-                      />
-                    </div>
+                    {paymentStep === 'method' && (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Numéro de téléphone</label>
+                          <input 
+                            type="tel" 
+                            placeholder="Ex: 0102030405"
+                            value={paymentPhone}
+                            onChange={(e) => setPaymentPhone(e.target.value)}
+                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold focus:border-primary outline-none transition-all"
+                          />
+                        </div>
 
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                      <p className="text-xs text-slate-500 mb-2">Syntaxe USSD (Composez ce code) :</p>
-                      <p className="font-mono font-bold text-slate-900 text-center bg-white py-2 rounded-lg border border-slate-200">
-                        {(() => {
-                          let syntax = "";
-                          let account = "";
-                          if (selectedPaymentMethod === 'orange') {
-                            syntax = settings?.paymentConfig?.ussdSyntaxes?.orange || '*144*4*6*{amount}*#';
-                            account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
-                          } else if (selectedPaymentMethod === 'moov') {
-                            syntax = settings?.paymentConfig?.ussdSyntaxes?.moov || '*555*2*1*{amount}#';
-                            account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
-                          } else if (selectedPaymentMethod === 'telecel') {
-                            syntax = settings?.paymentConfig?.ussdSyntaxes?.telecel || '*160*2*1*{amount}#';
-                            account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
-                          }
-                          return syntax
-                            .replace('{amount}', String(showPaymentModal.totalAmount))
-                            .replace('{account}', account);
-                        })()}
-                      </p>
-                      {(() => {
-                        let account = "";
-                        if (selectedPaymentMethod === 'orange') account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
-                        else if (selectedPaymentMethod === 'moov') account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
-                        else if (selectedPaymentMethod === 'telecel') account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
-                        
-                        return account ? (
-                          <p className="text-[10px] text-slate-400 mt-2 text-center">
-                            Compte Marchand : <span className="font-bold text-slate-600">{account}</span>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                          <p className="text-xs text-slate-500 mb-2">Syntaxe USSD (Composez ce code) :</p>
+                          <p className="font-mono font-bold text-slate-900 text-center bg-white py-2 rounded-lg border border-slate-200">
+                            {(() => {
+                              let syntax = "";
+                              let account = "";
+                              if (selectedPaymentMethod === 'orange') {
+                                syntax = settings?.paymentConfig?.ussdSyntaxes?.orange || '*144*4*6*{amount}*#';
+                                account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
+                              } else if (selectedPaymentMethod === 'moov') {
+                                syntax = settings?.paymentConfig?.ussdSyntaxes?.moov || '*555*2*1*{amount}#';
+                                account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
+                              } else if (selectedPaymentMethod === 'telecel') {
+                                syntax = settings?.paymentConfig?.ussdSyntaxes?.telecel || '*160*2*1*{amount}#';
+                                account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
+                              }
+                              return syntax
+                                .replace('{amount}', String(showPaymentModal.totalAmount))
+                                .replace('{account}', account);
+                            })()}
                           </p>
-                        ) : null;
-                      })()}
-                    </div>
+                          {(() => {
+                            let account = "";
+                            if (selectedPaymentMethod === 'orange') account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
+                            else if (selectedPaymentMethod === 'moov') account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
+                            else if (selectedPaymentMethod === 'telecel') account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
+                            
+                            return account ? (
+                              <p className="text-[10px] text-slate-400 mt-2 text-center">
+                                Compte Marchand : <span className="font-bold text-slate-600">{account}</span>
+                              </p>
+                            ) : null;
+                          })()}
+                        </div>
 
-                    <button 
-                      onClick={() => processPayment(selectedPaymentMethod)}
-                      disabled={isProcessingPayment || !paymentPhone}
-                      className="btn-primary w-full flex items-center justify-center gap-3"
-                    >
-                      <Smartphone size={20} />
-                      Confirmer le paiement
-                    </button>
+                        <button 
+                          onClick={() => initPayment(selectedPaymentMethod)}
+                          disabled={isProcessingPayment || !paymentPhone}
+                          className="btn-primary w-full flex items-center justify-center gap-3"
+                        >
+                          <Smartphone size={20} />
+                          Initier le paiement
+                        </button>
+                      </>
+                    )}
+
+                    {paymentStep === 'otp' && (
+                      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+                        <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
+                          <AlertCircle className="text-blue-500 shrink-0" size={20} />
+                          <p className="text-[10px] text-blue-700 leading-relaxed">
+                            Un code OTP a été envoyé sur votre téléphone ou généré via USSD. Veuillez le saisir ci-dessous pour valider le paiement.
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Code OTP</label>
+                          <input 
+                            type="text" 
+                            placeholder="Ex: 12345"
+                            value={paymentOtp}
+                            onChange={(e) => setPaymentOtp(e.target.value)}
+                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold text-center tracking-widest focus:border-primary outline-none transition-all"
+                          />
+                        </div>
+                        <button 
+                          onClick={() => performPayment(selectedPaymentMethod)}
+                          disabled={isProcessingPayment || !paymentOtp}
+                          className="btn-primary w-full flex items-center justify-center gap-3"
+                        >
+                          <CheckCircle size={20} />
+                          Valider le paiement
+                        </button>
+                      </div>
+                    )}
+
+                    {paymentStep === 'processing' && (
+                      <div className="py-8 flex flex-col items-center justify-center gap-4">
+                        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <p className="font-bold text-slate-600">Traitement en cours...</p>
+                      </div>
+                    )}
+
+                    {paymentStep === 'success' && (
+                      <div className="py-8 flex flex-col items-center justify-center gap-4 animate-in zoom-in">
+                        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+                          <CheckCircle size={32} />
+                        </div>
+                        <p className="font-bold text-emerald-600 text-lg">Paiement réussi !</p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2458,7 +2775,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     </div>
                     <div className="grid grid-cols-1 gap-3">
                       <button 
-                        onClick={() => processPayment('card')}
+                        onClick={() => simulatePayment('card')}
                         disabled={isProcessingPayment}
                         className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/20 flex items-center justify-center gap-3"
                       >
@@ -2518,7 +2835,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     </div>
 
                     <button 
-                      onClick={() => processPayment('card')} // Reusing card logic for simulation
+                      onClick={() => simulatePayment('bank')}
                       disabled={isProcessingPayment}
                       className="btn-primary w-full flex items-center justify-center gap-3"
                     >
@@ -2761,6 +3078,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
         )}
       </AnimatePresence>
     </div>
+  </PullToRefresh>
   );
 }
 
@@ -2814,8 +3132,11 @@ function WithdrawalModal({
         createdAt: serverTimestamp()
       });
 
-      // Decrement the user's wallet balance
+      const balanceField = profile.role === 'pharmacist' ? 'pharmacistBalance' : 
+                          profile.role === 'delivery' ? 'deliveryBalance' : 'walletBalance';
+      
       await updateDoc(doc(db, 'users', profile.uid), {
+        [balanceField]: increment(-Number(amount)),
         walletBalance: increment(-Number(amount))
       });
 
@@ -2915,6 +3236,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [phoneInput, setPhoneInput] = useState(profile.phone || '');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [viewImage, setViewImage] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -2937,7 +3259,8 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   useEffect(() => {
     const q = query(
       collection(db, 'withdrawals'),
-      where('userId', '==', profile.uid)
+      where('userId', '==', profile.uid),
+      where('userRole', '==', 'pharmacist')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ws = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest));
@@ -2963,6 +3286,23 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
   const [myPharmacy, setMyPharmacy] = useState<Pharmacy | null>(null);
   const [allPharmacies, setAllPharmacies] = useState<Pharmacy[]>([]);
+  const [cities, setCities] = useState<City[]>([]);
+  const [rotation, setRotation] = useState<OnCallRotation | null>(null);
+
+  useEffect(() => {
+    const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
+      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+    });
+    const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
+      if (docSnap.exists()) {
+        setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
+      }
+    });
+    return () => {
+      unsubCities();
+      unsubRotation();
+    };
+  }, []);
 
   useEffect(() => {
     getDocs(collection(db, 'pharmacies')).then(snap => {
@@ -3124,6 +3464,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
       // Create Order
       await addDoc(collection(db, 'orders'), {
         prescriptionId: selectedPrescription.id,
+        prescriptionImageUrl: selectedPrescription.imageUrl,
         patientId: selectedPrescription.patientId,
         patientName: selectedPrescription.patientName || "Anonyme",
         hospitalLocation: selectedPrescription.hospitalLocation || "Non spécifié",
@@ -3199,8 +3540,38 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     .reduce((sum, w) => sum + w.amount, 0);
   const availableGains = totalEarned - totalWithdrawn;
 
+  const currentCity = cities.find(c => c.id === profile.cityId);
+  const isOnCallNow = currentCity ? isCityOnCallNow(currentCity.onCallStartTime, currentCity.onCallEndTime) : false;
+  const currentGroup = rotation ? getCurrentOnCallGroup(rotation.baseMondayDate, rotation.baseGroup) : 1;
+  const isMyGroupOnCall = profile.groupId === currentGroup.toString();
+
   return (
-    <div className="space-y-12 pb-20">
+    <PullToRefresh onRefresh={async () => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      toast.success("Données actualisées");
+    }}>
+      <div className="space-y-12 pb-20">
+        {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
+      {/* On-Call Status Banner */}
+      {currentCity && isMyGroupOnCall && isOnCallNow && (
+        <div className="bg-indigo-600 text-white p-6 rounded-[2rem] shadow-lg flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+              <Navigation size={24} />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold">Votre pharmacie est de garde !</h3>
+              <p className="text-indigo-100 text-sm">Groupe {profile.groupId} • {currentCity.name} ({currentCity.onCallStartTime} - {currentCity.onCallEndTime})</p>
+            </div>
+          </div>
+          <div className="hidden md:block">
+            <span className="px-4 py-2 bg-white/20 rounded-full text-sm font-bold animate-pulse">
+              En service
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
         <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl flex items-center justify-between group relative overflow-hidden">
@@ -3303,8 +3674,14 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
             ) : (
               prescriptions.map(p => (
                 <div key={p.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-8">
-                  <div className="sm:w-48 aspect-[3/4] rounded-2xl overflow-hidden bg-slate-50 border border-slate-100">
-                    <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover" />
+                  <div 
+                    className="sm:w-48 aspect-[3/4] rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group"
+                    onClick={() => setViewImage(p.imageUrl)}
+                  >
+                    <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                      <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={32} />
+                    </div>
                   </div>
                   <div className="flex-1 flex flex-col">
                     <div className="mb-4">
@@ -3436,6 +3813,18 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                        o.status.replace('_', ' ').toUpperCase()}
                     </span>
                   </div>
+
+                  {o.prescriptionImageUrl && (
+                    <div 
+                      className="w-full h-32 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 mb-6 cursor-pointer relative group"
+                      onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                    >
+                      <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={24} />
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="space-y-3 mb-8">
                     {o.items?.map((item, i) => (
@@ -3522,6 +3911,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                               const pharmacistRef = doc(db, 'users', o.pharmacistId);
                               
                               batch.update(pharmacistRef, {
+                                pharmacistBalance: increment(pharmacyAmount),
                                 walletBalance: increment(pharmacyAmount)
                               });
 
@@ -3817,6 +4207,18 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Détails Client</p>
                           <p className="font-bold text-slate-900">{o.patientName}</p>
                           <p className="text-sm text-slate-500">{o.hospitalLocation}</p>
+                          
+                          {o.prescriptionImageUrl && (
+                            <div 
+                              className="w-full h-24 mt-4 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group"
+                              onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                            >
+                              <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                                <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={20} />
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-3">
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Articles</p>
@@ -4120,6 +4522,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                         if (pharmacyAmount > 0) {
                           const pharmacistRef = doc(db, 'users', profile.uid);
                           batch.update(pharmacistRef, {
+                            pharmacistBalance: increment(pharmacyAmount),
                             walletBalance: increment(pharmacyAmount)
                           });
 
@@ -4213,7 +4616,8 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
         )}
       </AnimatePresence>
     </div>
-  );
+  </PullToRefresh>
+);
 }
 
 // --- Delivery Dashboard ---
@@ -4280,7 +4684,8 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   useEffect(() => {
     const q = query(
       collection(db, 'withdrawals'),
-      where('userId', '==', profile.uid)
+      where('userId', '==', profile.uid),
+      where('userRole', '==', 'delivery')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ws = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest));
@@ -4343,8 +4748,12 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   const availableGains = totalEarned - totalWithdrawn;
 
   return (
-    <div className="space-y-12 pb-20">
-      {/* Stats Cards */}
+    <PullToRefresh onRefresh={async () => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      toast.success("Données actualisées");
+    }}>
+      <div className="space-y-12 pb-20">
+        {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl flex items-center justify-between group relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
@@ -4920,6 +5329,7 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                       const deliveryRef = doc(db, 'users', profile.uid);
 
                       batch.update(deliveryRef, {
+                        deliveryBalance: increment(deliveryAmount),
                         walletBalance: increment(deliveryAmount)
                       });
                       
@@ -5069,5 +5479,6 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
         )}
       </AnimatePresence>
     </div>
-  );
+  </PullToRefresh>
+);
 };

@@ -12,9 +12,13 @@ export interface UserProfile {
   pharmacyName?: string;
   pharmacyLocation?: string;
   authorizationNumber?: string;
+  cityId?: string;
+  groupId?: string;
   location?: { lat: number; lng: number };
   lastLocationUpdate?: any;
   walletBalance?: number;
+  pharmacistBalance?: number;
+  deliveryBalance?: number;
   status?: 'active' | 'suspended' | 'pending' | 'blocked' | 'test' | 'rejected';
   permissions?: string[];
   createdAt?: any;
@@ -28,6 +32,8 @@ export interface Pharmacy {
   phone?: string;
   licenseNumber?: string;
   locality?: string;
+  cityId: string;
+  groupId: string;
   isOnDuty?: boolean;
   status?: 'active' | 'suspended' | 'maintenance';
 }
@@ -63,6 +69,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   prescriptionId?: string;
+  prescriptionImageUrl?: string;
   patientId: string;
   patientName?: string;
   hospitalLocation?: string;
@@ -200,4 +207,18 @@ export interface Notification {
   type: 'quote_request' | 'new_mission' | 'system' | 'payment' | 'withdrawal';
   referenceId?: string;
   createdAt: any;
+}
+
+export interface City {
+  id: string;
+  name: string;
+  onCallStartTime: string; // HH:mm
+  onCallEndTime: string;   // HH:mm
+  status: 'active' | 'suspended';
+}
+
+export interface OnCallRotation {
+  id: string;
+  baseMondayDate: string; // YYYY-MM-DD
+  baseGroup: number;      // 1-4
 }
