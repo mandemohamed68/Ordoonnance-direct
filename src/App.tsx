@@ -1952,7 +1952,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
       
       {/* Pharmacy Header */}
-      <div className="bg-emerald-600 -mx-4 md:-mx-12 -mt-12 p-8 mb-12 relative overflow-hidden">
+      <div className="bg-emerald-600 rounded-[2rem] p-8 mb-12 relative overflow-hidden shadow-lg shadow-emerald-600/10">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
         <div className="relative flex items-center gap-4 text-white">
           <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
