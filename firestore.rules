@@ -79,9 +79,13 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
+    function isPrimaryAdmin() {
+      return isAuthenticated() && 'email' in request.auth.token && request.auth.token.email == "mandemohamed68@gmail.com";
+    }
+
     function isAdmin() {
       return isAuthenticated() && (
-        ('email' in request.auth.token && (request.auth.token.email == "mandemohamed68@gmail.com" || request.auth.token.email == "nmetechnologiegroup@gmail.com")) ||
+        isPrimaryAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super-admin'])
@@ -90,7 +94,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuthenticated() && (
-        ('email' in request.auth.token && (request.auth.token.email == "mandemohamed68@gmail.com" || request.auth.token.email == "nmetechnologiegroup@gmail.com")) ||
+        isPrimaryAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super-admin')
@@ -228,9 +232,9 @@ service cloud.firestore {
                       (request.resource.data.status == 'active' && (request.resource.data.role == 'patient' || isAdmin()))
                     ) && 
                     (request.resource.data.role != 'admin' || isAdmin()) && 
-                    (request.resource.data.role != 'super-admin' || isSuperAdmin());
+                    (request.resource.data.role != 'super-admin' || isPrimaryAdmin());
       
-      allow update: if (isAdmin() && isValidUser(request.resource.data)) || 
+      allow update: if (isAdmin() && (request.resource.data.role == resource.data.role || isPrimaryAdmin()) && isValidUser(request.resource.data)) || 
                     (isOwner(userId) && isValidUser(request.resource.data) && 
                      request.resource.data.uid == resource.data.uid && 
                      request.resource.data.role == resource.data.role && 
@@ -239,7 +243,7 @@ service cloud.firestore {
                        (resource.data.role == 'patient' && resource.data.status == 'pending' && request.resource.data.status == 'active')
                      )
                     );
-      allow delete: if isAdmin();
+      allow delete: if isPrimaryAdmin() || (isAdmin() && resource.data.role != 'super-admin' && resource.data.email != "mandemohamed68@gmail.com");
     }
 
     match /pharmacies/{pharmacyId} {

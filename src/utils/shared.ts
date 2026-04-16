@@ -3,7 +3,11 @@ import { db } from '../firebase';
 import { UserProfile } from '../types';
 import { sendSMS } from './sms';
 
-export const SUPER_ADMIN_EMAILS = ["mandemohamed68@gmail.com", "nmetechnologiegroup@gmail.com"];
+export const PRIMARY_ADMIN_EMAIL = "mandemohamed68@gmail.com";
+export const SUPER_ADMIN_EMAILS = [PRIMARY_ADMIN_EMAIL];
+
+export const isPrimaryAdminEmail = (email: string | null | undefined) => 
+  email === PRIMARY_ADMIN_EMAIL;
 
 export const isSuperAdminEmail = (email: string | null | undefined) => 
   email ? SUPER_ADMIN_EMAILS.includes(email) : false;
@@ -148,33 +152,43 @@ export const compressImage = (file: File, maxWidth = 1024, maxHeight = 1024, qua
 /**
  * Calculates the currently active on-call group based on the rotation settings and current date.
  */
-export const getCurrentOnCallGroup = (baseMondayDate: string, baseGroup: number): number => {
-  if (!baseMondayDate || !baseGroup) return 1;
+export const getCurrentOnCallGroup = (rotation: any): number => {
+  if (!rotation) return 1;
 
-  const baseDate = new Date(baseMondayDate);
-  // Ensure baseDate is set to midnight to avoid timezone issues
-  baseDate.setHours(0, 0, 0, 0);
-
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-
-  // Calculate difference in days
-  const diffTime = Math.abs(now.getTime() - baseDate.getTime());
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-  // Calculate difference in weeks
-  const diffWeeks = Math.floor(diffDays / 7);
-
-  // Calculate current group
-  // If now is before baseDate, we subtract weeks, otherwise we add weeks
-  let currentGroup = baseGroup;
-  if (now < baseDate) {
-    currentGroup = ((baseGroup - 1 - (diffWeeks % 4) + 4) % 4) + 1;
-  } else {
-    currentGroup = ((baseGroup - 1 + diffWeeks) % 4) + 1;
+  // New manual rotation logic
+  if (rotation.currentGroup) {
+    // If the admin strictly set the current group with start/end dates, use it directly.
+    return rotation.currentGroup;
   }
 
-  return currentGroup;
+  // Backward compatibility with baseMondayDate
+  if (rotation.baseMondayDate && rotation.baseGroup) {
+    const baseDate = new Date(rotation.baseMondayDate);
+    // Ensure baseDate is set to midnight to avoid timezone issues
+    baseDate.setHours(0, 0, 0, 0);
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    // Calculate difference in days
+    const diffTime = Math.abs(now.getTime() - baseDate.getTime());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    // Calculate difference in weeks
+    const diffWeeks = Math.floor(diffDays / 7);
+
+    // Calculate current group
+    let currentGroup = rotation.baseGroup;
+    if (now < baseDate) {
+      currentGroup = ((rotation.baseGroup - 1 - (diffWeeks % 4) + 4) % 4) + 1;
+    } else {
+      currentGroup = ((rotation.baseGroup - 1 + diffWeeks) % 4) + 1;
+    }
+
+    return currentGroup;
+  }
+
+  return 1;
 };
 
 /**

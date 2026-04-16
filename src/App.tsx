@@ -921,16 +921,22 @@ export default function App() {
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
+    
+    // Check if Google Auth is globally enabled
+    if (settings?.googleAuthEnabled === false) {
+      toast.error("La connexion Google est actuellement désactivée par l'administrateur.");
+      return;
+    }
+
     setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
+    
     try {
-      // Check if running in Capacitor (mobile app)
-      const isNative = Capacitor.isNativePlatform();
-      if (isNative) {
-        await signInWithRedirect(auth, provider);
-      } else {
-        await signInWithPopup(auth, provider);
-      }
+      // Use popup for both web and mobile webviews to avoid 'null' origin redirect errors in basic Capacitor setups.
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
       if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
         console.error("Login failed:", error);
@@ -2643,192 +2649,154 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     layout
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="medical-card p-8 group"
+                    className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group"
                   >
-                    <div 
-                      className="relative aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 bg-slate-50 shadow-inner cursor-pointer group/img"
-                      onClick={() => setViewImage(p.imageUrl)}
-                    >
-                      {p.imageUrl ? (
-                        <>
-                          <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-contain group-hover/img:scale-105 transition-transform duration-700 ease-out" />
-                          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
-                            <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
-                              <Search className="text-white" size={24} />
+                    <div className="flex gap-4">
+                      <div 
+                        className="relative w-24 h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
+                        onClick={() => setViewImage(p.imageUrl)}
+                      >
+                        {p.imageUrl ? (
+                          <>
+                            <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500" />
+                            <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
+                              <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                                <Search className="text-white" size={16} />
+                              </div>
                             </div>
+                          </>
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100/50 text-slate-400">
+                            <FileText size={24} strokeWidth={1} className="mb-1 opacity-20" />
+                            <p className="text-[8px] font-black uppercase tracking-widest opacity-40 text-center leading-tight">Saisie<br/>Manuelle</p>
                           </div>
-                        </>
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100/50 text-slate-400">
-                          <FileText size={48} strokeWidth={1} className="mb-2 opacity-20" />
-                          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Saisie Manuelle</p>
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0 flex flex-col">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <span className="text-[10px] font-black text-primary bg-primary/5 px-2 py-1 rounded-lg">#{p.id.slice(-4).toUpperCase()}</span>
+                            <p className="text-[10px] text-slate-400 font-bold mt-1">{formatDate(p.createdAt, 'date')}</p>
+                          </div>
+                          
+                          {(() => {
+                            const associatedOrder = orders.find(o => o.prescriptionId === p.id);
+                            const isPaid = associatedOrder && ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(associatedOrder.status);
+                            if (!isPaid) {
+                              return (
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handleDeletePrescription(p.id); }}
+                                  className="w-7 h-7 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shadow-sm"
+                                  title="Supprimer l'ordonnance"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
-                      )}
-                      <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
-                        {(() => {
-                          const associatedOrder = orders.find(o => o.prescriptionId === p.id);
-                          const displayStatus = associatedOrder ? associatedOrder.status : p.status;
-                          
-                          return (
-                            <span className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-2xl shadow-xl backdrop-blur-md ${
-                              displayStatus === 'draft' ? 'bg-slate-500/90 text-white' : 
-                              displayStatus === 'submitted' ? 'bg-amber-500/90 text-white' : 
-                              displayStatus === 'validated' || displayStatus === 'pending_quote' || displayStatus === 'pending_payment' ? 'bg-emerald-500/90 text-white' : 
-                              ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(displayStatus) ? 'bg-blue-500/90 text-white' :
-                              'bg-rose-500/90 text-white'
-                            }`}>
-                              {displayStatus === 'draft' ? 'Brouillon - À soumettre' : 
-                               displayStatus === 'submitted' ? (p.requestType === 'partial' ? 'Analyse en cours (Devis partiel)' : 'Analyse en cours (Devis complet)') : 
-                               displayStatus === 'validated' || displayStatus === 'pending_quote' ? 'Devis Établi' : 
-                               displayStatus === 'pending_payment' ? 'Attente Paiement' :
-                               displayStatus === 'paid' ? 'Payée' :
-                               displayStatus === 'preparing' ? 'En préparation' :
-                               displayStatus === 'ready' ? 'Prête' :
-                               displayStatus === 'delivering' ? 'En livraison' :
-                               displayStatus === 'completed' ? 'Livrée' :
-                               displayStatus === 'rejected_by_limit' ? 'Rejetée (Limite atteinte)' : 'Refusée'}
-                            </span>
-                          );
-                        })()}
-                        {(() => {
-                          const associatedOrder = orders.find(o => o.prescriptionId === p.id);
-                          const isPaid = associatedOrder && (
-                            associatedOrder.status === 'paid' || 
-                            associatedOrder.status === 'preparing' || 
-                            associatedOrder.status === 'ready' || 
-                            associatedOrder.status === 'delivering' || 
-                            associatedOrder.status === 'completed'
-                          );
-                          
-                          if (!isPaid) {
+
+                        <div className="mt-auto">
+                          {(() => {
+                            const associatedOrder = orders.find(o => o.prescriptionId === p.id);
+                            const displayStatus = associatedOrder ? associatedOrder.status : p.status;
                             return (
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeletePrescription(p.id);
-                                }}
-                                className="w-10 h-10 bg-white/90 backdrop-blur-md text-rose-500 rounded-xl flex items-center justify-center shadow-lg hover:bg-rose-500 hover:text-white transition-all duration-300"
-                                title="Supprimer l'ordonnance"
-                              >
-                                <Trash2 size={18} />
-                              </button>
+                              <span className={`inline-block text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl ${
+                                displayStatus === 'draft' ? 'bg-slate-100 text-slate-600' : 
+                                displayStatus === 'submitted' ? 'bg-amber-100 text-amber-700' : 
+                                displayStatus === 'validated' || displayStatus === 'pending_quote' || displayStatus === 'pending_payment' ? 'bg-emerald-100 text-emerald-700' : 
+                                ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(displayStatus) ? 'bg-blue-100 text-blue-700' :
+                                'bg-rose-100 text-rose-700'
+                              }`}>
+                                {displayStatus === 'draft' ? 'Brouillon' : 
+                                 displayStatus === 'submitted' ? (p.requestType === 'partial' ? 'Analyse (Partiel)' : 'Analyse en cours') : 
+                                 displayStatus === 'validated' || displayStatus === 'pending_quote' ? 'Devis Établi' : 
+                                 displayStatus === 'pending_payment' ? 'Attente Paiement' :
+                                 displayStatus === 'paid' ? 'Payée' :
+                                 displayStatus === 'preparing' ? 'En préparation' :
+                                 displayStatus === 'ready' ? 'Prête' :
+                                 displayStatus === 'delivering' ? 'En livraison' :
+                                 displayStatus === 'completed' ? 'Livrée' :
+                                 displayStatus === 'rejected_by_limit' ? 'Rejetée (Limite)' : 'Refusée'}
+                              </span>
                             );
-                          }
-                          return null;
-                        })()}
+                          })()}
+                        </div>
                       </div>
                     </div>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-slate-400 font-bold">{formatDate(p.createdAt, 'date')}</p>
-                        <span className="text-[10px] font-black text-primary bg-primary/5 px-3 py-1 rounded-xl">ID: {p.id.slice(-4).toUpperCase()}</span>
+
+                    {!p.extractedData && p.status === 'draft' && (
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse en cours...</p>
                       </div>
+                    )}
 
-                      {p.status === 'rejected_by_limit' && (
-                        <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100">
-                          <p className="text-xs text-rose-700 font-bold leading-relaxed">Cette ordonnance a été rejetée par 5 pharmacies. Veuillez contacter le support.</p>
-                        </div>
-                      )}
-                      
-                      {!p.extractedData && p.status === 'draft' && (
-                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-center gap-3">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse en cours...</p>
-                        </div>
-                      )}
-                      
-                      {p.extractedData && (
-                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Médicaments détectés</p>
-                          <div className="space-y-2">
-                            {(() => {
-                              try {
-                                const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                                if (!jsonStr) return null;
-                                const parsed = JSON.parse(jsonStr);
-                                const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
-                                
-                                const displayMeds = p.requestType === 'partial' && p.selectedMedications
-                                  ? meds.filter((m: any) => {
-                                      const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament);
-                                      return p.selectedMedications?.includes(name);
-                                    })
-                                  : meds;
+                    {p.extractedData && (
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
+                          Médicaments
+                          {p.requestType === 'partial' && <span className="text-primary italic flex items-center gap-1"><Plus size={10} /> Partiel</span>}
+                        </p>
+                        <div className="space-y-1.5">
+                          {(() => {
+                            try {
+                              const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
+                              if (!jsonStr) return null;
+                              const parsed = JSON.parse(jsonStr);
+                              const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+                              const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
 
-                                return displayMeds.map((m: any, i: number) => {
-                                  const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Médicament inconnu');
-                                  const dosage = typeof m === 'object' ? m.dosage : '';
-                                  const posology = typeof m === 'object' ? m.posologie : '';
-                                  
-                                  return (
-                                    <div key={`${name}-${i}`} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:border-primary/20 transition-colors group/med">
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center text-primary group-hover/med:bg-primary group-hover/med:text-white transition-colors">
-                                          <Package size={14} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <p className="text-xs text-slate-900 font-black truncate">{name}</p>
-                                          {(dosage || posology) && (
-                                            <p className="text-[10px] text-slate-500 font-medium truncate">
-                                              {dosage}{dosage && posology ? ' • ' : ''}{posology}
-                                            </p>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                });
-                              } catch (e) { return null; }
-                            })()}
-                            {p.requestType === 'partial' && (
-                              <p className="text-[10px] font-black text-primary mt-2 italic flex items-center gap-1">
-                                <Plus size={10} /> Demande partielle
-                              </p>
-                            )}
-                          </div>
+                              return displayMeds.map((m: any, i: number) => {
+                                const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
+                                const dosage = typeof m === 'object' ? m.dosage : '';
+                                const posology = typeof m === 'object' ? m.posologie : '';
+                                return (
+                                  <div key={i} className="flex items-center gap-2 text-xs">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0"></div>
+                                    <span className="font-bold text-slate-700 truncate">{name}</span>
+                                    {(dosage || posology) && <span className="text-slate-400 truncate text-[10px] ml-auto">{dosage}{dosage && posology ? ' • ' : ''}{posology}</span>}
+                                  </div>
+                                );
+                              });
+                            } catch (e) { return null; }
+                          })()}
                         </div>
-                      )}
+                      </div>
+                    )}
 
-                      {p.status === 'draft' && (
-                        <div className="flex flex-col gap-3 pt-2">
-                          <button 
-                            onClick={() => handleRequestQuote(p, 'all')}
-                            className="btn-primary w-full py-4 text-sm"
-                          >
-                            Soumettre pour devis complet
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setShowPartialSelect(p);
-                              setSelectedMeds(p.selectedMedications || []);
-                            }}
-                            className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold text-sm hover:bg-slate-200 transition-all"
-                          >
-                            Soumettre pour devis partiel
-                          </button>
-                        </div>
-                      )}
-
-                      {p.status === 'submitted' && (
-                        <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100 mt-4">
-                          <div className="w-8 h-8 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0">
-                            <Clock size={16} />
-                          </div>
-                          <p className="text-xs text-amber-700 font-medium leading-relaxed">
-                            En attente du retour de la pharmacie. Vous recevrez une notification dès qu'un devis sera disponible.
-                          </p>
-                        </div>
-                      )}
-
-                      {p.status === 'validated' && (
-                        <div className="flex items-center gap-3 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                          <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center text-white">
-                            <CheckCircle size={18} />
-                          </div>
-                          <p className="text-xs text-emerald-700 font-bold">Prête pour commande</p>
-                        </div>
-                      )}
-                    </div>
+                    {p.status === 'draft' && (
+                      <div className="flex gap-2">
+                        <button onClick={() => handleRequestQuote(p, 'all')} className="flex-1 bg-primary text-white py-2 rounded-xl text-xs font-bold hover:bg-primary/90 transition-all">
+                          Devis complet
+                        </button>
+                        <button onClick={() => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} className="flex-1 bg-slate-100 text-slate-600 py-2 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all">
+                          Devis partiel
+                        </button>
+                      </div>
+                    )}
+                    
+                    {p.status === 'rejected_by_limit' && (
+                      <div className="p-2.5 bg-rose-50 rounded-xl border border-rose-100 mt-1">
+                        <p className="text-[10px] text-rose-700 font-bold leading-relaxed text-center">Rejetée par 5 pharmacies. Contactez le support.</p>
+                      </div>
+                    )}
+                    
+                    {p.status === 'submitted' && (
+                      <div className="flex items-center gap-2 p-2.5 bg-amber-50 rounded-xl border border-amber-100 mt-1">
+                        <Clock size={14} className="text-amber-500 shrink-0" />
+                        <p className="text-[10px] text-amber-700 font-bold leading-tight">En attente d'un devis des pharmacies.</p>
+                      </div>
+                    )}
+                    
+                    {p.status === 'validated' && (
+                      <div className="flex items-center gap-2 p-2.5 bg-emerald-50 rounded-xl border border-emerald-100 mt-1">
+                        <CheckCircle size={14} className="text-emerald-500 shrink-0" />
+                        <p className="text-[10px] text-emerald-700 font-bold leading-tight">Prête pour commande.</p>
+                      </div>
+                    )}
                   </motion.div>
                 ))}
               </div>
@@ -3172,96 +3140,90 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                       <p className="text-slate-500 text-sm max-w-xs mx-auto">Vos commandes terminées ou annulées apparaîtront ici.</p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').map(o => (
-                        <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-6 opacity-75 hover:opacity-100 transition-opacity">
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-4">
+                        <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4 opacity-75 hover:opacity-100 transition-opacity">
+                            <div className="flex items-center justify-between">
                               <div className="flex items-center gap-3">
                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${o.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                                   {o.status === 'completed' ? <CheckCircle size={20} /> : <X size={20} />}
                                 </div>
                                 <div>
-                                  <h4 className="font-bold">Commande #{o.id.slice(-6).toUpperCase()}</h4>
-                                  <p className="text-xs text-slate-400">{formatDate(o.createdAt)}</p>
+                                  <h4 className="font-bold text-sm">#{o.id.slice(-6).toUpperCase()}</h4>
+                                  <p className="text-[10px] text-slate-400">{formatDate(o.createdAt)}</p>
                                 </div>
                               </div>
-                              <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
                                 o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
                               }`}>
                                 {o.status === 'completed' ? 'Terminée' : 'Annulée'}
                               </span>
                             </div>
 
-                            <div className="bg-slate-50 p-4 rounded-2xl mb-4">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Building2 size={16} className="text-slate-400" />
-                                <span className="font-bold text-slate-700">{o.pharmacyName || "Pharmacie"}</span>
+                            <div className="bg-slate-50 p-3 rounded-2xl mb-2 flex-grow">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Building2 size={14} className="text-slate-400" />
+                                <span className="font-bold text-sm text-slate-700 truncate">{o.pharmacyName || "Pharmacie"}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <MapPin size={16} className="text-slate-400" />
-                                <span className="text-sm text-slate-500">{o.hospitalLocation}</span>
+                                <MapPin size={14} className="text-slate-400" />
+                                <span className="text-[11px] text-slate-500 truncate">{o.hospitalLocation}</span>
                               </div>
                             </div>
 
                             {o.items && o.items.length > 0 && (
-                              <div className="space-y-3 mb-4">
+                              <div className="space-y-1.5 mb-2">
                                 {o.items.map((item, idx) => (
-                                  <div key={idx} className="flex justify-between items-center text-sm">
-                                    <span className="text-slate-600">{item.name} x{item.quantity}</span>
-                                    <span className="font-bold">{item.price * item.quantity} FCFA</span>
+                                  <div key={idx} className="flex justify-between items-center text-xs">
+                                    <span className="text-slate-600 truncate mr-2">{item.name} x{item.quantity}</span>
+                                    <span className="font-bold whitespace-nowrap">{item.price * item.quantity} FCFA</span>
                                   </div>
                                 ))}
                               </div>
                             )}
 
-                            <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                              <span className="text-slate-400 text-sm">Total payé</span>
-                              <span className="text-xl font-bold text-primary">{(o.totalAmount || 0).toLocaleString()} FCFA</span>
+                            <div className="flex items-center justify-between pt-3 border-t border-slate-50 mt-auto">
+                              <span className="text-slate-400 text-xs">Total payé</span>
+                              <span className="text-lg font-bold text-primary">{(o.totalAmount || 0).toLocaleString()} FCFA</span>
                             </div>
 
                             {o.status === 'completed' && (
-                              <div className="mt-4 pt-4 border-t border-slate-50 flex flex-col gap-4">
+                              <div className="mt-2 flex gap-2">
                                 <button
                                   onClick={() => generateInvoice(o, profile)}
-                                  className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                                  className="flex-1 bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
                                 >
-                                  <FileText size={18} />
-                                  Télécharger la facture PDF
+                                  <FileText size={14} /> Facture
                                 </button>
                                 {(o.deliveryPhoto || o.deliverySignature) && (
-                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
-                                    <div className="flex gap-4">
+                                  <div className="flex gap-2">
                                       {o.deliveryPhoto && (
                                         <button 
                                           onClick={() => setViewImage(o.deliveryPhoto!)}
-                                          className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group"
+                                          className="w-10 h-10 aspect-square rounded-xl overflow-hidden border border-slate-200 relative group flex-shrink-0"
                                         >
                                           <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
                                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                            <Search className="text-white" size={20} />
+                                            <Search className="text-white" size={14} />
                                           </div>
                                         </button>
                                       )}
                                       {o.deliverySignature && (
                                         <button 
                                           onClick={() => setViewImage(o.deliverySignature!)}
-                                          className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative"
+                                          className="w-10 h-10 aspect-square rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 group relative flex-shrink-0"
                                         >
                                           <img src={o.deliverySignature} className="max-h-full object-contain" />
                                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                            <Search className="text-white" size={20} />
+                                            <Search className="text-white" size={14} />
                                           </div>
                                         </button>
                                       )}
-                                    </div>
                                   </div>
                                 )}
                               </div>
                             )}
                           </div>
-                        </div>
                       ))}
                     </div>
                   )}
@@ -3271,7 +3233,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               {activeTab === 'pharmacies' && (
                 <>
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xl font-bold">Pharmacies de Garde</h3>
+                    <h3 className="text-xl font-bold">Pharmacies à proximité</h3>
                     <div className="flex items-center gap-2 text-sm text-slate-500 bg-white px-4 py-2 rounded-xl border border-slate-100">
                 <Search size={16} />
                 <input 
@@ -3291,16 +3253,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                                         ph.address.toLowerCase().includes(pharmacySearch.toLowerCase()) ||
                                         (ph as any).locality?.toLowerCase().includes(pharmacySearch.toLowerCase());
                   
-                  // On-call logic
                   const city = cities.find(c => c.id === ph.cityId);
-                  if (!city) return matchesSearch; // If no city assigned, just use search filter
-                  
-                  const isOnCallNow = isCityOnCallNow(city.onCallStartTime, city.onCallEndTime);
-                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation.baseMondayDate, rotation.baseGroup) : 1;
+                  const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
+                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
                   const isMyGroupOnCall = ph.groupId === currentGroup.toString();
 
-                  // Only show pharmacies that are currently on call
-                  return matchesSearch && isOnCallNow && isMyGroupOnCall;
+                  if (isOnCallNow) {
+                    // La nuit : uniquement celles de garde
+                    return matchesSearch && isMyGroupOnCall;
+                  } else {
+                    // Le jour : toutes les pharmacies (standard et de garde ce soir)
+                    return matchesSearch;
+                  }
                 })
                 .sort((a, b) => {
                   if (!location) return 0;
@@ -3308,8 +3272,20 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                   const distB = b.location ? calculateDistance(location.lat, location.lng, b.location.lat, b.location.lng) : Infinity;
                   return distA - distB;
                 })
+                .slice(0, 20)
                 .map((ph) => {
                   const distance = location && ph.location ? calculateDistance(location.lat, location.lng, ph.location.lat, ph.location.lng) : null;
+                  
+                  const city = cities.find(c => c.id === ph.cityId);
+                  const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
+                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
+                  const isMyGroupOnCall = ph.groupId === currentGroup.toString();
+
+                  const statusLabel = isOnCallNow ? (isMyGroupOnCall ? 'De Garde' : 'Ouvert') : (isMyGroupOnCall ? 'De Garde Ce Soir' : 'Standard');
+                  const statusClasses = isMyGroupOnCall 
+                    ? 'bg-amber-100 text-amber-700' 
+                    : 'bg-emerald-100 text-emerald-700';
+
                   return (
                   <div key={ph.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 hover:border-primary/30 transition-all">
                     <div className="flex items-center justify-between mb-4">
@@ -3322,8 +3298,8 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                             {distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`}
                           </span>
                         )}
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700`}>
-                          Ouvert
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${statusClasses}`}>
+                          {statusLabel}
                         </span>
                       </div>
                     </div>
@@ -3337,8 +3313,17 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                           <Phone size={14} /> Appeler
                         </a>
                       )}
-                      <button className="flex-1 py-2.5 bg-primary/10 text-primary rounded-xl text-sm font-bold hover:bg-primary/20 transition-all">
-                        Itinéraire
+                      <button 
+                        onClick={() => {
+                          if (ph.location?.lat && ph.location?.lng) {
+                            window.open(`https://www.google.com/maps/dir/?api=1&destination=${ph.location.lat},${ph.location.lng}`, '_blank');
+                          } else {
+                            window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ph.name + ' ' + (cities.find(c => c.id === ph.cityId)?.name || ''))}`, '_blank');
+                          }
+                        }}
+                        className="flex-1 py-2.5 bg-primary/10 text-primary rounded-xl text-sm font-bold hover:bg-primary/20 transition-all flex items-center justify-center gap-2"
+                      >
+                        <MapPin size={14} /> Itinéraire
                       </button>
                     </div>
                   </div>
@@ -3346,19 +3331,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               })}
               {pharmacies.filter(ph => {
                   const city = cities.find(c => c.id === ph.cityId);
-                  if (!city) return true;
-                  const isOnCallNow = isCityOnCallNow(city.onCallStartTime, city.onCallEndTime);
-                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation.baseMondayDate, rotation.baseGroup) : 1;
+                  const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
+                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
                   const isMyGroupOnCall = ph.groupId === currentGroup.toString();
-                  return isOnCallNow && isMyGroupOnCall;
+                  return isOnCallNow ? isMyGroupOnCall : true;
                 }).length === 0 && (
                 <div className="col-span-full bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                   <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                   <div className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
                     <LogoIcon size={48} />
                   </div>
-                  <p className="text-slate-900 font-black text-2xl mb-2">Aucune pharmacie de garde</p>
-                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Il n'y a actuellement aucune pharmacie de garde disponible dans votre zone.</p>
+                  <p className="text-slate-900 font-black text-2xl mb-2">Aucune pharmacie</p>
+                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Il n'y a actuellement aucune pharmacie correspondante à votre recherche ou ouverte dans votre zone.</p>
                 </div>
               )}
             </div>
@@ -4351,7 +4335,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 
   const currentCity = cities.find(c => c.id === profile.cityId);
   const isOnCallNow = currentCity ? isCityOnCallNow(currentCity.onCallStartTime, currentCity.onCallEndTime) : false;
-  const currentGroup = rotation ? getCurrentOnCallGroup(rotation.baseMondayDate, rotation.baseGroup) : 1;
+  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
   const isMyGroupOnCall = profile.groupId === currentGroup.toString();
 
   return (
@@ -4482,98 +4466,99 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
               </div>
             ) : (
               prescriptions.map(p => (
-                <div key={p.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-8">
-                  <div 
-                    className="sm:w-48 aspect-[3/4] rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group"
-                    onClick={() => setViewImage(p.imageUrl)}
-                  >
-                    <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
-                      <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={32} />
+                <div key={p.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4">
+                  <div className="flex gap-4">
+                    <div 
+                      className="w-24 h-24 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group shrink-0"
+                      onClick={() => setViewImage(p.imageUrl)}
+                    >
+                      <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={16} />
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
+                      <div>
+                        <div className="flex justify-between items-start mb-1">
+                          <h4 className="text-sm font-bold text-slate-900 truncate">{p.patientName || "Anonyme"}</h4>
+                          <span className="text-[10px] bg-primary/5 text-primary px-2 py-1 rounded-lg font-black uppercase">#{p.id.slice(-4).toUpperCase()}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate mb-1">{p.hospitalLocation || "Lieu non spécifié"}</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 mt-auto">
+                        <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg text-[10px] font-bold">
+                          <MapPin size={10} />
+                          {p.distance || 2} km
+                        </div>
+                        {p.requestType === 'partial' && (
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
+                            <Plus size={10} /> Partielle
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex-1 flex flex-col">
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Patient & Lieu</h4>
-                        <div className="flex flex-col items-end gap-1">
-                          <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full text-[10px] font-bold">
-                            <MapPin size={10} />
-                            {p.distance || 2} km
-                          </div>
-                          {p.requestType === 'partial' && (
-                            <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                              Demande Partielle
-                            </span>
-                          )}
+
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 max-h-32 overflow-hidden relative">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                        <FileText size={10} /> IA Détection
+                      </p>
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      {p.extractedData ? (
+                        <div className="space-y-1">
+                          {(() => {
+                            try {
+                              const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
+                              if (!jsonStr) return <p className="italic text-slate-400">Non structuré</p>;
+                              const parsed = JSON.parse(jsonStr);
+                              const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+                              
+                              const displayMeds = p.requestType === 'partial' && p.selectedMedications
+                                ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament)))
+                                : meds;
+
+                              return displayMeds.map((m: any, i: number) => {
+                                const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
+                                const dosage = typeof m === 'string' ? '' : (m.dosage || '');
+                                return (
+                                  <div key={`${name}-${i}`} className="flex items-center gap-1.5 truncate">
+                                    <div className="w-1 h-1 rounded-full bg-slate-300 shrink-0"></div>
+                                    <span className="font-bold text-slate-700">{name}</span>
+                                    {dosage && <span className="text-[10px] text-slate-400"> {dosage}</span>}
+                                  </div>
+                                );
+                              });
+                            } catch (e) {
+                              return <p className="truncate">{p.extractedData}</p>;
+                            }
+                          })()}
                         </div>
-                      </div>
-                      <p className="text-sm font-bold text-slate-900">{p.patientName || "Anonyme"}</p>
-                      <p className="text-xs text-slate-500">{p.hospitalLocation || "Lieu non spécifié"}</p>
+                      ) : (
+                        <span className="flex items-center gap-2"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse en cours...</span>
+                      )}
                     </div>
+                    {/* Fade out bottom to indicate scroll/more if needed without taking space */}
+                    <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
+                  </div>
 
-                    <div className="mb-6">
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Analyse Assistée par IA</h4>
-                        <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">Burkina Faso</span>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-2xl text-sm text-slate-600 max-h-48 overflow-auto border border-slate-100">
-                        {p.extractedData ? (
-                          <div className="space-y-3">
-                            {(() => {
-                              try {
-                                const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                                if (!jsonStr) return <p className="italic text-slate-400">Données non structurées</p>;
-                                const parsed = JSON.parse(jsonStr);
-                                const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
-                                
-                                const displayMeds = p.requestType === 'partial' && p.selectedMedications
-                                  ? meds.filter((m: any) => {
-                                      const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament);
-                                      return p.selectedMedications?.includes(name);
-                                    })
-                                  : meds;
-
-                                return displayMeds.map((m: any, i: number) => {
-                                  const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Médicament inconnu');
-                                  const dosage = typeof m === 'string' ? '' : (m.dosage || '');
-                                  const posologie = typeof m === 'string' ? '' : (m.posologie || '');
-                                  return (
-                                    <div key={`${name}-${i}`} className="pb-2 border-b border-slate-200 last:border-0">
-                                      <p className="font-bold text-slate-800">{name}</p>
-                                      {(dosage || posologie) && <p className="text-xs text-slate-500">{dosage} {posologie && `• ${posologie}`}</p>}
-                                    </div>
-                                  );
-                                });
-                              } catch (e) {
-                                return <p className="text-xs">{p.extractedData}</p>;
-                              }
-                            })()}
-                          </div>
-                        ) : "Analyse en cours..."}
-                      </div>
-                    </div>
-                    <div className="mt-auto flex flex-col gap-3">
-                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 mb-1">
-                        <p className="text-[10px] text-amber-700 font-medium flex items-center gap-2">
-                          <Clock size={12} />
-                          Limite de 5 minutes pour établir le devis après clic.
-                        </p>
-                      </div>
-                      <button 
-                        onClick={() => handleStartQuote(p)}
-                        className="btn-primary w-full flex items-center justify-center gap-2"
-                      >
-                        <FileText size={18} />
-                        Établir un Devis
-                      </button>
-                      <button 
-                        onClick={() => handleValidatePrescription(p.id, 'rejected')}
-                        className="w-full bg-rose-50 text-rose-600 py-3 rounded-2xl font-bold hover:bg-rose-100 transition-all text-sm"
-                      >
-                        Rejeter l'ordonnance
-                      </button>
-                    </div>
+                  <div className="flex gap-2 mt-auto">
+                    <button 
+                      onClick={() => handleStartQuote(p)}
+                      className="flex-1 btn-primary py-2.5 text-xs font-bold rounded-xl"
+                    >
+                      Devis
+                    </button>
+                    <button 
+                      onClick={() => handleValidatePrescription(p.id, 'rejected')}
+                      className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-100 hover:text-rose-600 transition-all shadow-sm"
+                      title="Rejeter"
+                    >
+                      <X size={16} />
+                    </button>
                   </div>
                 </div>
               ))
@@ -4596,55 +4581,55 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
               </div>
             ) : (
               orders.map(o => (
-                <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center justify-between w-full">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary">
-                          <Package size={16} />
-                        </div>
-                        <span className="font-bold text-sm">#{o.id.slice(-6).toUpperCase()}</span>
+                <div key={o.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary">
+                        <Package size={16} />
                       </div>
-                      <button 
-                        onClick={() => setActiveChatOrderId(o.id)}
-                        className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all relative"
-                        title="Discuter avec le patient"
-                      >
-                        <MessageCircle size={16} />
-                        {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
-                          <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white text-[8px] flex items-center justify-center rounded-full border border-white">
-                            {o.unreadCounts[profile?.role || 'pharmacist']}
-                          </span>
-                        )}
-                      </button>
+                      <div>
+                        <span className="font-bold text-sm block leading-tight">#{o.id.slice(-6).toUpperCase()}</span>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md inline-block ${
+                          o.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 
+                          o.status === 'pending_quote' ? 'bg-amber-100 text-amber-700' : 
+                          o.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 
+                          o.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
+                          o.status === 'ready' ? 'bg-emerald-100 text-emerald-700' :
+                          o.status === 'delivering' ? 'bg-secondary/10 text-secondary' :
+                          'bg-blue-100 text-blue-700'
+                        }`}>
+                          {o.status === 'pending_quote' ? 'ATTENTE VALID.' : 
+                           o.status === 'pending_payment' ? 'ATTENTE PAIEMENT' : 
+                           o.status === 'paid' ? 'À PRÉPARER' :
+                           o.status === 'preparing' ? 'PRÉPARATION' :
+                           o.status === 'ready' ? 'PRÊT' :
+                           o.status === 'delivering' ? 'EN LIVRAISON' :
+                           o.status.replace('_', ' ').toUpperCase()}
+                        </span>
+                      </div>
                     </div>
-                    <span className={`text-[10px] font-bold px-3 py-1 rounded-full ${
-                      o.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 
-                      o.status === 'pending_quote' ? 'bg-amber-100 text-amber-700' : 
-                      o.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 
-                      o.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
-                      o.status === 'ready' ? 'bg-emerald-100 text-emerald-700' :
-                      o.status === 'delivering' ? 'bg-secondary/10 text-secondary' :
-                      'bg-blue-100 text-blue-700'
-                    }`}>
-                      {o.status === 'pending_quote' ? 'DEVIS ENVOYÉ - ATTENTE VALIDATION' : 
-                       o.status === 'pending_payment' ? 'ATTENTE PAIEMENT' : 
-                       o.status === 'paid' ? 'PAYÉ - À PRÉPARER' :
-                       o.status === 'preparing' ? 'PRÉPARATION EN COURS' :
-                       o.status === 'ready' ? 'PRÊT POUR LIVRAISON' :
-                       o.status === 'delivering' ? 'LIVRAISON EN COURS' :
-                       o.status.replace('_', ' ').toUpperCase()}
-                    </span>
+                    <button 
+                      onClick={() => setActiveChatOrderId(o.id)}
+                      className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all relative shrink-0"
+                      title="Discuter avec le patient"
+                    >
+                      <MessageCircle size={18} />
+                      {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                          {o.unreadCounts[profile?.role || 'pharmacist']}
+                        </span>
+                      )}
+                    </button>
                   </div>
 
                   {o.prescriptionImageUrl && (
                     <div 
-                      className="w-full h-32 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 mb-6 cursor-pointer relative group"
+                      className="w-full h-24 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group"
                       onClick={() => setViewImage(o.prescriptionImageUrl!)}
                     >
-                      <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
-                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={24} />
+                      <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={20} />
                       </div>
                     </div>
                   )}
@@ -5050,9 +5035,9 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 
               {activeTab === 'history' && (
                 <>
-                  <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {historyOrders.length === 0 ? (
-              <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
+              <div className="lg:col-span-3 bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                 <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
                   <Clock size={48} strokeWidth={1.5} />
@@ -5062,93 +5047,33 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
               </div>
             ) : (
               historyOrders.map(o => (
-                <div key={o.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-                  <div className="flex flex-col md:flex-row justify-between gap-6">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
-                          <CheckCircle size={24} />
-                        </div>
-                        <div>
-                          <h4 className="text-lg font-bold">Commande #{o.id.slice(-6).toUpperCase()}</h4>
-                          <p className="text-sm text-slate-500">Terminée le {o.updatedAt ? formatDate(o.updatedAt, 'date') : 'Date inconnue'}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
-                        <div className="space-y-3">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Détails Client</p>
-                          <p className="font-bold text-slate-900">{o.patientName}</p>
-                          <p className="text-sm text-slate-500">{o.hospitalLocation}</p>
-                          
-                          {o.prescriptionImageUrl && (
-                            <div 
-                              className="w-full h-24 mt-4 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group"
-                              onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                            >
-                              <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
-                                <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={20} />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-3">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Articles</p>
-                          {o.items?.map((item, i) => (
-                            <div key={`${item.name}-${i}`} className="flex justify-between text-sm">
-                              <span className="text-slate-600">
-                                {item.equivalent ? (
-                                  <span className="flex flex-col">
-                                    <span className="line-through text-slate-400 text-[10px]">{item.name}</span>
-                                    <span className="font-bold text-amber-700">{item.equivalent}</span>
-                                  </span>
-                                ) : item.name}
-                              </span>
-                              <span className="font-bold">x{item.equivalent ? (item.equivalentQuantity || item.quantity) : item.quantity}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                <div key={o.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity">
+                  <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
+                    <div>
+                      <span className="font-bold text-sm block">#{o.id.slice(-6).toUpperCase()}</span>
+                      <span className="text-[10px] text-slate-500">{o.updatedAt ? formatDate(o.updatedAt, 'date') : 'Date inconnue'}</span>
                     </div>
-                    
-                    <div className="md:w-64 bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-between">
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Votre Gain Net</p>
-                        <p className="text-2xl font-bold text-emerald-600">{o.pharmacyAmount?.toLocaleString()} FCFA</p>
-                      </div>
-                      <div className="mt-4 pt-4 border-t border-slate-200">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Statut Final</p>
-                        <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs">
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                          LIVRÉ / TERMINÉ
-                        </div>
-                      </div>
+                    <div className="text-right">
+                      <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">TERMINÉE</span>
+                      <span className="text-xs font-black text-emerald-600">+{o.pharmacyAmount?.toLocaleString()} FCFA</span>
                     </div>
                   </div>
-
-                  {/* Order Status Tracking Timeline */}
-                  <div className="mt-8 pt-8 border-t border-slate-100">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6">Suivi des étapes</p>
-                    <div className="flex flex-wrap gap-4">
-                      {o.history?.map((step: any, i: number) => (
-                        <div key={`${step.timestamp}-${i}`} className="flex items-center gap-3">
-                          <div className="flex flex-col items-center">
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                              i === (o.history.length - 1) ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-600'
-                            }`}>
-                              {i + 1}
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-900">{step.label}</p>
-                            <p className="text-[10px] text-slate-500">{formatDate(step.timestamp, 'time')}</p>
-                          </div>
-                          {i < (o.history.length - 1) && (
-                            <ChevronRight size={14} className="text-slate-300 mx-2" />
-                          )}
+                  
+                  <div className="flex-1 flex flex-col gap-4">
+                    <div className="flex gap-4">
+                      {o.prescriptionImageUrl && (
+                        <div 
+                          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer"
+                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                        >
+                          <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
                         </div>
-                      ))}
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
+                        <p className="text-[10px] text-slate-500 truncate mb-1">{o.hospitalLocation}</p>
+                        <p className="text-xs text-slate-700 font-medium truncate">{o.items?.length || 0} article(s)</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -5861,9 +5786,9 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
 
               {activeTab === 'active' && (
                 <>
-                  <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeMissions.length === 0 ? (
-              <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
+              <div className="lg:col-span-3 bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
                   <Truck size={48} strokeWidth={1.5} />
@@ -5873,95 +5798,93 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
               </div>
             ) : (
               activeMissions.map(m => (
-                <div key={m.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row gap-8">
-                  <div className="flex-1 space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <h4 className="text-xl font-bold">Livraison #{m.id.slice(-6).toUpperCase()}</h4>
-                        <button 
-                          onClick={() => setActiveChatOrderId(m.id)}
-                          className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-all relative"
-                          title="Chatter avec le client/pharmacien"
-                        >
-                          <MessageCircle size={16} />
-                          {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
-                            <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white text-[8px] flex items-center justify-center rounded-full border border-white">
-                              {m.unreadCounts[profile?.role || 'delivery']}
-                            </span>
-                          )}
-                        </button>
+                <div key={m.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                        <Truck size={16} />
                       </div>
-                      <span className={`px-4 py-1 rounded-full text-xs font-bold uppercase ${
-                        m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {m.status === 'pending_payment' ? 'Attente Paiement' : 'En cours'}
-                      </span>
+                      <div>
+                        <span className="font-bold text-sm block leading-tight">#{m.id.slice(-6).toUpperCase()}</span>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md inline-block ${
+                          m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {m.status === 'pending_payment' ? 'ATT. PAIEM.' : 'EN COURS'}
+                        </span>
+                      </div>
                     </div>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                      <div className="space-y-4">
-                        <div className="flex gap-3">
-                          <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500">
-                            <MapPin size={20} />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase">Adresse de livraison</p>
-                            <p className="font-medium">Secteur 15, Rue 15.22, Porte 102</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500">
-                            <Phone size={20} />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase">Contact client</p>
-                            <p className="font-medium">+226 70 00 00 00</p>
-                          </div>
-                        </div>
+                    <button 
+                      onClick={() => setActiveChatOrderId(m.id)}
+                      className="w-10 h-10 rounded-xl bg-slate-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-50 transition-all relative shrink-0"
+                      title="Chatter avec le client/pharmacien"
+                    >
+                      <MessageCircle size={18} />
+                      {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                          {m.unreadCounts[profile?.role || 'delivery']}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
+                        <MapPin size={14} />
                       </div>
-                      <div className="bg-slate-50 p-6 rounded-2xl">
-                        <h5 className="text-xs font-bold text-slate-400 uppercase mb-3">Résumé commande</h5>
-                        <div className="space-y-2">
-                          {m.items?.map((item, i) => (
-                            <div key={`${item.name}-${i}`} className="flex justify-between text-sm">
-                              <span className="text-slate-600">
-                                {item.equivalent ? (
-                                  <span className="flex flex-col">
-                                    <span className="line-through text-slate-400 text-[10px]">{item.name}</span>
-                                    <span className="font-bold text-amber-700">{item.equivalent}</span>
-                                  </span>
-                                ) : item.name}
-                              </span>
-                              <span className="font-bold">x{item.equivalent ? (item.equivalentQuantity || item.quantity) : item.quantity}</span>
-                            </div>
-                          ))}
-                        </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Adresse</p>
+                        <p className="font-bold text-xs text-slate-800 truncate">Secteur 15, Rue 15.22, Porte 102</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
+                        <Phone size={14} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Contact</p>
+                        <p className="font-bold text-xs text-slate-800 truncate">+226 70 00 00 00</p>
                       </div>
                     </div>
                   </div>
-                  <div className="md:w-72 flex flex-col gap-3">
+                  
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 mt-auto">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Résumé commande</p>
+                    <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                      {m.items?.map((item, i) => (
+                        <div key={`${item.name}-${i}`} className="flex justify-between text-xs">
+                          <span className="text-slate-600 truncate mr-2">
+                            {item.equivalent || item.name}
+                          </span>
+                          <span className="font-bold shrink-0">x{item.equivalent ? (item.equivalentQuantity || item.quantity) : item.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 mt-2">
                     {!m.isHandedOver ? (
                       <button 
                         onClick={() => setShowPickupQR(m)}
-                        className="w-full py-4 bg-amber-500 text-white rounded-2xl font-bold hover:bg-amber-600 transition-all shadow-lg shadow-amber-100 flex items-center justify-center gap-2"
+                        className="w-full py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-all shadow-sm flex items-center justify-center gap-2"
                       >
-                        <QrCode size={18} />
-                        Code de Retrait (Pharmacie)
+                        <QrCode size={14} />
+                        Code Retrait
                       </button>
                     ) : (
                       <button 
                         onClick={() => setShowDeliveryVerify(m)}
-                        className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 flex items-center justify-center gap-2"
+                        className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-2"
                       >
-                        <ShieldCheck size={18} />
-                        Confirmer la Livraison
+                        <ShieldCheck size={14} />
+                        Valider Livr.
                       </button>
                     )}
                     <button 
                       onClick={() => setShowMapForOrder(m)}
-                      className="w-full py-4 bg-slate-100 text-slate-700 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                      className="w-full py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
                     >
-                      <Search size={18} /> Voir sur la carte
+                      <Search size={14} /> Carte
                     </button>
                   </div>
                 </div>
@@ -5973,10 +5896,9 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
 
       {activeTab === 'history' && (
         <>
-          <div className="space-y-6">
-          <h3 className="text-2xl font-black text-slate-900 px-4">Historique des Missions</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {historyMissions.length === 0 ? (
-            <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
+            <div className="lg:col-span-3 bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
               <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
               <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
                 <Clock size={48} strokeWidth={1.5} />
@@ -5986,48 +5908,35 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
             </div>
           ) : (
             historyMissions.map(m => (
-              <div key={m.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row gap-8 opacity-75">
-                <div className="flex-1 space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xl font-bold">Livraison #{m.id.slice(-6).toUpperCase()}</h4>
-                    <span className="px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase flex items-center gap-1">
-                      <CheckCircle size={14} /> Terminée
-                    </span>
+              <div key={m.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity">
+                <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <span className="font-bold text-sm block">#{m.id.slice(-6).toUpperCase()}</span>
+                    <span className="text-[10px] text-slate-500">{m.updatedAt ? formatDate(m.updatedAt, 'date') : 'Date inconnue'}</span>
                   </div>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <div className="flex gap-3">
-                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500">
-                          <MapPin size={20} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase">Adresse de livraison</p>
-                          <p className="font-medium text-slate-600">Secteur 15, Rue 15.22, Porte 102</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-3">
-                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500">
-                          <Phone size={20} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase">Contact client</p>
-                          <p className="font-medium text-slate-600">+226 70 00 00 00</p>
-                        </div>
-                      </div>
+                  <div className="text-right">
+                    <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">LIVRÉE</span>
+                    <span className="text-xs font-black text-emerald-600">+{m.deliveryFee || 1500} FCFA</span>
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex gap-3">
+                    <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
+                      <MapPin size={14} />
                     </div>
-                    <div className="bg-slate-50 p-6 rounded-2xl">
-                      <h5 className="text-xs font-bold text-slate-400 uppercase mb-3">Détails</h5>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Date</span>
-                          <span className="font-bold">{m.createdAt ? formatDate(m.createdAt, 'date') : 'Date inconnue'}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Gain</span>
-                          <span className="font-bold text-emerald-600">+{m.deliveryFee || 1500} FCFA</span>
-                        </div>
-                      </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Secteur / Quartier</p>
+                      <p className="font-bold text-xs text-slate-600 truncate">Secteur 15, Rue 15.22</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
+                      <Package size={14} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Articles</p>
+                      <p className="font-bold text-xs text-slate-600 truncate">{m.items?.length || 0} article(s)</p>
                     </div>
                   </div>
                 </div>

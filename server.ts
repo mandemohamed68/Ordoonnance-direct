@@ -97,9 +97,8 @@ app.post("/api/ai/analyze", async (req, res) => {
     let response;
     if (image) {
       response = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: {
-          parts: [
+        model: "gemini-3-flash-preview",
+        contents: [
             {
               inlineData: {
                 mimeType: "image/jpeg",
@@ -107,21 +106,17 @@ app.post("/api/ai/analyze", async (req, res) => {
               }
             },
             {
-              text: prompt || "Extrait les médicaments de cette ordonnance au format JSON."
+              text: prompt || "Extrait les médicaments de cette ordonnance."
             }
-          ]
+          ],
+        config: {
+          responseMimeType: "application/json",
         }
       });
     } else {
       response = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: {
-          parts: [
-            {
-              text: `${prompt || "Analyse ces médicaments."} : "${text}"`
-            }
-          ]
-        },
+        model: "gemini-3-flash-preview",
+        contents: `${prompt || "Analyse ces médicaments."} : "${text}"`,
         config: {
           responseMimeType: "application/json",
         }

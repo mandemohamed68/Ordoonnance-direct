@@ -11,7 +11,7 @@ import { db, handleFirestoreError, OperationType, auth } from '../firebase';
 import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail } from '../utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
 import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
@@ -160,7 +160,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   const [editingCity, setEditingCity] = useState<City | null>(null);
   const [newCity, setNewCity] = useState<Partial<City>>({ name: '', onCallStartTime: '19:00', onCallEndTime: '08:00', status: 'active' });
   const [showRotationModal, setShowRotationModal] = useState(false);
-  const [editRotation, setEditRotation] = useState<Partial<OnCallRotation>>({ baseMondayDate: '', baseGroup: 1 });
+  const [editRotation, setEditRotation] = useState<Partial<OnCallRotation>>({ startDate: '', endDate: '', currentGroup: 1 });
   const [editSettings, setEditSettings] = useState<Settings | null>(settings ? {
     ...settings,
     commissionPercentage: settings.commissionPercentage || 10,
@@ -255,9 +255,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     return () => unsub();
   }, [selectedChat]);
 
-  const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '' });
+  const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
   const [addingPharmacy, setAddingPharmacy] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
   const [addingUser, setAddingUser] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
 
@@ -466,8 +466,6 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   }, []);
 
   const handleSeedPharmacies = async () => {
-    if (!confirm(`Voulez-vous importer ${PHARMACIES_OUAGA.length} pharmacies de Ouagadougou ?`)) return;
-    
     setSeeding(true);
     let count = 0;
     try {
@@ -529,16 +527,33 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     }
     setAddingPharmacy(true);
     try {
-      const id = newPharmacy.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      await setDoc(doc(db, 'pharmacies', id), {
+      const id = newPharmacy.name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substr(2, 4);
+      
+      const pharmacyData: any = {
         id,
-        ...newPharmacy,
+        name: newPharmacy.name,
+        address: newPharmacy.address,
+        phone: newPharmacy.phone,
+        locality: newPharmacy.locality,
+        cityId: newPharmacy.cityId,
+        groupId: newPharmacy.groupId,
+        licenseNumber: newPharmacy.licenseNumber || '',
         status: 'active',
         isOnDuty: false,
         createdAt: serverTimestamp()
-      });
-      setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '' });
+      };
+
+      if (newPharmacy.lat && newPharmacy.lng) {
+        pharmacyData.location = {
+          lat: parseFloat(newPharmacy.lat),
+          lng: parseFloat(newPharmacy.lng)
+        };
+      }
+
+      await setDoc(doc(db, 'pharmacies', id), pharmacyData);
+      setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
       toast.success("Pharmacie ajoutée !");
+      await addSystemLog('CREATE_PHARMACY', `Création d'une pharmacie: ${newPharmacy.name}`);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'pharmacies');
       toast.error("Erreur lors de l'ajout.");
@@ -549,12 +564,51 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUser.name || !newUser.phone || !newUser.role || !newUser.email) return;
+    if (!newUser.name || !newUser.phone || !newUser.role || !newUser.email) {
+      toast.error("Veuillez remplir les champs obligatoires (Nom, Email, Téléphone, Rôle).");
+      return;
+    }
+
+    if (newUser.role === 'pharmacist' && (!newUser.pharmacyName || !newUser.address || !newUser.cityId || !newUser.groupId)) {
+      toast.error("Pour un pharmacien, les détails de la pharmacie sont obligatoires.");
+      return;
+    }
+
     setAddingUser(true);
     try {
       // Create a unique ID for the user
       const uid = 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
       
+      let pharmacyId = null;
+
+      // AUTOMATION: Create pharmacy if role is pharmacist
+      if (newUser.role === 'pharmacist') {
+        pharmacyId = newUser.pharmacyName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substr(2, 4);
+        
+        const pharmacyData: any = {
+          id: pharmacyId,
+          name: newUser.pharmacyName,
+          address: newUser.address,
+          phone: newUser.phone, // Same phone as the pharmacist for contact
+          locality: newUser.locality || '',
+          cityId: newUser.cityId,
+          groupId: newUser.groupId,
+          licenseNumber: newUser.licenseNumber || '',
+          status: 'active',
+          isOnDuty: false,
+          createdAt: serverTimestamp()
+        };
+
+        if (newUser.lat && newUser.lng) {
+          pharmacyData.location = {
+            lat: parseFloat(newUser.lat),
+            lng: parseFloat(newUser.lng)
+          };
+        }
+
+        await setDoc(doc(db, 'pharmacies', pharmacyId), pharmacyData);
+      }
+
       const userData: any = {
         uid,
         name: newUser.name,
@@ -569,10 +623,14 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       };
 
       if (newUser.role === 'pharmacist') {
+        userData.pharmacyId = pharmacyId;
         userData.pharmacyName = newUser.pharmacyName;
         userData.address = newUser.address;
         userData.cityId = newUser.cityId;
         userData.groupId = newUser.groupId;
+        userData.locality = newUser.locality;
+        userData.licenseNumber = newUser.licenseNumber;
+        userData.authorizationNumber = newUser.authorizationNumber;
         if (newUser.lat && newUser.lng) {
           userData.location = {
             lat: parseFloat(newUser.lat),
@@ -584,11 +642,15 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       }
 
       await setDoc(doc(db, 'users', uid), userData);
-      setNewUser({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '' });
-      toast.success("Utilisateur créé avec succès.");
+      
+      const roleText = newUser.role === 'pharmacist' ? 'Pharmacien (et sa pharmacie)' : 'Utilisateur';
+      await addSystemLog('CREATE_USER_AND_PHARMACY', `Création d'un ${roleText}: ${newUser.name}`);
+      
+      setNewUser({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
+      toast.success(`${roleText} créé avec succès.`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `users`);
-      toast.error("Erreur lors de la création de l'utilisateur.");
+      handleFirestoreError(error, OperationType.CREATE, `users-pharmacies`);
+      toast.error("Erreur lors de la création.");
     } finally {
       setAddingUser(false);
     }
@@ -698,15 +760,23 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   };
 
   const handleSaveRotation = async () => {
-    if (!editRotation.baseMondayDate || !editRotation.baseGroup) {
-      toast.error("Veuillez remplir tous les champs.");
-      return;
+    if (!editRotation.startDate || !editRotation.endDate || !editRotation.currentGroup) {
+      // Fallback for previous fields if they try to save using previous flow
+      if (!editRotation.baseMondayDate || !editRotation.baseGroup) {
+        toast.error("Veuillez remplir tous les champs de la nouvelle rotation (Date début, Date fin, Groupe).");
+        return;
+      }
     }
+    
     try {
       await setDoc(doc(db, 'on_call_rotation', 'global'), {
         id: 'global',
-        baseMondayDate: editRotation.baseMondayDate,
-        baseGroup: Number(editRotation.baseGroup)
+        startDate: editRotation.startDate || '',
+        endDate: editRotation.endDate || '',
+        currentGroup: Number(editRotation.currentGroup || 1),
+        // Keep old ones around for legacy compatibility if needed
+        baseMondayDate: editRotation.baseMondayDate || '',
+        baseGroup: Number(editRotation.baseGroup || 1)
       });
       await addSystemLog('UPDATE_ROTATION', `Rotation de garde mise à jour : Groupe ${editRotation.baseGroup} le ${editRotation.baseMondayDate}`);
       toast.success("Rotation mise à jour !");
@@ -747,12 +817,23 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       toast.error("Vous ne pouvez pas supprimer votre propre compte.");
       return;
     }
+
+    const userToDelete = users.find(u => u.uid === uid);
+    if (userToDelete && isPrimaryAdminEmail(userToDelete.email)) {
+      toast.error("Le compte Super Admin principal ne peut pas être supprimé.");
+      return;
+    }
+
+    if (!isPrimaryAdminEmail(profile.email) && userToDelete?.role === 'super-admin') {
+      toast.error("Seul l'administrateur principal peut supprimer un Super Admin.");
+      return;
+    }
     
-    // Using a simple state-based confirmation would be better, but for now let's use a toast with action if possible or just proceed if admin is sure.
-    // Since I can't use window.confirm, I'll just proceed but maybe add a "double click" or something later.
-    // For now, let's just implement the deletion logic.
+    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet utilisateur ? Cette action est irréversible.")) return;
+
     try {
       await deleteDoc(doc(db, 'users', uid));
+      await addSystemLog('DELETE_USER', `Utilisateur ${uid} supprimé`);
       toast.success("Utilisateur supprimé.");
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${uid}`);
@@ -1225,7 +1306,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       <select 
                         value={user.role}
                         onChange={(e) => handleUpdateRole(user.uid, e.target.value)}
-                        disabled={isSuperAdminEmail(user.email)}
+                        disabled={isPrimaryAdminEmail(user.email) || (!isPrimaryAdminEmail(profile.email) && user.role === 'super-admin')}
                         className="bg-slate-100 border-none rounded-xl px-4 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
                       >
                         <option value="patient">Patient</option>
@@ -1255,7 +1336,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       <select 
                         value={user.status || 'active'}
                         onChange={(e) => handleUpdateUserStatus(user.uid, e.target.value)}
-                        disabled={isSuperAdminEmail(user.email)}
+                        disabled={isPrimaryAdminEmail(user.email)}
                         className={`border-none rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 ${
                           user.status === 'suspended' ? 'bg-amber-100 text-amber-700' :
                           user.status === 'blocked' ? 'bg-red-100 text-red-700' :
@@ -1274,7 +1355,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     <td className="p-6 text-right">
                       <button 
                         onClick={() => handleDeleteUser(user.uid)}
-                        disabled={isSuperAdminEmail(user.email)}
+                        disabled={isPrimaryAdminEmail(user.email) || (!isPrimaryAdminEmail(profile.email) && user.role === 'super-admin')}
                         className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-30"
                         title="Supprimer l'utilisateur"
                       >
@@ -1345,7 +1426,12 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             </div>
 
             {newUser.role === 'pharmacist' && (
-              <>
+              <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100 space-y-6">
+                <div className="flex items-center gap-3 mb-2">
+                  <Package className="text-blue-600" size={18} />
+                  <h4 className="text-sm font-bold text-slate-900">Détails de la Pharmacie</h4>
+                </div>
+                
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de la Pharmacie</label>
                   <input 
@@ -1353,10 +1439,23 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     required
                     value={newUser.pharmacyName}
                     onChange={e => setNewUser({...newUser, pharmacyName: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                     placeholder="Ex: Pharmacie de la Paix"
                   />
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse complète / Quartier</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newUser.address}
+                    onChange={e => setNewUser({...newUser, address: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                    placeholder="Ex: Avenue de la Liberté, Secteur 15"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville</label>
@@ -1364,7 +1463,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       required
                       value={newUser.cityId || ''}
                       onChange={(e) => setNewUser({...newUser, cityId: e.target.value})}
-                      className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                     >
                       <option value="">Sélectionner une ville</option>
                       {cities.map(city => (
@@ -1378,7 +1477,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       required
                       value={newUser.groupId || ''}
                       onChange={(e) => setNewUser({...newUser, groupId: e.target.value})}
-                      className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                     >
                       <option value="">Sélectionner un groupe</option>
                       <option value="1">Groupe 1</option>
@@ -1388,41 +1487,68 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     </select>
                   </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Latitude (GPS)</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Numéro de Licence (Pharmacie)</label>
+                    <input 
+                      type="text" 
+                      value={newUser.licenseNumber}
+                      onChange={e => setNewUser({...newUser, licenseNumber: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                      placeholder="Ex: LIC-12345"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">N° d'Autorisation (Pharmacien)</label>
+                    <input 
+                      type="text" 
+                      value={newUser.authorizationNumber}
+                      onChange={e => setNewUser({...newUser, authorizationNumber: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                      placeholder="Ex: AUTH-6789"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Latitude (Optionnel)</label>
                     <input 
                       type="text" 
                       value={newUser.lat}
                       onChange={e => setNewUser({...newUser, lat: e.target.value})}
-                      className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                      placeholder="Ex: 12.3714"
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                      placeholder="12.3714"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Longitude (GPS)</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Longitude (Optionnel)</label>
                     <input 
                       type="text" 
                       value={newUser.lng}
                       onChange={e => setNewUser({...newUser, lng: e.target.value})}
-                      className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                      placeholder="Ex: -1.5197"
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                      placeholder="-1.5197"
                     />
                   </div>
                 </div>
-              </>
+              </div>
             )}
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse / Localisation</label>
-              <input 
-                type="text" 
-                value={newUser.address}
-                onChange={e => setNewUser({...newUser, address: e.target.value})}
-                className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                placeholder="Ex: Ouagadougou, Secteur 1"
-              />
-            </div>
+            {newUser.role !== 'pharmacist' && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse / Zone d'activité</label>
+                <input 
+                  type="text" 
+                  required
+                  value={newUser.address}
+                  onChange={e => setNewUser({...newUser, address: e.target.value})}
+                  className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  placeholder="Ex: Ouagadougou, Secteur 1"
+                />
+              </div>
+            )}
 
             <button 
               type="submit"
@@ -1540,81 +1666,117 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               <h3 className="text-xl font-bold">Ajouter une Pharmacie</h3>
             </div>
             <form onSubmit={handleAddPharmacy} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de la pharmacie</label>
-                <input 
-                  type="text" 
-                  required
-                  value={newPharmacy.name}
-                  onChange={(e) => setNewPharmacy({...newPharmacy, name: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  placeholder="Ex: Pharmacie du Progrès"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse / Quartier</label>
-                <input 
-                  type="text" 
-                  required
-                  value={newPharmacy.address}
-                  onChange={(e) => setNewPharmacy({...newPharmacy, address: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  placeholder="Ex: Ouagadougou, Zogona"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Téléphone (Optionnel)</label>
-                <input 
-                  type="tel" 
-                  value={newPharmacy.phone}
-                  onChange={(e) => setNewPharmacy({...newPharmacy, phone: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  placeholder="Ex: +226 25 30 00 00"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100 space-y-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville</label>
-                  <select 
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de la pharmacie</label>
+                  <input 
+                    type="text" 
                     required
-                    value={newPharmacy.cityId || ''}
-                    onChange={(e) => setNewPharmacy({...newPharmacy, cityId: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  >
-                    <option value="">Sélectionner une ville</option>
-                    {cities.map(city => (
-                      <option key={city.id} value={city.id}>{city.name}</option>
-                    ))}
-                  </select>
+                    value={newPharmacy.name}
+                    onChange={(e) => setNewPharmacy({...newPharmacy, name: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                    placeholder="Ex: Pharmacie du Progrès"
+                  />
                 </div>
+
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe de garde</label>
-                  <select 
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse / Quartier</label>
+                  <input 
+                    type="text" 
                     required
-                    value={newPharmacy.groupId || ''}
-                    onChange={(e) => setNewPharmacy({...newPharmacy, groupId: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  >
-                    <option value="">Sélectionner un groupe</option>
-                    <option value="1">Groupe 1</option>
-                    <option value="2">Groupe 2</option>
-                    <option value="3">Groupe 3</option>
-                    <option value="4">Groupe 4</option>
-                  </select>
+                    value={newPharmacy.address}
+                    onChange={(e) => setNewPharmacy({...newPharmacy, address: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                    placeholder="Ex: Secteur 15, Ouagadougou"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Téléphone</label>
+                    <input 
+                      type="tel" 
+                      value={newPharmacy.phone}
+                      onChange={(e) => setNewPharmacy({...newPharmacy, phone: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                      placeholder="Ex: +226 25 30 00 00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Numéro de Licence</label>
+                    <input 
+                      type="text" 
+                      value={newPharmacy.licenseNumber}
+                      onChange={(e) => setNewPharmacy({...newPharmacy, licenseNumber: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                      placeholder="Ex: LIC-789"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville</label>
+                    <select 
+                      required
+                      value={newPharmacy.cityId || ''}
+                      onChange={(e) => setNewPharmacy({...newPharmacy, cityId: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                    >
+                      <option value="">Sélectionner</option>
+                      {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe</label>
+                    <select 
+                      required
+                      value={newPharmacy.groupId || ''}
+                      onChange={(e) => setNewPharmacy({...newPharmacy, groupId: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                    >
+                      <option value="">Sélectionner</option>
+                      {[1, 2, 3, 4].map(g => <option key={g} value={g.toString()}>Groupe {g}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Latitude</label>
+                    <input 
+                      type="text" 
+                      value={newPharmacy.lat}
+                      onChange={(e) => setNewPharmacy({...newPharmacy, lat: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                      placeholder="12.37"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Longitude</label>
+                    <input 
+                      type="text" 
+                      value={newPharmacy.lng}
+                      onChange={(e) => setNewPharmacy({...newPharmacy, lng: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                      placeholder="-1.51"
+                    />
+                  </div>
                 </div>
               </div>
+
               <button 
                 type="submit"
                 disabled={addingPharmacy}
                 className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
               >
-                {addingPharmacy ? "Ajout en cours..." : "Ajouter la pharmacie"}
+                {addingPharmacy ? "Ajout en cours..." : "Ajouter la Pharmacie"}
               </button>
             </form>
           </div>
-            </div>
-          </motion.div>
-        )}
+        </div>
+      </motion.div>
+    )}
 
         {activeTab === 'oncall' && (
           <motion.div
@@ -1652,9 +1814,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     <Activity size={32} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-indigo-900">Rotation Actuelle</h3>
+                    <h3 className="text-lg font-bold text-indigo-900">Garde Actuelle</h3>
                     <p className="text-indigo-700">
-                      Semaine de référence : <strong>{rotation.baseMondayDate}</strong> (Groupe {rotation.baseGroup})
+                      {rotation.startDate && rotation.endDate ? (
+                        <>Du <strong>{rotation.startDate}</strong> au <strong>{rotation.endDate}</strong> (Groupe {rotation.currentGroup})</>
+                      ) : (
+                        <>Semaine de référence : <strong>{rotation.baseMondayDate}</strong> (Groupe {rotation.baseGroup})</>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -2182,6 +2348,22 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           </div>
 
           <div className="space-y-6">
+            <div className="flex items-center justify-between p-4 bg-violet-50 rounded-2xl border border-violet-100">
+              <div>
+                <p className="font-bold text-sm text-violet-900">Connexion Google (OAuth)</p>
+                <p className="text-xs text-violet-700">Autoriser les utilisateurs à utiliser Google</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer"
+                  checked={editSettings.googleAuthEnabled !== false}
+                  onChange={(e) => setEditSettings({...editSettings, googleAuthEnabled: e.target.checked})}
+                />
+                <div className="w-11 h-6 bg-violet-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-violet-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+              </label>
+            </div>
+
             <div className="space-y-4">
               <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-2">Configuration OTP & SMS</h4>
               
@@ -3807,25 +3989,37 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         <div className="space-y-6">
           <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 mb-6">
             <p className="text-sm text-indigo-800">
-              Définissez une semaine de référence (un lundi) et le groupe qui était de garde cette semaine-là. Le système calculera automatiquement les rotations suivantes.
+              Définissez la plage de date de début et de fin pour le groupe de garde actuel.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Lundi de référence</label>
-            <input 
-              type="date" 
-              value={editRotation.baseMondayDate}
-              onChange={(e) => setEditRotation({...editRotation, baseMondayDate: e.target.value})}
-              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Date de début</label>
+              <input 
+                type="date" 
+                value={editRotation.startDate || editRotation.baseMondayDate || ''}
+                onChange={(e) => setEditRotation({...editRotation, startDate: e.target.value})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Date de fin</label>
+              <input 
+                type="date" 
+                value={editRotation.endDate || ''}
+                onChange={(e) => setEditRotation({...editRotation, endDate: e.target.value})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
           </div>
           
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe de garde (1 à 4)</label>
             <select
-              value={editRotation.baseGroup}
-              onChange={(e) => setEditRotation({...editRotation, baseGroup: Number(e.target.value)})}
+              value={editRotation.currentGroup || editRotation.baseGroup || 1}
+              onChange={(e) => setEditRotation({...editRotation, currentGroup: Number(e.target.value)})}
               className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
             >
               <option value={1}>Groupe 1</option>

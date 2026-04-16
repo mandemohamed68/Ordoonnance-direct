@@ -134,6 +134,7 @@ export interface Settings {
   serviceFee?: number;
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
+  googleAuthEnabled?: boolean;
   paymentConfig?: {
     mobileMoneyEnabled: boolean;
     cardEnabled: boolean;
@@ -229,8 +230,12 @@ export interface City {
 
 export interface OnCallRotation {
   id: string;
-  baseMondayDate: string; // YYYY-MM-DD
-  baseGroup: number;      // 1-4
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string;   // YYYY-MM-DD
+  currentGroup?: number; // 1-4
+  // Backward compatibility properties
+  baseMondayDate?: string; 
+  baseGroup?: number;      
 }
 
 export interface ChatMessage {
