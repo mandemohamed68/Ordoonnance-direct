@@ -64,6 +64,7 @@ export interface OrderItem {
   equivalent?: string;
   equivalentPrice?: number;
   equivalentQuantity?: number;
+  isUnavailable?: boolean;
 }
 
 export interface Order {
@@ -83,9 +84,12 @@ export interface Order {
   deliveryLocation?: { lat: number; lng: number };
   patientLocation?: { lat: number; lng: number };
   pharmacyLocationCoords?: { lat: number; lng: number };
+  driverLocation?: { lat: number; lng: number };
   pickupCode?: string;
   deliveryCode?: string;
   isHandedOver?: boolean;
+  deliveryPhoto?: string;
+  deliverySignature?: string;
   status: 'pending_quote' | 'pending_payment' | 'paid' | 'preparing' | 'ready' | 'delivering' | 'completed' | 'quote_rejected';
   deliveryMethod?: 'delivery' | 'pickup';
   items?: OrderItem[];
@@ -107,6 +111,12 @@ export interface Order {
     timestamp: string;
     label: string;
   }[];
+  unreadCounts?: {
+    patient: number;
+    pharmacist: number;
+    delivery: number;
+    admin: number;
+  };
 }
 
 export interface Settings {
@@ -221,4 +231,13 @@ export interface OnCallRotation {
   id: string;
   baseMondayDate: string; // YYYY-MM-DD
   baseGroup: number;      // 1-4
+}
+
+export interface ChatMessage {
+  id: string;
+  orderId: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  createdAt: any;
 }

@@ -16,6 +16,7 @@ import { sendSMS } from '../utils/sms';
 import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
 import { DataAnalyst } from './DataAnalyst';
+import { OrderChat } from './OrderChat';
 import { PHARMACIES_OUAGA } from '../data/pharmacies_ouaga';
 
 import { PullToRefresh } from './PullToRefresh';
@@ -226,7 +227,33 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   const [transactions, setTransactions] = useState<any[]>([]);
   const [supportChats, setSupportChats] = useState<any[]>([]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+  const [selectedChatMessages, setSelectedChatMessages] = useState<any[]>([]);
   const [adminReply, setAdminReply] = useState('');
+  const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedChat) {
+      setSelectedChatMessages([]);
+      return;
+    }
+
+    // Reset admin unread count
+    setDoc(doc(db, 'support_chats', selectedChat), {
+      unreadAdminCount: 0
+    }, { merge: true }).catch(console.error);
+
+    const q = query(
+      collection(db, 'support_messages'),
+      where('chatId', '==', selectedChat),
+      orderBy('createdAt', 'asc')
+    );
+    
+    const unsub = onSnapshot(q, (snapshot) => {
+      setSelectedChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => unsub();
+  }, [selectedChat]);
 
   const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '' });
   const [addingPharmacy, setAddingPharmacy] = useState(false);
@@ -406,23 +433,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
 
-    const qSupport = query(collection(db, 'support_messages'), orderBy('createdAt', 'desc'), limit(200));
+    const qSupport = query(collection(db, 'support_chats'), orderBy('lastTime', 'desc'));
     const unsubSupport = onSnapshot(qSupport, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const chatsMap = new Map();
-      msgs.forEach((m: any) => {
-        if (!chatsMap.has(m.chatId)) {
-          chatsMap.set(m.chatId, {
-            chatId: m.chatId,
-            senderName: m.senderName,
-            lastMessage: m.text,
-            lastTime: m.createdAt,
-            messages: []
-          });
-        }
-        chatsMap.get(m.chatId).messages.unshift(m);
-      });
-      setSupportChats(Array.from(chatsMap.values()));
+      setSupportChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (err) => console.error("Support chats error:", err));
 
     return () => {
@@ -716,6 +729,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         isAdmin: true,
         createdAt: serverTimestamp()
       });
+      
+      await setDoc(doc(db, 'support_chats', chatId), {
+        lastMessage: adminReply,
+        lastTime: serverTimestamp(),
+        unreadUserCount: increment(1)
+      }, { merge: true });
+
       setAdminReply('');
     } catch (err) {
       console.error("Failed to send admin reply:", err);
@@ -843,9 +863,10 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       <div className="space-y-12 pb-20">
       <div className="flex flex-col md:flex-row gap-8">
         <div className="w-full md:w-64 flex-shrink-0">
-          <div className="sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
             {[
               { id: 'overview', label: "Vue d'ensemble", icon: Activity, color: 'text-primary', bg: 'bg-primary/5' },
+              { id: 'support', label: 'Support Chat', icon: MessageSquare, color: 'text-primary', bg: 'bg-primary/5', badge: (supportChats || []).reduce((acc, chat) => acc + (chat.unreadAdminCount || 0), 0) },
               { id: 'approvals', label: 'Approbations', icon: ShieldCheck, color: 'text-amber-600', bg: 'bg-amber-50' },
               { id: 'users', label: 'Utilisateurs', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
               { id: 'pharmacies', label: 'Pharmacies', icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
@@ -861,7 +882,6 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               { id: 'roles', label: 'Rôles & Perms', icon: UserCog, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50' },
               { id: 'analytics', label: 'Analyste de Données', icon: BarChart3, color: 'text-rose-600', bg: 'bg-rose-50' },
               { id: 'reports', label: 'Rapports & Exports', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { id: 'support', label: 'Support Chat', icon: MessageSquare, color: 'text-primary', bg: 'bg-primary/5' },
               { id: 'scripts', label: 'Scripts & Terminal', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
               { id: 'database', label: 'Base de Données', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
               { id: 'logs', label: 'Logs Système', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
@@ -870,14 +890,21 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
+                className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
                   activeTab === tab.id 
                     ? `${tab.bg} ${tab.color} shadow-sm` 
                     : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <tab.icon size={20} />
-                {tab.label}
+                <div className="flex items-center gap-4">
+                  <tab.icon size={20} />
+                  {tab.label}
+                </div>
+                {tab.badge > 0 && (
+                  <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                    {tab.badge}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -1724,6 +1751,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   <th className="p-6 font-bold">Statut</th>
                   <th className="p-6 font-bold">Montant</th>
                   <th className="p-6 font-bold">Date</th>
+                  <th className="p-6 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1762,6 +1790,20 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       </td>
                       <td className="p-6 font-bold text-slate-900">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
                       <td className="p-6 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
+                      <td className="p-6 text-right">
+                        <button 
+                          onClick={() => setActiveChatOrderId(order.id)}
+                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all relative"
+                          title="Ouvrir le chat tripartite"
+                        >
+                          <MessageSquare size={18} />
+                          {order.unreadCounts?.admin > 0 && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white">
+                              {order.unreadCounts.admin}
+                            </span>
+                          )}
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -2653,13 +2695,21 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 <button 
                   key={chat.chatId}
                   onClick={() => setSelectedChat(chat.chatId)}
-                  className={`w-full p-6 text-left border-b border-slate-50 hover:bg-slate-50 transition-colors ${selectedChat === chat.chatId ? 'bg-slate-50' : ''}`}
+                  className={`w-full p-6 text-left border-b border-slate-50 hover:bg-slate-50 transition-colors relative ${selectedChat === chat.chatId ? 'bg-slate-50' : ''}`}
                 >
                   <div className="flex justify-between items-start mb-1">
-                    <p className="font-bold text-slate-900">{chat.senderName}</p>
+                    <p className="font-bold text-slate-900 flex items-center gap-2">
+                      {chat.participantName}
+                      {chat.status === 'suspended' && <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full">Suspendu</span>}
+                    </p>
                     <span className="text-[10px] text-slate-400">{formatDate(chat.lastTime)}</span>
                   </div>
-                  <p className="text-sm text-slate-500 truncate">{chat.lastMessage}</p>
+                  <p className="text-sm text-slate-500 truncate pr-6">{chat.lastMessage}</p>
+                  {chat.unreadAdminCount > 0 && (
+                    <span className="absolute right-6 top-1/2 -translate-y-1/2 bg-rose-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                      {chat.unreadAdminCount}
+                    </span>
+                  )}
                 </button>
               ))}
               {supportChats.length === 0 && (
@@ -2671,13 +2721,33 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           <div className="md:col-span-2 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden flex flex-col">
             {selectedChat ? (
               <>
-                <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-                  <h3 className="text-xl font-bold">
-                    {supportChats.find(c => c.chatId === selectedChat)?.senderName}
-                  </h3>
+                <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                  <div>
+                    <h3 className="text-xl font-bold">
+                      {supportChats.find(c => c.chatId === selectedChat)?.participantName}
+                    </h3>
+                    <p className="text-xs text-slate-500 capitalize">{supportChats.find(c => c.chatId === selectedChat)?.participantRole}</p>
+                  </div>
+                  <div>
+                    {supportChats.find(c => c.chatId === selectedChat)?.status === 'suspended' ? (
+                      <button 
+                        onClick={() => setDoc(doc(db, 'support_chats', selectedChat), { status: 'active' }, { merge: true })}
+                        className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-200 transition-colors"
+                      >
+                        Activer le chat
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => setDoc(doc(db, 'support_chats', selectedChat), { status: 'suspended' }, { merge: true })}
+                        className="bg-rose-100 text-rose-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-rose-200 transition-colors"
+                      >
+                        Suspendre le chat
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 bg-slate-50/30">
-                  {supportChats.find(c => c.chatId === selectedChat)?.messages.map((msg: any) => (
+                  {selectedChatMessages.map((msg: any) => (
                     <div 
                       key={msg.id}
                       className={`max-w-[80%] p-4 rounded-2xl text-sm shadow-sm border ${
@@ -2704,12 +2774,14 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       type="text" 
                       value={adminReply}
                       onChange={(e) => setAdminReply(e.target.value)}
-                      placeholder="Écrivez votre réponse..."
-                      className="flex-1 bg-slate-50 border-none rounded-2xl px-6 py-4 font-medium outline-none focus:ring-2 focus:ring-primary/20"
+                      placeholder={supportChats.find(c => c.chatId === selectedChat)?.status === 'suspended' ? "Chat suspendu" : "Écrivez votre réponse..."}
+                      disabled={supportChats.find(c => c.chatId === selectedChat)?.status === 'suspended'}
+                      className="flex-1 bg-slate-50 border-none rounded-2xl px-6 py-4 font-medium outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
                     />
                     <button 
                       type="submit"
-                      className="bg-primary text-white px-8 rounded-2xl font-bold hover:bg-primary-dark transition-all"
+                      disabled={supportChats.find(c => c.chatId === selectedChat)?.status === 'suspended'}
+                      className="bg-primary text-white px-8 rounded-2xl font-bold hover:bg-primary-dark transition-all disabled:opacity-50"
                     >
                       Répondre
                     </button>
@@ -2920,6 +2992,22 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             </div>
 
             <div className="space-y-6">
+              <div className="flex items-center justify-between p-6 bg-primary/5 rounded-[2rem] border border-primary/10">
+                <div>
+                  <h4 className="font-bold text-slate-900">Activer le Chat de Support</h4>
+                  <p className="text-xs text-slate-500">Permettre aux utilisateurs de contacter le support via le chat intégré.</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={editSettings.supportChatEnabled !== false}
+                    onChange={(e) => setEditSettings({...editSettings, supportChatEnabled: e.target.checked})}
+                  />
+                  <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de l'application</label>
                 <input 
@@ -2951,21 +3039,6 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                <div>
-                  <h4 className="font-bold text-slate-900">Activer le Chat de Support</h4>
-                  <p className="text-xs text-slate-500">Permettre aux utilisateurs de contacter le support via le chat intégré.</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer"
-                    checked={editSettings.supportChatEnabled !== false}
-                    onChange={(e) => setEditSettings({...editSettings, supportChatEnabled: e.target.checked})}
-                  />
-                  <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary"></div>
-                </label>
-              </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Devise</label>
                 <input 
@@ -2975,6 +3048,41 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   placeholder="FCFA"
                 />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+            <div className="flex items-center gap-4 mb-8">
+              <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-600">
+                <Lock size={24} />
+              </div>
+              <h3 className="text-xl font-bold">Configuration Serveur (Secrets)</h3>
+            </div>
+
+            <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Les identifiants sensibles pour les SMS et les Paiements Sappay doivent être configurés dans le menu <strong>Settings (Secrets)</strong> de AI Studio pour des raisons de sécurité.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-white rounded-xl border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">IA & SMS (Sappay)</p>
+                  <ul className="text-xs text-slate-500 space-y-1 font-mono">
+                    <li>GEMINI_API_KEY</li>
+                    <li>SMS_API_USER</li>
+                    <li>SMS_API_HASH</li>
+                    <li>SMS_SENDER_ID</li>
+                  </ul>
+                </div>
+                <div className="p-4 bg-white rounded-xl border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Paiements (Sappay)</p>
+                  <ul className="text-xs text-slate-500 space-y-1 font-mono">
+                    <li>SAPPAY_CLIENT_ID</li>
+                    <li>SAPPAY_CLIENT_SECRET</li>
+                    <li>SAPPAY_USERNAME</li>
+                    <li>SAPPAY_PASSWORD</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
@@ -3738,6 +3846,15 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     </motion.div>
   )}
 </AnimatePresence>
+      {activeChatOrderId && (
+        <OrderChat 
+          orderId={activeChatOrderId} 
+          userId={profile.uid} 
+          userName={profile.name} 
+          userRole="admin"
+          onClose={() => setActiveChatOrderId(null)} 
+        />
+      )}
   </PullToRefresh>
   );
 }

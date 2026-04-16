@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { getMessaging, isSupported } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -8,6 +9,19 @@ export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true
 }, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Initialize Firebase Cloud Messaging and get a reference to the service
+export const messaging = async () => {
+  try {
+    const supported = await isSupported();
+    if (supported) {
+      return getMessaging(app);
+    }
+  } catch (error) {
+    console.warn('FCM not supported in this environment:', error);
+  }
+  return null;
+};
 
 export enum OperationType {
   CREATE = 'create',

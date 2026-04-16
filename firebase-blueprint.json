@@ -76,7 +76,7 @@
         "rejectedBy": { "type": "array", "items": { "type": "string" } },
         "rejectionCount": { "type": "integer" }
       },
-      "required": ["id", "patientId", "imageUrl", "status"]
+      "required": ["id", "patientId", "status"]
     },
     "Order": {
       "title": "Order",
@@ -94,11 +94,23 @@
         "pickupCode": { "type": "string" },
         "deliveryCode": { "type": "string" },
         "isHandedOver": { "type": "boolean" },
+        "deliveryPhoto": { "type": "string", "description": "Base64 photo of delivery proof." },
+        "deliverySignature": { "type": "string", "description": "Base64 signature of patient." },
         "status": { "type": "string", "enum": ["pending_quote", "paid", "preparing", "ready", "delivering", "completed", "quote_rejected"] },
         "deliveryMethod": { "type": "string", "enum": ["delivery", "pickup"] },
         "items": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "price": { "type": "number" }, "quantity": { "type": "integer" } } } },
         "totalAmount": { "type": "number" },
         "deliveryFee": { "type": "number" },
+        "unreadCounts": { 
+          "type": "object", 
+          "properties": {
+            "patient": { "type": "integer" },
+            "pharmacist": { "type": "integer" },
+            "delivery": { "type": "integer" },
+            "admin": { "type": "integer" }
+          },
+          "description": "Unread message counts for each role in the order chat."
+        },
         "rejectedBy": { "type": "array", "items": { "type": "string" }, "description": "Delivery person UIDs who rejected this mission." },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -171,6 +183,19 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "title", "message", "read", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message between patient and pharmacist about an order.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "senderId", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -180,6 +205,7 @@
     "/orders/{orderId}": { "schema": "Order", "description": "Order tracking." },
     "/settings/{settingId}": { "schema": "Settings", "description": "Global settings." },
     "/support_messages/{messageId}": { "schema": "SupportMessage", "description": "Support chat messages." },
+    "/chat_messages/{messageId}": { "schema": "ChatMessage", "description": "Order-related chat messages." },
     "/withdrawals/{withdrawalId}": { "schema": "Withdrawal", "description": "Withdrawal requests." },
     "/transactions/{transactionId}": { "schema": "Transaction", "description": "Wallet transactions." },
     "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications." },

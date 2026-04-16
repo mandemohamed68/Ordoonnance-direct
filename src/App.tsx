@@ -36,7 +36,8 @@ import {
   increment,
   writeBatch
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, messaging } from './firebase';
+import { getToken, onMessage } from 'firebase/messaging';
 import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest, City, OnCallRotation } from './types';
 import { 
   Camera, 
@@ -63,13 +64,16 @@ import {
   Power,
   Smartphone,
   MessageCircle,
+  MessageSquare,
   X,
   TrendingUp,
   Save,
   Bell,
   BellOff,
   Building2,
-  Navigation
+  Navigation,
+  PenTool,
+  Mic
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -78,7 +82,11 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-
 import L from 'leaflet';
 import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance } from './utils/shared';
 import { Capacitor } from '@capacitor/core';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { PullToRefresh } from './components/PullToRefresh';
+import { OrderChat } from './components/OrderChat';
+import { getApiUrl } from './config';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Legal } from './components/Legal';
 import { ReportsView } from './components/ReportsView';
@@ -98,6 +106,7 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// @ts-ignore
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 // --- Super Admin Utilities moved to shared.ts ---
@@ -105,6 +114,174 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 // --- Utilities moved to shared.ts ---
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const generateInvoice = (order: Order, profile: UserProfile) => {
+  const doc = new jsPDF();
+  
+  // Header
+  doc.setFontSize(20);
+  doc.setTextColor(16, 185, 129); // emerald-600
+  doc.text("FACTURE", 14, 22);
+  
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(`Commande #${order.id.slice(-6).toUpperCase()}`, 14, 30);
+  doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString('fr-FR')}`, 14, 35);
+  
+  // Patient Info
+  doc.setFontSize(12);
+  doc.setTextColor(0);
+  doc.text("Facturé à:", 14, 50);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(profile.name, 14, 55);
+  if (profile.phone) doc.text(profile.phone, 14, 60);
+  
+  // Pharmacy Info
+  doc.setFontSize(12);
+  doc.setTextColor(0);
+  doc.text("Pharmacie:", 120, 50);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(order.pharmacyName || "Pharmacie Partenaire", 120, 55);
+  
+  // Items Table
+  const tableColumn = ["Désignation", "Prix Unitaire", "Quantité", "Total"];
+  const tableRows: any[] = [];
+  
+  if (order.items) {
+    order.items.forEach(item => {
+      const itemData = [
+        item.name,
+        `${item.price} FCFA`,
+        item.quantity,
+        `${item.price * item.quantity} FCFA`
+      ];
+      tableRows.push(itemData);
+    });
+  }
+  
+  // @ts-ignore
+  autoTable(doc, {
+    startY: 70,
+    head: [tableColumn],
+    body: tableRows,
+    theme: 'striped',
+    headStyles: { fillColor: [16, 185, 129] },
+  });
+  
+  // Totals
+  // @ts-ignore
+  const finalY = doc.lastAutoTable?.finalY || 70;
+  
+  doc.setFontSize(10);
+  doc.setTextColor(0);
+  doc.text("Sous-total Médicaments:", 120, finalY + 10);
+  doc.text(`${order.medicationTotal || 0} FCFA`, 170, finalY + 10, { align: 'right' });
+  
+  if (order.deliveryFee) {
+    doc.text("Frais de Livraison:", 120, finalY + 16);
+    doc.text(`${order.deliveryFee} FCFA`, 170, finalY + 16, { align: 'right' });
+  }
+  
+  if (order.serviceFee) {
+    doc.text("Frais de Service:", 120, finalY + 22);
+    doc.text(`${order.serviceFee} FCFA`, 170, finalY + 22, { align: 'right' });
+  }
+  
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("TOTAL PAYÉ:", 120, finalY + 32);
+  doc.setTextColor(16, 185, 129);
+  doc.text(`${order.totalAmount || 0} FCFA`, 170, finalY + 32, { align: 'right' });
+  
+  // Footer
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(150);
+  doc.text("Merci de votre confiance !", 105, 280, { align: 'center' });
+  
+  doc.save(`Facture_${order.id.slice(-6).toUpperCase()}.pdf`);
+};
+
+function SignaturePad({ onSave, onCancel }: { onSave: (signature: string) => void, onCancel: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+  }, []);
+
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    setIsDrawing(true);
+    draw(e);
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx?.beginPath();
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : (e as React.MouseEvent).clientX - rect.left;
+    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : (e as React.MouseEvent).clientY - rect.top;
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx?.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const save = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    onSave(canvas.toDataURL());
+  };
+
+  return (
+    <div className="space-y-4">
+      <canvas
+        ref={canvasRef}
+        width={400}
+        height={200}
+        className="bg-white border-2 border-slate-200 rounded-2xl w-full touch-none cursor-crosshair"
+        onMouseDown={startDrawing}
+        onMouseUp={stopDrawing}
+        onMouseMove={draw}
+        onTouchStart={startDrawing}
+        onTouchEnd={stopDrawing}
+        onTouchMove={draw}
+      />
+      <div className="flex gap-2">
+        <button onClick={clear} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold">Effacer</button>
+        <button onClick={save} className="flex-1 py-2 bg-emerald-600 text-white rounded-xl font-bold">Enregistrer</button>
+      </div>
+    </div>
+  );
+}
 
 function RecenterMap({ center }: { center: [number, number] }) {
   const map = useMap();
@@ -115,14 +292,58 @@ function RecenterMap({ center }: { center: [number, number] }) {
 }
 
 function MapComponent({ center, markers, zoom = 13 }: { center: [number, number], markers: { pos: [number, number], label: string, color?: string, type?: 'patient' | 'pharmacy' | 'delivery' | 'self' }[], zoom?: number }) {
+  const [route, setRoute] = useState<[number, number][]>([]);
+  const [eta, setEta] = useState<number | null>(null);
+
+  useEffect(() => {
+    // If we have exactly 2 markers (e.g., delivery and patient/pharmacy), calculate route
+    if (markers.length === 2 || markers.length === 3) {
+      // If 3 markers, usually it's delivery, pharmacy, patient. Let's route from delivery to the next destination.
+      // For simplicity, we'll route between the first two markers if there are 2, or delivery to patient if 3.
+      let start = markers[0].pos;
+      let end = markers[1].pos;
+      
+      if (markers.length === 3) {
+        const delivery = markers.find(m => m.type === 'delivery');
+        const pharmacy = markers.find(m => m.type === 'pharmacy');
+        const patient = markers.find(m => m.type === 'patient');
+        if (delivery && patient) {
+          start = delivery.pos;
+          end = patient.pos; // Route to patient
+        }
+      }
+
+      fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.routes && data.routes[0]) {
+            const coords = data.routes[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
+            setRoute(coords);
+            setEta(Math.round(data.routes[0].duration / 60));
+          }
+        })
+        .catch(console.error);
+    } else {
+      setRoute([]);
+      setEta(null);
+    }
+  }, [markers]);
+
   return (
     <div className="h-[300px] w-full rounded-2xl overflow-hidden border border-slate-100 shadow-inner relative z-0">
+      {eta !== null && (
+        <div className="absolute top-4 right-4 z-[400] bg-white px-4 py-2 rounded-xl shadow-lg font-bold text-sm flex items-center gap-2 text-slate-700">
+          <Clock size={16} className="text-primary" />
+          ETA: {eta} min
+        </div>
+      )}
       <MapContainer center={center} zoom={zoom} scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <RecenterMap center={center} />
+        {route.length > 0 && <Polyline positions={route} color="#10b981" weight={4} dashArray="10, 10" />}
         {markers.map((marker, idx) => (
           <Marker 
             key={idx} 
@@ -225,7 +446,22 @@ function NotificationBell({ userId }: { userId: string }) {
       limit(20)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const newNotifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Play sound if there's a new unread notification that wasn't there before
+      const hasNewUnread = snapshot.docChanges().some(change => 
+        change.type === 'added' && !change.doc.data().read
+      );
+      
+      // We only play sound if the component is already mounted and it's not the initial load
+      // (Actually onSnapshot fires immediately with current data, so we might need a ref to skip first)
+      if (hasNewUnread && snapshot.metadata.hasPendingWrites === false) {
+        // playNotificationSound is passed via props or defined globally
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+        audio.play().catch(e => console.log("Audio play blocked", e));
+      }
+      
+      setNotifications(newNotifs);
     }, (err) => console.error("Error fetching notifications:", err));
     return () => unsubscribe();
   }, [userId]);
@@ -332,6 +568,7 @@ export default function App() {
   const [showSupportChat, setShowSupportChat] = useState(false);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [newSupportMessage, setNewSupportMessage] = useState('');
+  const [supportChatMeta, setSupportChatMeta] = useState<any>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -343,11 +580,36 @@ export default function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setSupportMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'support_messages'));
-    return () => unsubscribe();
+
+    const unsubMeta = onSnapshot(doc(db, 'support_chats', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        setSupportChatMeta(docSnap.data());
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      unsubMeta();
+    };
   }, [user]);
+
+  // Reset unread count when opening chat
+  useEffect(() => {
+    if (showSupportChat && user && supportChatMeta?.unreadUserCount > 0) {
+      setDoc(doc(db, 'support_chats', user.uid), {
+        unreadUserCount: 0
+      }, { merge: true }).catch(console.error);
+    }
+  }, [showSupportChat, user, supportChatMeta?.unreadUserCount]);
 
   const sendSupportMessage = async () => {
     if (!newSupportMessage.trim() || !user) return;
+    
+    if (supportChatMeta?.status === 'suspended') {
+      toast.error("Ce chat a été suspendu par l'administrateur.");
+      return;
+    }
+
     try {
       await addDoc(collection(db, 'support_messages'), {
         chatId: user.uid,
@@ -357,15 +619,99 @@ export default function App() {
         isAdmin: false,
         createdAt: serverTimestamp()
       });
+      
+      await setDoc(doc(db, 'support_chats', user.uid), {
+        chatId: user.uid,
+        participantName: profile?.name || user.email,
+        participantRole: profile?.role || 'user',
+        lastMessage: newSupportMessage,
+        lastTime: serverTimestamp(),
+        unreadAdminCount: increment(1),
+        status: supportChatMeta?.status || 'active'
+      }, { merge: true });
+
       setNewSupportMessage('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'support_messages');
     }
   };
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+
+  const playNotificationSound = () => {
+    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    audio.play().catch(e => console.log("Audio play blocked by browser", e));
+  };
+
+  // Auto-logout logic (15 minutes of inactivity)
+  useEffect(() => {
+    if (!user) return;
+    const IDLE_TIMEOUT = 15 * 60 * 1000; // 15 minutes
+    const checkIdle = setInterval(() => {
+      if (Date.now() - lastActivity > IDLE_TIMEOUT) {
+        handleLogout();
+        toast.info("Session fermée pour inactivité.");
+      }
+    }, 60000); // Check every minute
+
+    const updateActivity = () => setLastActivity(Date.now());
+    window.addEventListener('mousemove', updateActivity);
+    window.addEventListener('keydown', updateActivity);
+    window.addEventListener('click', updateActivity);
+    window.addEventListener('touchstart', updateActivity);
+
+    return () => {
+      clearInterval(checkIdle);
+      window.removeEventListener('mousemove', updateActivity);
+      window.removeEventListener('keydown', updateActivity);
+      window.removeEventListener('click', updateActivity);
+      window.removeEventListener('touchstart', updateActivity);
+    };
+  }, [lastActivity, user]);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
   const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
+
+  // Request FCM Permission and Token
+  useEffect(() => {
+    if (!profile?.uid) return;
+
+    const setupFCM = async () => {
+      try {
+        const msg = await messaging();
+        if (!msg) return;
+
+        if (!('Notification' in window)) {
+          console.warn('This browser does not support desktop notification');
+          return;
+        }
+
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          // Note: In a real production app, you need to pass your VAPID key here
+          // const token = await getToken(msg, { vapidKey: 'YOUR_VAPID_KEY' });
+          const token = await getToken(msg);
+          if (token) {
+            await updateDoc(doc(db, 'users', profile.uid), {
+              fcmToken: token
+            });
+          }
+          
+          onMessage(msg, (payload) => {
+            toast.info(payload.notification?.title || 'Nouvelle notification', {
+              description: payload.notification?.body,
+              icon: <Bell className="text-primary" />
+            });
+            playNotificationSound();
+          });
+        }
+      } catch (error) {
+        console.error('FCM Setup Error:', error);
+      }
+    };
+
+    setupFCM();
+  }, [profile?.uid]);
 
   // Track location for delivery and patients
   useEffect(() => {
@@ -811,6 +1157,20 @@ export default function App() {
               </span>
             </div>
             <div className="flex items-center gap-2">
+              {settings?.supportChatEnabled !== false && (
+                <button 
+                  onClick={() => setShowSupportChat(true)}
+                  className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-primary hover:bg-primary/5 transition-all border border-slate-100 relative"
+                  title="Support Chat"
+                >
+                  <MessageSquare size={20} />
+                  {supportChatMeta?.unreadUserCount > 0 && (
+                    <span className="absolute top-2 right-2 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white">
+                      {supportChatMeta.unreadUserCount}
+                    </span>
+                  )}
+                </button>
+              )}
               <NotificationBell userId={profile.uid} />
               <button onClick={() => setShowLegal(true)} className="px-4 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all border border-slate-100 font-bold text-sm">
                 Mentions Légales
@@ -873,13 +1233,18 @@ export default function App() {
       </main>
 
       {/* Support Chat FAB */}
-      {profile.role !== 'admin' && profile.role !== 'super-admin' && settings?.supportChatEnabled !== false && (
+      {settings?.supportChatEnabled !== false && (
         <>
           <button 
             onClick={() => setShowSupportChat(true)}
             className="fixed bottom-6 right-6 w-16 h-16 bg-primary text-white rounded-full shadow-2xl shadow-primary/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-40"
           >
             <MessageCircle size={28} />
+            {supportChatMeta?.unreadUserCount > 0 && (
+              <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white animate-bounce">
+                {supportChatMeta.unreadUserCount}
+              </span>
+            )}
           </button>
           
           <AnimatePresence>
@@ -902,6 +1267,11 @@ export default function App() {
                   </div>
                   <h3 className="font-bold text-lg">Support Client</h3>
                   <p className="text-white/80 text-xs">Nous répondons généralement en quelques minutes.</p>
+                  {supportChatMeta?.status === 'suspended' && (
+                    <div className="mt-2 bg-rose-500/20 text-rose-100 text-xs px-2 py-1 rounded-lg inline-block">
+                      Chat suspendu
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1 bg-slate-50 p-6 flex flex-col gap-4 overflow-y-auto">
                   <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border border-slate-100 text-sm text-slate-600 max-w-[85%]">
@@ -932,12 +1302,14 @@ export default function App() {
                       type="text" 
                       value={newSupportMessage}
                       onChange={(e) => setNewSupportMessage(e.target.value)}
-                      placeholder="Écrivez votre message..." 
-                      className="w-full bg-slate-50 border-none rounded-2xl py-3 pl-4 pr-12 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      placeholder={supportChatMeta?.status === 'suspended' ? "Chat suspendu" : "Écrivez votre message..."}
+                      disabled={supportChatMeta?.status === 'suspended'}
+                      className="w-full bg-slate-50 border-none rounded-2xl py-3 pl-4 pr-12 text-sm focus:ring-2 focus:ring-primary/20 outline-none disabled:opacity-50"
                     />
                     <button 
                       type="submit"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-white rounded-xl flex items-center justify-center hover:bg-primary-dark transition-all"
+                      disabled={supportChatMeta?.status === 'suspended'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-white rounded-xl flex items-center justify-center hover:bg-primary-dark transition-all disabled:opacity-50"
                     >
                       <ChevronRight size={16} />
                     </button>
@@ -1447,7 +1819,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
   const [orders, setOrders] = useState<Order[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'prescriptions' | 'orders' | 'pharmacies'>('prescriptions');
+  const [activeTab, setActiveTab] = useState<'prescriptions' | 'orders' | 'pharmacies' | 'history'>('prescriptions');
   const [hospitalLocation, setHospitalLocation] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPartialSelect, setShowPartialSelect] = useState<Prescription | null>(null);
@@ -1463,8 +1835,12 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
   const [showMapForOrder, setShowMapForOrder] = useState<Order | null>(null);
   const [pharmacySearch, setPharmacySearch] = useState('');
   const [cities, setCities] = useState<City[]>([]);
+  const [showManualEntryModal, setShowManualEntryModal] = useState(false);
+  const [manualEntryText, setManualEntryText] = useState('');
+  const [isListening, setIsListening] = useState(false);
   const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   const [viewImage, setViewImage] = useState<string | null>(null);
+  const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
@@ -1571,6 +1947,110 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     return () => unsubscribe();
   }, []);
 
+  const handleManualEntrySubmit = async () => {
+    if (!manualEntryText.trim()) {
+      toast.error("Veuillez entrer les médicaments.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const docRef = await addDoc(collection(db, 'prescriptions'), {
+        patientId: profile.uid,
+        patientName: profile.name,
+        hospitalLocation: hospitalLocation || "Non spécifié",
+        patientLocation: location,
+        extractedData: "",
+        status: 'draft',
+        createdAt: serverTimestamp(),
+        distance: Math.floor(Math.random() * 5) + 1
+      });
+
+      setHospitalLocation('');
+      setShowManualEntryModal(false);
+      setManualEntryText('');
+      setUploading(false);
+      toast.success("Demande envoyée ! Analyse en cours...");
+
+      // Run parsing with Gemini in the background
+      (async () => {
+        try {
+          const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: {
+              parts: [
+                {
+                  text: `Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient : "${manualEntryText}". Extrait les noms des médicaments, les dosages et les posologies. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis.`
+                }
+              ]
+            },
+            config: {
+              responseMimeType: "application/json",
+            }
+          });
+
+          const jsonText = response.text;
+          await updateDoc(docRef, {
+            extractedData: jsonText,
+            status: 'submitted'
+          });
+          toast.success("Analyse terminée ! Les pharmacies peuvent maintenant vous envoyer des devis.");
+        } catch (error) {
+          console.error("Gemini Parsing Error:", error);
+          await updateDoc(docRef, {
+            extractedData: JSON.stringify([{ nom_article: "Erreur d'analyse", dosage: "", posologie: "Veuillez vérifier la saisie" }]),
+            status: 'submitted'
+          });
+          toast.error("L'analyse a échoué, mais la demande a été transmise.");
+        }
+      })();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'prescriptions');
+      setUploading(false);
+    }
+  };
+
+  const toggleVoiceInput = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast.error("La reconnaissance vocale n'est pas supportée par votre navigateur.");
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'fr-FR';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      toast.info("Écoute en cours... Parlez maintenant.");
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setManualEntryText(prev => prev ? prev + ' ' + transcript : transcript);
+      setIsListening(false);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error", event.error);
+      setIsListening(false);
+      toast.error("Erreur de reconnaissance vocale.");
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1601,7 +2081,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       (async () => {
         try {
           const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3-flash-preview",
             contents: {
               parts: [
                 {
@@ -1678,10 +2158,14 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       const finalDeliveryAmount = isNaN(deliveryAmount) ? 0 : deliveryAmount;
       const finalPlatformFee = isNaN(totalPlatformFee) ? 0 : totalPlatformFee;
 
+      // Generate a 6-digit PIN for delivery verification
+      const deliveryPin = generateCode();
+
       await updateDoc(doc(db, 'orders', order.id), {
         status: 'paid',
         paymentMethod: method,
         paymentStatus: 'completed',
+        deliveryCode: deliveryPin,
         medicationTotal,
         deliveryFee,
         serviceFee,
@@ -1736,7 +2220,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     setPaymentStep('processing');
     
     try {
-      const response = await fetch('/api/payment/init', {
+      const response = await fetch(getApiUrl('/api/payment/init'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1767,7 +2251,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     setPaymentStep('processing');
     
     try {
-      const response = await fetch('/api/payment/perform', {
+      const response = await fetch(getApiUrl('/api/payment/perform'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1803,12 +2287,15 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       const finalDeliveryAmount = isNaN(deliveryAmount) ? 0 : deliveryAmount;
       const finalPlatformFee = isNaN(totalPlatformFee) ? 0 : totalPlatformFee;
 
+      const deliveryPin = generateCode();
+
       await updateDoc(doc(db, 'orders', order.id), {
         status: 'paid',
         paymentMethod: method,
         paymentPhone: paymentPhone,
         paymentStatus: 'completed',
         sappayInvoiceId: paymentInvoiceId,
+        deliveryCode: deliveryPin,
         medicationTotal,
         deliveryFee,
         serviceFee,
@@ -2006,6 +2493,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
             {[
               { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
               { id: 'orders', label: 'Commandes', icon: Package, color: 'text-sky-600', bg: 'bg-sky-50' },
+              { id: 'history', label: 'Historique', icon: Clock, color: 'text-indigo-600', bg: 'bg-indigo-50' },
               { id: 'pharmacies', label: 'Pharmacies', icon: MapPin, color: 'text-amber-600', bg: 'bg-amber-50' },
             ].map(tab => (
               <button
@@ -2052,26 +2540,91 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     className="bg-transparent outline-none text-sm w-full sm:w-48 font-medium"
                   />
                 </div>
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="btn-primary flex items-center gap-3 px-8"
-                >
-                  {uploading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Camera size={20} />}
-                  Scanner une ordonnance
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="btn-primary flex items-center justify-center gap-3 px-6"
+                  >
+                    {uploading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Camera size={20} />}
+                    Scanner
+                  </button>
+                  <button 
+                    onClick={() => setShowManualEntryModal(true)}
+                    disabled={uploading}
+                    className="bg-white border-2 border-primary text-primary hover:bg-primary/5 font-bold rounded-2xl flex items-center justify-center gap-3 px-6 py-4 transition-all"
+                  >
+                    <PenTool size={20} />
+                    Saisie Manuelle / Vocale
+                  </button>
+                </div>
               </div>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" capture="environment" className="hidden" />
             </div>
 
+            {showManualEntryModal && (
+              <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative">
+                  <button onClick={() => setShowManualEntryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-2">
+                    <X size={20} />
+                  </button>
+                  <h3 className="text-xl font-bold mb-4 text-slate-800">Saisie des médicaments</h3>
+                  <p className="text-sm text-slate-500 mb-6">Tapez le nom de vos médicaments ou utilisez le micro pour les dicter.</p>
+                  
+                  <div className="relative mb-6">
+                    <textarea 
+                      value={manualEntryText}
+                      onChange={(e) => setManualEntryText(e.target.value)}
+                      placeholder="Ex: Paracétamol 500mg, 1 boite..."
+                      className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 min-h-[120px] text-slate-700 focus:border-primary outline-none transition-all resize-none"
+                    />
+                    <button 
+                      onClick={toggleVoiceInput}
+                      className={`absolute bottom-4 right-4 p-3 rounded-full text-white shadow-lg transition-all ${isListening ? 'bg-rose-500 animate-pulse' : 'bg-primary hover:bg-primary/90'}`}
+                      title="Dicter"
+                    >
+                      <Mic size={20} />
+                    </button>
+                  </div>
+
+                  <button 
+                    onClick={handleManualEntrySubmit}
+                    disabled={uploading || !manualEntryText.trim()}
+                    className="w-full btn-primary py-4 disabled:opacity-50"
+                  >
+                    {uploading ? "Envoi en cours..." : "Demander des devis"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {prescriptions.length === 0 ? (
-              <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
+              <div className="bg-white p-12 sm:p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center text-primary mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
                   <FileText size={48} strokeWidth={1.5} />
                 </div>
                 <p className="text-slate-900 font-black text-2xl mb-2">Aucune ordonnance</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">Prenez en photo votre ordonnance pour recevoir des devis de nos pharmacies partenaires.</p>
+                <p className="text-slate-500 text-sm max-w-xs mx-auto mb-8">Prenez en photo votre ordonnance ou saisissez vos médicaments pour recevoir des devis de nos pharmacies partenaires.</p>
+                
+                <div className="flex flex-col sm:flex-row justify-center gap-4 relative z-10">
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="btn-primary flex items-center justify-center gap-3 px-8"
+                  >
+                    {uploading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Camera size={20} />}
+                    Scanner une ordonnance
+                  </button>
+                  <button 
+                    onClick={() => setShowManualEntryModal(true)}
+                    disabled={uploading}
+                    className="bg-white border-2 border-primary text-primary hover:bg-primary/5 font-bold rounded-2xl flex items-center justify-center gap-3 px-8 py-4 transition-all"
+                  >
+                    <PenTool size={20} />
+                    Saisie Manuelle / Vocale
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -2084,13 +2637,24 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     className="medical-card p-8 group"
                   >
                     <div 
-                      className="relative aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 bg-slate-50 shadow-inner cursor-pointer"
+                      className="relative aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 bg-slate-50 shadow-inner cursor-pointer group/img"
                       onClick={() => setViewImage(p.imageUrl)}
                     >
-                      <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
-                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={32} />
-                      </div>
+                      {p.imageUrl ? (
+                        <>
+                          <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-contain group-hover/img:scale-105 transition-transform duration-700 ease-out" />
+                          <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
+                            <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                              <Search className="text-white" size={24} />
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100/50 text-slate-400">
+                          <FileText size={48} strokeWidth={1} className="mb-2 opacity-20" />
+                          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Saisie Manuelle</p>
+                        </div>
+                      )}
                       <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
                         {(() => {
                           const associatedOrder = orders.find(o => o.prescriptionId === p.id);
@@ -2182,12 +2746,26 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                                     })
                                   : meds;
 
-                                return displayMeds.slice(0, 3).map((m: any, i: number) => {
+                                return displayMeds.map((m: any, i: number) => {
                                   const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Médicament inconnu');
+                                  const dosage = typeof m === 'object' ? m.dosage : '';
+                                  const posology = typeof m === 'object' ? m.posologie : '';
+                                  
                                   return (
-                                    <div key={`${name}-${i}`} className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
-                                      <p className="text-xs text-slate-700 font-bold truncate">{name}</p>
+                                    <div key={`${name}-${i}`} className="p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:border-primary/20 transition-colors group/med">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center text-primary group-hover/med:bg-primary group-hover/med:text-white transition-colors">
+                                          <Package size={14} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-xs text-slate-900 font-black truncate">{name}</p>
+                                          {(dosage || posology) && (
+                                            <p className="text-[10px] text-slate-500 font-medium truncate">
+                                              {dosage}{dosage && posology ? ' • ' : ''}{posology}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
                                   );
                                 });
@@ -2252,7 +2830,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               {activeTab === 'orders' && (
                 <>
                   <h3 className="text-xl font-bold">Suivi de Commandes</h3>
-                  {orders.length === 0 ? (
+                  {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').length === 0 ? (
               <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
@@ -2263,7 +2841,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               </div>
             ) : (
               <div className="space-y-4">
-                {orders.map(o => (
+                {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').map(o => (
                   <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-6">
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-4">
@@ -2272,7 +2850,21 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                             <Package size={20} />
                           </div>
                           <div>
-                            <h4 className="font-bold">Commande #{o.id.slice(-6).toUpperCase()}</h4>
+                            <h4 className="font-bold flex items-center gap-2">
+                              Commande #{o.id.slice(-6).toUpperCase()}
+                              <button 
+                                onClick={() => setActiveChatOrderId(o.id)}
+                                className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-all relative"
+                                title="Discuter avec le pharmacien"
+                              >
+                                <MessageCircle size={12} />
+                                {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
+                                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white text-[8px] flex items-center justify-center rounded-full border border-white">
+                                    {o.unreadCounts[profile?.role || 'patient']}
+                                  </span>
+                                )}
+                              </button>
+                            </h4>
                             <p className="text-xs text-slate-400">{formatDate(o.createdAt)}</p>
                           </div>
                         </div>
@@ -2310,12 +2902,29 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                       )}
 
                       <div className="space-y-2 mb-4">
+                        {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
+                          <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl mb-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-amber-900">
+                              <ShieldCheck size={20} />
+                              <div>
+                                <p className="text-[10px] font-black uppercase tracking-widest">Code de Livraison</p>
+                                <p className="text-xl font-black">{o.deliveryCode}</p>
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-amber-700 font-medium max-w-[120px] text-right">À donner au livreur pour confirmer la réception</p>
+                          </div>
+                        )}
                         {o.items?.map((item, i) => (
                           <div key={`${item.name}-${i}`} className="flex flex-col text-sm bg-slate-50/50 p-3 rounded-2xl border border-slate-100/50">
                             <div className="flex justify-between items-start">
                               <div className="flex flex-col">
                                 <span className="font-bold text-slate-800">
-                                  {item.equivalent ? (
+                                  {item.isUnavailable ? (
+                                    <span className="text-rose-600 font-bold flex items-center gap-1">
+                                      <BellOff size={12} />
+                                      {item.name} (INDISPONIBLE)
+                                    </span>
+                                  ) : item.equivalent ? (
                                     <span className="flex flex-col">
                                       <span className="line-through text-slate-400 text-[10px]">{item.name}</span>
                                       <span className="text-amber-700">{item.equivalent}</span>
@@ -2325,7 +2934,9 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                                   )}
                                 </span>
                                 <span className="text-[10px] text-slate-500 mt-1">
-                                  {item.equivalent ? (
+                                  {item.isUnavailable ? (
+                                    "Non facturé"
+                                  ) : item.equivalent ? (
                                     `${(item.equivalentPrice || item.price).toLocaleString()} FCFA x ${item.equivalentQuantity || item.quantity}`
                                   ) : (
                                     `${item.price.toLocaleString()} FCFA x ${item.quantity}`
@@ -2333,7 +2944,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                                 </span>
                               </div>
                               <span className="font-black text-primary">
-                                {(item.equivalent ? ((item.equivalentPrice || item.price) * (item.equivalentQuantity || item.quantity)) : (item.price * item.quantity)).toLocaleString()} FCFA
+                                {item.isUnavailable ? "0 FCFA" : (item.equivalent ? ((item.equivalentPrice || item.price) * (item.equivalentQuantity || item.quantity)) : (item.price * item.quantity)).toLocaleString() + " FCFA"}
                               </span>
                             </div>
                             {item.equivalent && (
@@ -2355,6 +2966,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                           )}
                         </div>
                         <div className="flex items-center gap-4">
+                          <button 
+                            onClick={() => setActiveChatOrderId(o.id)}
+                            className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all relative"
+                            title="Discuter avec le pharmacien"
+                          >
+                            <MessageCircle size={20} />
+                            {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
+                              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white">
+                                {o.unreadCounts[profile?.role || 'patient']}
+                              </span>
+                            )}
+                          </button>
                           {['paid', 'preparing', 'ready', 'delivering'].includes(o.status) && (
                             <button 
                               onClick={() => setShowMapForOrder(o)}
@@ -2367,6 +2990,46 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                           <span className="text-xl font-bold text-primary">{(o.totalAmount || 0).toLocaleString()} FCFA</span>
                         </div>
                       </div>
+                      {o.status === 'completed' && (
+                        <div className="mt-4 pt-4 border-t border-slate-50 flex flex-col gap-4">
+                          <button
+                            onClick={() => generateInvoice(o, profile)}
+                            className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                          >
+                            <FileText size={18} />
+                            Télécharger la facture PDF
+                          </button>
+                          {(o.deliveryPhoto || o.deliverySignature) && (
+                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
+                              <div className="flex gap-4">
+                                {o.deliveryPhoto && (
+                                  <button 
+                                    onClick={() => setViewImage(o.deliveryPhoto!)}
+                                    className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group"
+                                  >
+                                    <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                      <Search className="text-white" size={20} />
+                                    </div>
+                                  </button>
+                                )}
+                                {o.deliverySignature && (
+                                  <button 
+                                    onClick={() => setViewImage(o.deliverySignature!)}
+                                    className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative"
+                                  >
+                                    <img src={o.deliverySignature} className="max-h-full object-contain" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                      <Search className="text-white" size={20} />
+                                    </div>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       <StatusTrace history={o.history} />
 
@@ -2484,6 +3147,115 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                 ))}
               </div>
             )}
+                </>
+              )}
+
+              {activeTab === 'history' && (
+                <>
+                  <h3 className="text-xl font-bold">Historique de Santé</h3>
+                  {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').length === 0 ? (
+                    <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
+                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                      <div className="w-24 h-24 bg-indigo-500/10 rounded-full flex items-center justify-center text-indigo-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
+                        <Clock size={48} strokeWidth={1.5} />
+                      </div>
+                      <p className="text-slate-900 font-black text-2xl mb-2">Historique vide</p>
+                      <p className="text-slate-500 text-sm max-w-xs mx-auto">Vos commandes terminées ou annulées apparaîtront ici.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').map(o => (
+                        <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-6 opacity-75 hover:opacity-100 transition-opacity">
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${o.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                  {o.status === 'completed' ? <CheckCircle size={20} /> : <X size={20} />}
+                                </div>
+                                <div>
+                                  <h4 className="font-bold">Commande #{o.id.slice(-6).toUpperCase()}</h4>
+                                  <p className="text-xs text-slate-400">{formatDate(o.createdAt)}</p>
+                                </div>
+                              </div>
+                              <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                                o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                              }`}>
+                                {o.status === 'completed' ? 'Terminée' : 'Annulée'}
+                              </span>
+                            </div>
+
+                            <div className="bg-slate-50 p-4 rounded-2xl mb-4">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Building2 size={16} className="text-slate-400" />
+                                <span className="font-bold text-slate-700">{o.pharmacyName || "Pharmacie"}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <MapPin size={16} className="text-slate-400" />
+                                <span className="text-sm text-slate-500">{o.hospitalLocation}</span>
+                              </div>
+                            </div>
+
+                            {o.items && o.items.length > 0 && (
+                              <div className="space-y-3 mb-4">
+                                {o.items.map((item, idx) => (
+                                  <div key={idx} className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-600">{item.name} x{item.quantity}</span>
+                                    <span className="font-bold">{item.price * item.quantity} FCFA</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                              <span className="text-slate-400 text-sm">Total payé</span>
+                              <span className="text-xl font-bold text-primary">{(o.totalAmount || 0).toLocaleString()} FCFA</span>
+                            </div>
+
+                            {o.status === 'completed' && (
+                              <div className="mt-4 pt-4 border-t border-slate-50 flex flex-col gap-4">
+                                <button
+                                  onClick={() => generateInvoice(o, profile)}
+                                  className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                                >
+                                  <FileText size={18} />
+                                  Télécharger la facture PDF
+                                </button>
+                                {(o.deliveryPhoto || o.deliverySignature) && (
+                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
+                                    <div className="flex gap-4">
+                                      {o.deliveryPhoto && (
+                                        <button 
+                                          onClick={() => setViewImage(o.deliveryPhoto!)}
+                                          className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group"
+                                        >
+                                          <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
+                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                            <Search className="text-white" size={20} />
+                                          </div>
+                                        </button>
+                                      )}
+                                      {o.deliverySignature && (
+                                        <button 
+                                          onClick={() => setViewImage(o.deliverySignature!)}
+                                          className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative"
+                                        >
+                                          <img src={o.deliverySignature} className="max-h-full object-contain" />
+                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                            <Search className="text-white" size={20} />
+                                          </div>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
 
@@ -3055,8 +3827,8 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                     color: "green", 
                     type: 'pharmacy' 
                   },
-                  ...(showMapForOrder.deliveryLocation ? [{
-                    pos: [showMapForOrder.deliveryLocation.lat, showMapForOrder.deliveryLocation.lng] as [number, number],
+                  ...(showMapForOrder.driverLocation ? [{
+                    pos: [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] as [number, number],
                     label: "Livreur",
                     color: "blue",
                     type: 'delivery' as const
@@ -3078,6 +3850,15 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
         )}
       </AnimatePresence>
     </div>
+    {activeChatOrderId && (
+      <OrderChat 
+        orderId={activeChatOrderId} 
+        userId={profile.uid} 
+        userName={profile.name} 
+        userRole={profile.role}
+        onClose={() => setActiveChatOrderId(null)} 
+      />
+    )}
   </PullToRefresh>
   );
 }
@@ -3237,6 +4018,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   const [phoneInput, setPhoneInput] = useState(profile.phone || '');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [viewImage, setViewImage] = useState<string | null>(null);
+  const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -3278,6 +4060,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     equivalent?: string;
     equivalentPrice?: number;
     equivalentQuantity?: number;
+    isUnavailable?: boolean;
   }[]>([]);
   const [completedCount, setCompletedCount] = useState(0);
   const [showHandoverVerify, setShowHandoverVerify] = useState<Order | null>(null);
@@ -3789,11 +4572,25 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
               orders.map(o => (
                 <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
                   <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary">
-                        <Package size={16} />
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary">
+                          <Package size={16} />
+                        </div>
+                        <span className="font-bold text-sm">#{o.id.slice(-6).toUpperCase()}</span>
                       </div>
-                      <span className="font-bold text-sm">#{o.id.slice(-6).toUpperCase()}</span>
+                      <button 
+                        onClick={() => setActiveChatOrderId(o.id)}
+                        className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all relative"
+                        title="Discuter avec le patient"
+                      >
+                        <MessageCircle size={16} />
+                        {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
+                          <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white text-[8px] flex items-center justify-center rounded-full border border-white">
+                            {o.unreadCounts[profile?.role || 'pharmacist']}
+                          </span>
+                        )}
+                      </button>
                     </div>
                     <span className={`text-[10px] font-bold px-3 py-1 rounded-full ${
                       o.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 
@@ -4011,6 +4808,36 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                         <ChevronRight size={18} />
                       </button>
                     ) : null}
+
+                    {o.status === 'completed' && (o.deliveryPhoto || o.deliverySignature) && (
+                      <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
+                        <div className="flex gap-4">
+                          {o.deliveryPhoto && (
+                            <button 
+                              onClick={() => setViewImage(o.deliveryPhoto!)}
+                              className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group"
+                            >
+                              <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                <Search className="text-white" size={20} />
+                              </div>
+                            </button>
+                          )}
+                          {o.deliverySignature && (
+                            <button 
+                              onClick={() => setViewImage(o.deliverySignature!)}
+                              className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative"
+                            >
+                              <img src={o.deliverySignature} className="max-h-full object-contain" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                <Search className="text-white" size={20} />
+                              </div>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -4058,11 +4885,12 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                         <input 
                           type="number" 
                           value={item.price}
+                          disabled={item.isUnavailable}
                           onChange={(e) => {
                             const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, price: Number(e.target.value) } : qi);
                             setQuoteItems(newItems);
                           }}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
                         />
                       </div>
                       <div className="col-span-2 space-y-1">
@@ -4070,65 +4898,84 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                         <input 
                           type="number" 
                           value={item.quantity}
+                          disabled={item.isUnavailable}
                           onChange={(e) => {
                             const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, quantity: Number(e.target.value) } : qi);
                             setQuoteItems(newItems);
                           }}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
                         />
                       </div>
-                      <div className="col-span-1">
+                      <div className="col-span-1 flex gap-1">
+                        <button 
+                          onClick={() => {
+                            const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, isUnavailable: !qi.isUnavailable, price: 0, equivalent: '' } : qi);
+                            setQuoteItems(newItems);
+                          }}
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${item.isUnavailable ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500'}`}
+                          title={item.isUnavailable ? "Remettre en stock" : "Marquer comme indisponible"}
+                        >
+                          <BellOff size={18} />
+                        </button>
                         <button 
                           onClick={() => setQuoteItems(quoteItems.filter(qi => qi.id !== item.id))}
-                          className="w-10 h-10 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-100"
+                          className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500"
                         >
                           <Plus size={18} className="rotate-45" />
                         </button>
                       </div>
                     </div>
                     
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Équivalent (si produit initial non disponible)</label>
-                        <input 
-                          type="text" 
-                          value={item.equivalent || ''}
-                          onChange={(e) => {
-                            const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalent: e.target.value } : qi);
-                            setQuoteItems(newItems);
-                          }}
-                          placeholder="Ex: Paracétamol 500mg au lieu de Doliprane"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary italic"
-                        />
-                      </div>
+                    {!item.isUnavailable && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Équivalent (si produit initial non disponible)</label>
+                          <input 
+                            type="text" 
+                            value={item.equivalent || ''}
+                            onChange={(e) => {
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalent: e.target.value } : qi);
+                              setQuoteItems(newItems);
+                            }}
+                            placeholder="Ex: Paracétamol 500mg au lieu de Doliprane"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary italic"
+                          />
+                        </div>
 
-                      <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Prix Équivalent (FCFA)</label>
-                          <input 
-                            type="number" 
-                            value={item.equivalentPrice || 0}
-                            onChange={(e) => {
-                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentPrice: Number(e.target.value) } : qi);
-                              setQuoteItems(newItems);
-                            }}
-                            className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary font-bold"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Qté Équivalent</label>
-                          <input 
-                            type="number" 
-                            value={item.equivalentQuantity || 1}
-                            onChange={(e) => {
-                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentQuantity: Number(e.target.value) } : qi);
-                              setQuoteItems(newItems);
-                            }}
-                            className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary font-bold"
-                          />
+                        <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Prix Équivalent (FCFA)</label>
+                            <input 
+                              type="number" 
+                              value={item.equivalentPrice || 0}
+                              onChange={(e) => {
+                                const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentPrice: Number(e.target.value) } : qi);
+                                setQuoteItems(newItems);
+                              }}
+                              className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary font-bold"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Qté Équivalent</label>
+                            <input 
+                              type="number" 
+                              value={item.equivalentQuantity || 1}
+                              onChange={(e) => {
+                                const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentQuantity: Number(e.target.value) } : qi);
+                                setQuoteItems(newItems);
+                              }}
+                              className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary font-bold"
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
+                    {item.isUnavailable && (
+                      <div className="bg-rose-50 text-rose-600 p-3 rounded-xl text-xs font-bold flex items-center gap-2">
+                        <AlertCircle size={14} />
+                        Ce produit sera marqué comme indisponible dans le devis.
+                      </div>
+                    )}
                   </div>
                 ))}
                 
@@ -4616,6 +5463,15 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
         )}
       </AnimatePresence>
     </div>
+    {activeChatOrderId && (
+      <OrderChat 
+        orderId={activeChatOrderId} 
+        userId={profile.uid} 
+        userName={profile.name} 
+        userRole={profile.role}
+        onClose={() => setActiveChatOrderId(null)} 
+      />
+    )}
   </PullToRefresh>
 );
 }
@@ -4633,6 +5489,10 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [historyMissions, setHistoryMissions] = useState<Order[]>([]);
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
+  const [deliveryPhoto, setDeliveryPhoto] = useState<string | null>(null);
+  const [deliverySignature, setDeliverySignature] = useState<string | null>(null);
+  const [showSignaturePad, setShowSignaturePad] = useState(false);
+  const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -4696,6 +5556,38 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
 
   const [completedMissionsCount, setCompletedMissionsCount] = useState(0);
   const [showMapForOrder, setShowMapForOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    let watchId: number;
+    const deliveringMissions = activeMissions.filter(m => m.status === 'delivering');
+    
+    if (deliveringMissions.length > 0 && navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          deliveringMissions.forEach(async (mission) => {
+            try {
+              await updateDoc(doc(db, 'orders', mission.id), {
+                driverLocation: { lat: latitude, lng: longitude }
+              });
+            } catch (error) {
+              console.error("Error updating driver location:", error);
+            }
+          });
+        },
+        (error) => {
+          console.error("Error watching position:", error);
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+      );
+    }
+
+    return () => {
+      if (watchId !== undefined && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [activeMissions]);
 
   const handleRejectMission = async (orderId: string) => {
     try {
@@ -4911,7 +5803,6 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                             deliveryPersonPhone: profile.phone || "Non spécifié",
                             deliveryPersonPhoto: profile.photoUrl || null,
                             pickupCode: generateCode(),
-                            deliveryCode: generateCode(),
                             isHandedOver: false,
                             updatedAt: serverTimestamp(),
                             history: arrayUnion({
@@ -4959,7 +5850,21 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                 <div key={m.id} className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row gap-8">
                   <div className="flex-1 space-y-6">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-xl font-bold">Livraison #{m.id.slice(-6).toUpperCase()}</h4>
+                      <div className="flex items-center gap-3">
+                        <h4 className="text-xl font-bold">Livraison #{m.id.slice(-6).toUpperCase()}</h4>
+                        <button 
+                          onClick={() => setActiveChatOrderId(m.id)}
+                          className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-all relative"
+                          title="Chatter avec le client/pharmacien"
+                        >
+                          <MessageCircle size={16} />
+                          {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
+                            <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white text-[8px] flex items-center justify-center rounded-full border border-white">
+                              {m.unreadCounts[profile?.role || 'delivery']}
+                            </span>
+                          )}
+                        </button>
+                      </div>
                       <span className={`px-4 py-1 rounded-full text-xs font-bold uppercase ${
                         m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                       }`}>
@@ -5300,15 +6205,66 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
           <h3 className="text-2xl font-bold mb-2">Vérification Patient</h3>
           <p className="text-slate-500 mb-8 text-sm">Demandez le code de livraison au patient pour finaliser.</p>
           
-          <div className="space-y-4 mb-8">
-            <input 
-              type="text" 
-              maxLength={6}
-              placeholder="Entrez le code à 6 chiffres"
-              value={deliveryCodeInput}
-              onChange={(e) => setDeliveryCodeInput(e.target.value)}
-              className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 text-center text-3xl font-bold tracking-[0.2em] outline-none focus:border-primary transition-all"
-            />
+          <div className="space-y-6 mb-8 text-left">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Preuve Photo (Optionnel)</label>
+              <div className="flex flex-col items-center gap-4">
+                {deliveryPhoto ? (
+                  <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-emerald-500">
+                    <img src={deliveryPhoto} className="w-full h-full object-cover" />
+                    <button onClick={() => setDeliveryPhoto(null)} className="absolute top-2 right-2 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg"><X size={16} /></button>
+                  </div>
+                ) : (
+                  <label className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all">
+                    <Camera size={32} />
+                    <span className="text-xs font-bold mt-2">Prendre une photo</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      capture="environment" 
+                      className="hidden" 
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const base64 = await compressImage(file, 800, 600, 0.7);
+                          setDeliveryPhoto(base64);
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Signature du Patient (Optionnel)</label>
+              {deliverySignature ? (
+                <div className="relative w-full h-32 bg-white border-2 border-emerald-500 rounded-2xl overflow-hidden">
+                  <img src={deliverySignature} className="w-full h-full object-contain" />
+                  <button onClick={() => setDeliverySignature(null)} className="absolute top-2 right-2 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg"><X size={16} /></button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setShowSignaturePad(true)}
+                  className="w-full h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary hover:text-primary transition-all"
+                >
+                  <PenTool size={32} />
+                  <span className="text-xs font-bold mt-2">Signer ici</span>
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Code de Livraison (6 chiffres)</label>
+              <input 
+                type="text" 
+                maxLength={6}
+                placeholder="000000"
+                value={deliveryCodeInput}
+                onChange={(e) => setDeliveryCodeInput(e.target.value)}
+                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 text-center text-3xl font-bold tracking-[0.2em] outline-none focus:border-primary transition-all"
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-3">
@@ -5364,6 +6320,8 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                     batch.update(orderRef, { 
                       status: 'completed', 
                       updatedAt: serverTimestamp(),
+                      deliveryPhoto: deliveryPhoto || null,
+                      deliverySignature: deliverySignature || null,
                       history: arrayUnion({
                         status: 'completed',
                         timestamp: new Date().toISOString(),
@@ -5428,10 +6386,10 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
           </div>
           
           <MapComponent 
-            center={showMapForOrder.deliveryLocation ? [showMapForOrder.deliveryLocation.lat, showMapForOrder.deliveryLocation.lng] : [12.3714, -1.5197]}
+            center={showMapForOrder.driverLocation ? [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] : [12.3714, -1.5197]}
             markers={[
               { 
-                pos: showMapForOrder.deliveryLocation ? [showMapForOrder.deliveryLocation.lat, showMapForOrder.deliveryLocation.lng] : [12.3714, -1.5197], 
+                pos: showMapForOrder.driverLocation ? [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] : [12.3714, -1.5197], 
                 label: "Livreur (Moi)", 
                 color: "blue", 
                 type: 'delivery' 
@@ -5479,6 +6437,39 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
         )}
       </AnimatePresence>
     </div>
+    {showSignaturePad && (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[210] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-white rounded-[2.5rem] shadow-2xl max-w-md w-full p-8"
+        >
+          <h3 className="text-xl font-bold mb-6">Signature du Patient</h3>
+          <SignaturePad 
+            onSave={(sig) => {
+              setDeliverySignature(sig);
+              setShowSignaturePad(false);
+            }}
+            onCancel={() => setShowSignaturePad(false)}
+          />
+          <button 
+            onClick={() => setShowSignaturePad(false)}
+            className="w-full mt-4 py-3 text-slate-400 font-bold"
+          >
+            Annuler
+          </button>
+        </motion.div>
+      </div>
+    )}
+      {activeChatOrderId && (
+        <OrderChat 
+          orderId={activeChatOrderId} 
+          userId={profile.uid} 
+          userName={profile.name} 
+          userRole={profile.role}
+          onClose={() => setActiveChatOrderId(null)} 
+        />
+      )}
   </PullToRefresh>
 );
 };

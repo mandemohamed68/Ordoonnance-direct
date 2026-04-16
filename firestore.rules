@@ -177,9 +177,9 @@ service cloud.firestore {
     }
 
     function isValidPrescription(data) {
-      return data.keys().hasAll(['patientId', 'imageUrl', 'status', 'createdAt']) &&
+      return data.keys().hasAll(['patientId', 'status', 'createdAt']) &&
              data.patientId is string &&
-             isValidUrl(data.imageUrl) &&
+             (!('imageUrl' in data) || isValidUrl(data.imageUrl)) &&
              data.status in ['draft', 'submitted', 'validated', 'rejected', 'rejected_by_limit'] &&
              data.createdAt is timestamp &&
              (!('requestType' in data) || data.requestType in ['all', 'partial']) &&
@@ -199,6 +199,14 @@ service cloud.firestore {
              data.senderId is string &&
              data.text is string && data.text.size() < 2000 &&
              data.isAdmin is bool &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['orderId', 'senderId', 'text', 'createdAt']) &&
+             data.orderId is string &&
+             data.senderId is string &&
+             data.text is string && data.text.size() < 2000 &&
              data.createdAt is timestamp;
     }
 
@@ -273,13 +281,13 @@ service cloud.firestore {
       );
       allow update: if isAuthenticated() && (
         isAdmin() ||
-        (resource.data.patientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryMethod', 'deliveryFee', 'serviceFee', 'totalAmount', 'updatedAt', 'history', 'paymentMethod', 'paymentPhone', 'paymentStatus', 'medicationTotal', 'pharmacyAmount', 'deliveryAmount', 'platformFee'])) ||
+        (resource.data.patientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryMethod', 'deliveryFee', 'serviceFee', 'totalAmount', 'updatedAt', 'history', 'paymentMethod', 'paymentPhone', 'paymentStatus', 'medicationTotal', 'pharmacyAmount', 'deliveryAmount', 'platformFee', 'unreadCounts'])) ||
         (hasRole('pharmacist') && (
           resource.data.pharmacistId == request.auth.uid || !('pharmacistId' in resource.data)
-        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'items', 'totalAmount', 'updatedAt', 'pharmacistId', 'pharmacistName', 'pharmacyName', 'pharmacyLocation', 'isHandedOver', 'history'])) ||
+        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'items', 'totalAmount', 'updatedAt', 'pharmacistId', 'pharmacistName', 'pharmacyName', 'pharmacyLocation', 'isHandedOver', 'history', 'unreadCounts'])) ||
         (hasRole('delivery') && (
           resource.data.deliveryId == request.auth.uid || !('deliveryId' in resource.data)
-        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'deliveryId', 'deliveryPersonName', 'deliveryPersonPhone', 'deliveryPersonPhoto', 'pickupCode', 'deliveryCode', 'isHandedOver', 'history', 'rejectedBy', 'deliveryLocation']))
+        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'deliveryId', 'deliveryPersonName', 'deliveryPersonPhone', 'deliveryPersonPhoto', 'pickupCode', 'deliveryCode', 'isHandedOver', 'history', 'rejectedBy', 'deliveryLocation', 'unreadCounts']))
       );
       allow delete: if isAdmin();
     }
@@ -336,6 +344,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /support_chats/{chatId} {
+      allow read: if isAuthenticated() && (chatId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && (chatId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (chatId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
     match /support_messages/{messageId} {
       allow read: if isAuthenticated() && (
         resource.data.chatId == request.auth.uid || isAdmin()
@@ -345,6 +360,24 @@ service cloud.firestore {
                       request.resource.data.chatId == request.auth.uid || isAdmin()
                     );
       allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /chat_messages/{messageId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.patientId == request.auth.uid ||
+        get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.pharmacistId == request.auth.uid ||
+        get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data.deliveryId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && 
+                    isValidChatMessage(request.resource.data) && (
+                      isAdmin() ||
+                      get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.patientId == request.auth.uid ||
+                      get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.pharmacistId == request.auth.uid ||
+                      get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.deliveryId == request.auth.uid
+                    );
+      allow update: if false;
       allow delete: if isAdmin();
     }
   }

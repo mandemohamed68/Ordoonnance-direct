@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
@@ -10,6 +11,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Enable CORS for local development and mobile app access
+app.use(cors());
 
 // Cloud Run provides the PORT environment variable.
 const PORT = parseInt(process.env.PORT || process.env.DEFAULT_APP_PORT || "3000", 10);
@@ -40,7 +44,7 @@ app.post("/api/send-sms", async (req, res) => {
   const { to, message } = req.body;
   try {
     if (!process.env.SMS_API_USER || !process.env.SMS_API_HASH) {
-      throw new Error("Missing SMS API credentials. Please configure SMS_API_USER and SMS_API_HASH in the Settings menu.");
+      throw new Error("Identifiants SMS manquants. Veuillez configurer SMS_API_USER et SMS_API_HASH dans les paramètres (Secrets) de AI Studio.");
     }
 
     const apiUrl = "https://tfso.sappay.net/index.php";
@@ -90,7 +94,7 @@ const SAPPAY_PROCESSORS = {
 
 async function getSappayToken() {
   if (!process.env.SAPPAY_CLIENT_ID || !process.env.SAPPAY_CLIENT_SECRET || !process.env.SAPPAY_USERNAME || !process.env.SAPPAY_PASSWORD) {
-    throw new Error("Missing Sappay API credentials. Please configure SAPPAY_CLIENT_ID, SAPPAY_CLIENT_SECRET, SAPPAY_USERNAME, and SAPPAY_PASSWORD in the Settings menu.");
+    throw new Error("Identifiants Sappay manquants. Veuillez configurer SAPPAY_CLIENT_ID, SAPPAY_CLIENT_SECRET, SAPPAY_USERNAME, et SAPPAY_PASSWORD dans les paramètres (Secrets) de AI Studio.");
   }
 
   const response = await fetch("https://api.prod.sappay.net/api/public/authentication/", {
