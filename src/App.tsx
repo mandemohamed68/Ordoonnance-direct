@@ -16,7 +16,6 @@ import {
   sendPasswordResetEmail,
   updateProfile
 } from 'firebase/auth';
-import { GoogleGenAI } from "@google/genai";
 import { 
   doc, 
   getDoc, 
@@ -105,9 +104,6 @@ let DefaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
-
-// @ts-ignore
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 // --- Super Admin Utilities moved to shared.ts ---
 
@@ -456,9 +452,18 @@ function NotificationBell({ userId }: { userId: string }) {
       // We only play sound if the component is already mounted and it's not the initial load
       // (Actually onSnapshot fires immediately with current data, so we might need a ref to skip first)
       if (hasNewUnread && snapshot.metadata.hasPendingWrites === false) {
-        // playNotificationSound is passed via props or defined globally
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-        audio.play().catch(e => console.log("Audio play blocked", e));
+        // playNotificationSound function
+        const playSnd = () => {
+          try {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+            audio.volume = 0.8;
+            const promise = audio.play();
+            if (promise !== undefined) {
+              promise.catch(e => console.warn("[DEBUG] Notification sound blocked:", e));
+            }
+          } catch(e) { console.error("[DEBUG] Sound error:", e); }
+        };
+        playSnd();
       }
       
       setNotifications(newNotifs);
@@ -1972,26 +1977,23 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       setUploading(false);
       toast.success("Demande envoyée ! Analyse en cours...");
 
-      // Run parsing with Gemini in the background
+      // Run parsing with Gemini in the background via server API
       (async () => {
         try {
-          const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: {
-              parts: [
-                {
-                  text: `Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient : "${manualEntryText}". Extrait les noms des médicaments, les dosages et les posologies. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis.`
-                }
-              ]
-            },
-            config: {
-              responseMimeType: "application/json",
-            }
+          const response = await fetch(getApiUrl('/api/ai/analyze'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: manualEntryText,
+              prompt: "Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient. Extrait les noms des médicaments, les dosages et les posologies. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
+            })
           });
 
-          const jsonText = response.text;
+          const data = await response.json();
+          if (!data.success) throw new Error(data.error);
+
           await updateDoc(docRef, {
-            extractedData: jsonText,
+            extractedData: data.text,
             status: 'submitted'
           });
           toast.success("Analyse terminée ! Les pharmacies peuvent maintenant vous envoyer des devis.");
@@ -2012,13 +2014,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
 
   const toggleVoiceInput = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      toast.error("La reconnaissance vocale n'est pas supportée par votre navigateur.");
+      toast.error("La reconnaissance vocale n'est pas supportée par votre navigateur (ou WebView Android).");
       return;
     }
 
     if (isListening) {
       setIsListening(false);
       return;
+    }
+
+    // On Android APK, we need to remind the user about RECORD_AUDIO permission
+    if (Capacitor.isNativePlatform()) {
+      toast.info("Assurez-vous d'avoir autorisé le MICROPHONE dans les paramètres de l'application Android.");
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -2036,12 +2043,19 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       const transcript = event.results[0][0].transcript;
       setManualEntryText(prev => prev ? prev + ' ' + transcript : transcript);
       setIsListening(false);
+      toast.success("Message capturé !");
     };
 
     recognition.onerror = (event: any) => {
       console.error("Speech recognition error", event.error);
       setIsListening(false);
-      toast.error("Erreur de reconnaissance vocale.");
+      if (event.error === 'not-allowed') {
+        toast.error("Permission MICROPHONE refusée. Activez-la dans les réglages Android.");
+      } else if (event.error === 'no-speech') {
+        toast.error("Aucune voix détectée. Parlez plus fort !");
+      } else {
+        toast.error("Erreur vocale: " + event.error);
+      }
     };
 
     recognition.onend = () => {
@@ -2077,29 +2091,24 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       setUploading(false);
       toast.success("Ordonnance ajoutée ! Analyse des médicaments en cours...");
 
-      // Run OCR with Gemini in the background
+      // Run OCR with Gemini in the background via server API
       (async () => {
         try {
-          const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: "image/jpeg",
-                    data: base64.split(',')[1]
-                  }
-                },
-                {
-                  text: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
-                }
-              ]
-            }
+          const response = await fetch(getApiUrl('/api/ai/analyze'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: base64.split(',')[1],
+              prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
+            })
           });
+
+          const data = await response.json();
+          if (!data.success) throw new Error(data.error);
           
-          if (response.text) {
+          if (data.text) {
             await updateDoc(doc(db, 'prescriptions', docRef.id), {
-              extractedData: response.text
+              extractedData: data.text
             });
             toast.success("Analyse de l'ordonnance terminée !");
           } else {
@@ -2433,7 +2442,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="space-y-12 pb-20 relative">
+      <div className="space-y-12 pb-32 pt-2 px-4 sm:px-0 safe-area-pt transition-all relative">
       {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
       {/* Background Decorative Element */}
       <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
@@ -4093,6 +4102,23 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     });
   }, []);
 
+  const playNotificationSound = () => {
+    try {
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.volume = 0.5;
+      const playPromise = audio.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.log("[DEBUG] Audio autoplay blocked or failed:", error);
+          // Suggest user interaction if blocked
+        });
+      }
+    } catch (err) {
+      console.error("[DEBUG] Sound execution error:", err);
+    }
+  };
+
   useEffect(() => {
     if (!profile.uid) return;
     if (profile.pharmacyId) {
@@ -4333,7 +4359,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="space-y-12 pb-20">
+      <div className="space-y-12 pb-32 pt-2 px-4 sm:px-0 safe-area-pt transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
       {/* On-Call Status Banner */}
       {currentCity && isMyGroupOnCall && isOnCallNow && (

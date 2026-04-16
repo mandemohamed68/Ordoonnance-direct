@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import dotenv from "dotenv";
 import cors from "cors";
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
 
@@ -79,6 +80,58 @@ app.post("/api/send-sms", async (req, res) => {
     }
   } catch (error) {
     console.error("Failed to send SMS:", error);
+    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// --- AI Analysis API ---
+app.post("/api/ai/analyze", async (req, res) => {
+  const { image, text, prompt } = req.body;
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY manquante dans les variables d'environnement.");
+    }
+
+    const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    let response;
+    if (image) {
+      response = await genAI.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: image
+              }
+            },
+            {
+              text: prompt || "Extrait les médicaments de cette ordonnance au format JSON."
+            }
+          ]
+        }
+      });
+    } else {
+      response = await genAI.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: {
+          parts: [
+            {
+              text: `${prompt || "Analyse ces médicaments."} : "${text}"`
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+    }
+
+    const resultText = response.text;
+    res.json({ success: true, text: resultText });
+  } catch (error) {
+    console.error("AI Analysis Error:", error);
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
   }
 });

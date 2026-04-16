@@ -19,6 +19,17 @@
 @layer base {
   body {
     @apply bg-[#F8FAFC] text-slate-900 antialiased selection:bg-primary/20 selection:text-primary;
+    /* Respect Safe Areas (Notches) */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+  }
+  
+  html {
+    height: -webkit-fill-available;
   }
   
   h1, h2, h3, h4 {
