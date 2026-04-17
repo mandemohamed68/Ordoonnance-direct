@@ -1828,29 +1828,33 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
             {isSignup ? "Déjà un compte ? Se connecter" : "Pas encore de compte ? S'inscrire"}
           </button>
         </form>
-
-        <div className="relative mb-8">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-white/10"></div>
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-emerald-950 px-2 text-slate-500 font-bold">Ou continuer avec</span>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <button 
-            onClick={onLogin}
-            disabled={isLoggingIn || loading}
-            className="w-full py-4 bg-white text-emerald-950 rounded-2xl font-black text-sm hover:bg-emerald-50 transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-95 disabled:opacity-50 group"
-          >
-            <div className="bg-white p-1 rounded-lg shadow-sm group-hover:rotate-12 transition-transform">
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+        
+        {!Capacitor.isNativePlatform() && (
+          <>
+            <div className="relative my-8">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10"></div>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-emerald-950 px-2 text-slate-500 font-bold">Ou continuer avec</span>
+              </div>
             </div>
-            {isLoggingIn ? "Connexion..." : "Continuer avec Google"}
-          </button>
-        </div>
 
+            <div className="space-y-6">
+              <button 
+                onClick={onLogin}
+                disabled={isLoggingIn || loading}
+                className="w-full py-4 bg-white text-emerald-950 rounded-2xl font-black text-sm hover:bg-emerald-50 transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-95 disabled:opacity-50 group"
+              >
+                <div className="bg-white p-1 rounded-lg shadow-sm group-hover:rotate-12 transition-transform">
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                </div>
+                {isLoggingIn ? "Connexion..." : "Continuer avec Google"}
+              </button>
+            </div>
+          </>
+        )}
+        
         <div className="mt-12 pt-8 border-t border-white/5 grid grid-cols-3 gap-4">
           {[
             { icon: Truck, label: 'Livraison', color: 'text-emerald-400' },
@@ -5285,27 +5289,28 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 
         {/* Quote Modal */}
         {selectedPrescription && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] flex items-center justify-center p-2 md:p-4">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-[2.5rem] shadow-2xl max-w-2xl w-full overflow-hidden"
+              className="bg-white rounded-[2rem] md:rounded-[2.5rem] shadow-2xl max-w-2xl w-full max-h-[95vh] flex flex-col overflow-hidden"
             >
-              <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-4 md:p-8 border-b border-slate-100 flex items-center justify-between shrink-0">
                 <div>
-                  <h3 className="text-2xl font-bold">Établir un Devis</h3>
+                  <h3 className="text-xl md:text-2xl font-bold">Établir un Devis</h3>
                   <p className="text-slate-500 text-sm">Patient: {selectedPrescription.patientName || "Anonyme"}</p>
                 </div>
-                <button onClick={() => setSelectedPrescription(null)} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-100">
+                <button onClick={() => setSelectedPrescription(null)} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-100 shrink-0">
                   <Plus size={24} className="rotate-45" />
                 </button>
               </div>
               
-              <div className="p-8 space-y-6 max-h-[60vh] overflow-auto">
+              <div className="p-4 md:p-8 space-y-6 overflow-y-auto grow">
                 {quoteItems.map((item, index) => (
-                  <div key={item.id} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 space-y-4">
-                    <div className="grid grid-cols-12 gap-4 items-end">
-                      <div className="col-span-6 space-y-1">
+                  <div key={item.id} className="bg-slate-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 space-y-4">
+                    <div className="flex flex-col md:flex-row gap-4 md:items-end">
+                      {/* Name input - full width on mobile, partial on desktop */}
+                      <div className="w-full md:flex-1 space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Désignation</label>
                         <input 
                           type="text" 
@@ -5317,49 +5322,53 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                           className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary"
                         />
                       </div>
-                      <div className="col-span-3 space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Prix (FCFA)</label>
-                        <input 
-                          type="number" 
-                          value={item.price}
-                          disabled={item.isUnavailable}
-                          onChange={(e) => {
-                            const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, price: Number(e.target.value) } : qi);
-                            setQuoteItems(newItems);
-                          }}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
-                        />
-                      </div>
-                      <div className="col-span-2 space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Qté</label>
-                        <input 
-                          type="number" 
-                          value={item.quantity}
-                          disabled={item.isUnavailable}
-                          onChange={(e) => {
-                            const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, quantity: Number(e.target.value) } : qi);
-                            setQuoteItems(newItems);
-                          }}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
-                        />
-                      </div>
-                      <div className="col-span-1 flex gap-1">
-                        <button 
-                          onClick={() => {
-                            const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, isUnavailable: !qi.isUnavailable, price: 0, equivalent: '' } : qi);
-                            setQuoteItems(newItems);
-                          }}
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${item.isUnavailable ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500'}`}
-                          title={item.isUnavailable ? "Remettre en stock" : "Marquer comme indisponible"}
-                        >
-                          <BellOff size={18} />
-                        </button>
-                        <button 
-                          onClick={() => setQuoteItems(quoteItems.filter(qi => qi.id !== item.id))}
-                          className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500"
-                        >
-                          <Plus size={18} className="rotate-45" />
-                        </button>
+                      
+                      {/* Container for Price, Qty and Buttons, side-by-side on mobile */}
+                      <div className="flex gap-2 items-end w-full md:w-auto">
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Prix (FCFA)</label>
+                          <input 
+                            type="number" 
+                            value={item.price}
+                            disabled={item.isUnavailable}
+                            onChange={(e) => {
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, price: Number(e.target.value) } : qi);
+                              setQuoteItems(newItems);
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-2 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
+                          />
+                        </div>
+                        <div className="w-16 md:w-20 shrink-0 space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Qté</label>
+                          <input 
+                            type="number" 
+                            value={item.quantity}
+                            disabled={item.isUnavailable}
+                            onChange={(e) => {
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, quantity: Number(e.target.value) } : qi);
+                              setQuoteItems(newItems);
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-2 py-2 text-sm outline-none focus:border-primary text-center disabled:opacity-50"
+                          />
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <button 
+                            onClick={() => {
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, isUnavailable: !qi.isUnavailable, price: 0, equivalent: '' } : qi);
+                              setQuoteItems(newItems);
+                            }}
+                            className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center transition-all ${item.isUnavailable ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500'}`}
+                            title={item.isUnavailable ? "Remettre en stock" : "Marquer comme indisponible"}
+                          >
+                            <BellOff size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setQuoteItems(quoteItems.filter(qi => qi.id !== item.id))}
+                            className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500"
+                          >
+                            <Plus size={18} className="rotate-45" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                     
