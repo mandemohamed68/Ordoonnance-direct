@@ -16,6 +16,7 @@
     "cap:assets": "npx capacitor-assets generate --android"
   },
   "dependencies": {
+    "@capacitor-community/speech-recognition": "^7.0.1",
     "@capacitor/android": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "@capacitor/haptics": "^8.0.2",

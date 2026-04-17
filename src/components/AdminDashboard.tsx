@@ -1033,49 +1033,86 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           </div>
 
           {/* Desktop Sidebar */}
-          <div className="hidden md:block sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
+          <div className="hidden md:block sticky top-24 p-4 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
             {[
-              { id: 'overview', label: "Vue d'ensemble", icon: Activity, color: 'text-primary', bg: 'bg-primary/5' },
-              { id: 'support', label: 'Support Chat', icon: MessageSquare, color: 'text-primary', bg: 'bg-primary/5', badge: (supportChats || []).reduce((acc, chat) => acc + (chat.unreadAdminCount || 0), 0) },
-              { id: 'approvals', label: 'Approbations', icon: ShieldCheck, color: 'text-amber-600', bg: 'bg-amber-50' },
-              { id: 'users', label: 'Utilisateurs', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { id: 'pharmacies', label: 'Pharmacies', icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { id: 'oncall', label: 'Gardes & Villes', icon: Navigation, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-              { id: 'orders', label: 'Commandes', icon: Truck, color: 'text-amber-600', bg: 'bg-amber-50' },
-              { id: 'history', label: 'Historique', icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-rose-600', bg: 'bg-rose-50' },
-              { id: 'revenue', label: 'Modèle Éco', icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { id: 'transactions', label: 'Transactions', icon: BarChart3, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-              { id: 'withdrawals', label: 'Retraits', icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { id: 'payments', label: 'Paiements', icon: CreditCard, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-              { id: 'security', label: 'Sécurité & API', icon: Lock, color: 'text-violet-600', bg: 'bg-violet-50' },
-              { id: 'roles', label: 'Rôles & Perms', icon: UserCog, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50' },
-              { id: 'analytics', label: 'Analyste de Données', icon: BarChart3, color: 'text-rose-600', bg: 'bg-rose-50' },
-              { id: 'reports', label: 'Rapports & Exports', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { id: 'scripts', label: 'Scripts & Terminal', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
-              { id: 'database', label: 'Base de Données', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { id: 'logs', label: 'Logs Système', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
-              { id: 'settings', label: 'Paramètres', icon: SettingsIcon, color: 'text-slate-600', bg: 'bg-slate-50' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
-                  activeTab === tab.id 
-                    ? `${tab.bg} ${tab.color} shadow-sm` 
-                    : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <div className="flex items-center gap-4">
-                  <tab.icon size={20} />
-                  {tab.label}
+              {
+                category: 'Général',
+                items: [
+                  { id: 'overview', label: "Vue d'ensemble", icon: Activity, color: 'text-primary', bg: 'bg-primary/5' },
+                  { id: 'support', label: 'Support Chat', icon: MessageSquare, color: 'text-primary', bg: 'bg-primary/5', badge: (supportChats || []).reduce((acc, chat) => acc + (chat.unreadAdminCount || 0), 0) },
+                ]
+              },
+              {
+                category: 'Opérations',
+                items: [
+                  { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-rose-600', bg: 'bg-rose-50' },
+                  { id: 'approvals', label: 'Approbations', icon: ShieldCheck, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  { id: 'orders', label: 'Commandes', icon: Truck, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  { id: 'history', label: 'Historique', icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                ]
+              },
+              {
+                category: 'Réseau',
+                items: [
+                  { id: 'users', label: 'Utilisateurs', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { id: 'pharmacies', label: 'Pharmacies', icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { id: 'oncall', label: 'Gardes & Villes', icon: Navigation, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                ]
+              },
+              {
+                category: 'Finances',
+                items: [
+                  { id: 'revenue', label: 'Modèle Éco', icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { id: 'transactions', label: 'Transactions', icon: BarChart3, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                  { id: 'payments', label: 'Paiements', icon: CreditCard, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                  { id: 'withdrawals', label: 'Retraits', icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
+                ]
+              },
+              {
+                category: 'Intelligence',
+                items: [
+                  { id: 'analytics', label: 'Analyste', icon: BarChart3, color: 'text-rose-600', bg: 'bg-rose-50' },
+                  { id: 'reports', label: 'Rapports', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                ]
+              },
+              {
+                category: 'Système',
+                items: [
+                  { id: 'security', label: 'Sécurité & API', icon: Lock, color: 'text-violet-600', bg: 'bg-violet-50' },
+                  { id: 'roles', label: 'Rôles', icon: UserCog, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50' },
+                  { id: 'database', label: 'Base de Données', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { id: 'scripts', label: 'Terminal', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
+                  { id: 'logs', label: 'Logs', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
+                  { id: 'settings', label: 'Paramètres', icon: SettingsIcon, color: 'text-slate-600', bg: 'bg-slate-50' },
+                ]
+              }
+            ].map((group, groupIdx) => (
+              <div key={groupIdx} className="mb-6 last:mb-0">
+                <p className="px-4 text-[10px] font-black tracking-widest text-slate-300 uppercase mb-2">{group.category}</p>
+                <div className="space-y-1">
+                  {group.items.map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id as any)}
+                      className={`w-full flex items-center justify-between px-5 py-3 rounded-2xl font-bold transition-all duration-300 ${
+                        activeTab === tab.id 
+                          ? `${tab.bg} ${tab.color} shadow-sm` 
+                          : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <tab.icon size={18} />
+                        <span className="text-sm">{tab.label}</span>
+                      </div>
+                      {tab.badge && tab.badge > 0 ? (
+                        <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                          {tab.badge}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
                 </div>
-                {tab.badge > 0 && (
-                  <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
+              </div>
             ))}
           </div>
         </div>

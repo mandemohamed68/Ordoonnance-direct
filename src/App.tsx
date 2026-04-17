@@ -82,7 +82,9 @@ import {
   Mic,
   FlaskConical,
   CheckCircle2,
-  Home
+  Home,
+  Info,
+  Mail
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -102,6 +104,9 @@ import { GoogleGenAI, ThinkingLevel, Modality } from "@google/genai";
 import { AdminDashboard } from './components/AdminDashboard';
 import { Legal } from './components/Legal';
 import { ReportsView } from './components/ReportsView';
+
+import { Capacitor } from '@capacitor/core';
+import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 
 // Fix Leaflet default icon issue
 // @ts-ignore
@@ -512,15 +517,18 @@ function StatusTrace({ history, defaultExpanded = false }: { history?: Order['hi
 }
 
 const LogoIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-    <rect width="100" height="100" rx="24" fill="#10b981" />
-    <path d="M35 25C35 22.2386 37.2386 20 40 20H60C62.7614 20 65 22.2386 65 25V75C65 77.7614 62.7614 80 60 80H40C37.2386 80 35 77.7614 35 75V25Z" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M42 20V25H58V20" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M30 50H70" stroke="white" strokeWidth="12" strokeLinecap="round"/>
-    <path d="M50 30V70" stroke="white" strokeWidth="12" strokeLinecap="round"/>
-    <path d="M35 75V85H65L75 75" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M65 85L75 75L65 65" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
+  <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
+    <img 
+      src="/logo.png" 
+      alt="Ordonnance Direct Logo" 
+      className="w-full h-full object-contain rounded-full border-2 border-white/20 shadow-sm"
+      onError={(e) => {
+        // Fallback to old cross icon if image is missing
+        e.currentTarget.style.display = 'none';
+        e.currentTarget.parentElement!.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="${className}"><rect width="100" height="100" rx="24" fill="#10b981" /><path d="M35 25C35 22.2386 37.2386 20 40 20H60C62.7614 20 65 22.2386 65 25V75C65 77.7614 62.7614 80 60 80H40C37.2386 80 35 77.7614 35 75V25Z" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M42 20V25H58V20" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M30 50H70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M50 30V70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M35 75V85H65L75 75" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M65 85L75 75L65 65" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/></svg>`;
+      }}
+    />
+  </div>
 );
 
 function NotificationBell({ userId }: { userId: string }) {
@@ -682,6 +690,7 @@ export default function App() {
 
   const [isResetting, setIsResetting] = useState(false);
   const [showSupportChat, setShowSupportChat] = useState(false);
+  const [infoPage, setInfoPage] = useState<'how_it_works' | 'pharmacies' | 'delivery' | 'contact' | 'legal' | 'privacy' | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [newSupportMessage, setNewSupportMessage] = useState('');
@@ -1301,11 +1310,11 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setViewMode(profile?.role || null); setIsMobileMenuOpen(false); }}>
             <motion.div 
-              whileHover={{ rotate: 180 }}
+              whileHover={{ scale: 1.05 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
-              className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20"
+              className="w-12 h-12 flex items-center justify-center shadow-lg shadow-emerald-500/20 rounded-full"
             >
-              <LogoIcon size={24} />
+              <LogoIcon size={48} />
             </motion.div>
             <div className="flex flex-col">
               <span className="text-lg font-black tracking-tighter text-slate-900 leading-none">Ordonnance Direct</span>
@@ -1610,10 +1619,10 @@ export default function App() {
           <div>
             <h5 className="font-bold mb-4">Support & Aide</h5>
             <ul className="space-y-2 text-sm text-slate-500">
-              <li><button className="hover:text-primary transition-colors">Comment ça marche ?</button></li>
-              <li><button className="hover:text-primary transition-colors">Pharmacies partenaires</button></li>
-              <li><button className="hover:text-primary transition-colors">Devenir livreur</button></li>
-              <li><button className="hover:text-primary transition-colors">Contactez-nous</button></li>
+              <li><button onClick={() => setInfoPage('how_it_works')} className="hover:text-primary transition-colors text-left">Comment ça marche ?</button></li>
+              <li><button onClick={() => setInfoPage('pharmacies')} className="hover:text-primary transition-colors text-left">Pharmacies partenaires</button></li>
+              <li><button onClick={() => setInfoPage('delivery')} className="hover:text-primary transition-colors text-left">Devenir livreur</button></li>
+              <li><button onClick={() => setInfoPage('contact')} className="hover:text-primary transition-colors text-left">Contactez-nous</button></li>
             </ul>
           </div>
           <div>
@@ -1630,11 +1639,122 @@ export default function App() {
             {(isSuperAdminEmail(user?.email) || profile?.role === 'admin') && (
               <button onClick={() => setShowResetConfirm(true)} className="text-rose-400 hover:text-rose-600 font-bold">Réinitialiser les données (Test)</button>
             )}
-            <button className="hover:text-slate-600">Mentions légales</button>
-            <button className="hover:text-slate-600">Confidentialité</button>
+            <button onClick={() => setInfoPage('legal')} className="hover:text-slate-600">Mentions légales</button>
+            <button onClick={() => setInfoPage('privacy')} className="hover:text-slate-600">Confidentialité</button>
           </div>
         </div>
       </footer>
+
+      {/* Info Pages Modal */}
+      <AnimatePresence>
+        {infoPage && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white rounded-[2rem] shadow-2xl max-w-lg w-full p-8 relative overflow-hidden"
+            >
+              <button 
+                onClick={() => setInfoPage(null)}
+                className="absolute top-6 right-6 w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-200"
+              >
+                <X size={20} />
+              </button>
+              
+              {infoPage === 'how_it_works' && (
+                <div>
+                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6"><Info size={28} /></div>
+                  <h3 className="text-2xl font-black text-slate-900 mb-6">Comment ça marche ?</h3>
+                  <div className="space-y-4">
+                    <div className="flex gap-4">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 font-black text-sm flex items-center justify-center shrink-0">1</div>
+                      <p className="text-slate-600"><strong className="text-slate-900">Prenez une photo.</strong> Photographiez votre ordonnance et envoyez-la sur notre plateforme.</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 font-black text-sm flex items-center justify-center shrink-0">2</div>
+                      <p className="text-slate-600"><strong className="text-slate-900">Recevez des devis.</strong> Les pharmacies partenaires consultent votre demande et vous proposent le meilleur prix.</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 font-black text-sm flex items-center justify-center shrink-0">3</div>
+                      <p className="text-slate-600"><strong className="text-slate-900">Payez en ligne.</strong> Optez pour le devis de votre choix et payez avec Orange Money, Moov, Sank Money ou Carte bancaire.</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 font-black text-sm flex items-center justify-center shrink-0">4</div>
+                      <p className="text-slate-600"><strong className="text-slate-900">Faites-vous livrer.</strong> Recevez vos médicaments à domicile, de jour comme de nuit.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {infoPage === 'pharmacies' && (
+                <div>
+                  <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6"><ShieldCheck size={28} /></div>
+                  <h3 className="text-2xl font-black text-slate-900 mb-4">Pharmacies partenaires</h3>
+                  <p className="text-slate-600 leading-relaxed mb-4">
+                    Notre réseau s'appuie exclusivement sur des <strong>pharmacies agréées et physiques</strong> situées au Burkina Faso. 
+                  </p>
+                  <p className="text-slate-600 leading-relaxed">
+                    Afin d'assurer votre sécurité sanitaire, chaque pharmacie partenaire est vérifiée avec rigueur avant de pouvoir vous soumettre le moindre devis. Vous bénéficiez de médicaments authentiques avec la même expertise pharmaceutique qu'en officine.
+                  </p>
+                </div>
+              )}
+
+              {infoPage === 'delivery' && (
+                <div>
+                  <div className="w-16 h-16 bg-orange-50 text-orange-500 rounded-2xl flex items-center justify-center mb-6"><Truck size={28} /></div>
+                  <h3 className="text-2xl font-black text-slate-900 mb-4">Devenir Livreur</h3>
+                  <p className="text-slate-600 leading-relaxed mb-6">
+                    Rejoignez la flotte Ordonnance Direct et aidez à rendre la santé accessible à tous à tout moment !
+                  </p>
+                  <ul className="space-y-3 mb-6 text-sm text-slate-600">
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-orange-500"></div> Permis de conduire valide</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-orange-500"></div> CNI ou document d'identité</li>
+                    <li className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-orange-500"></div> Véhicule/Moto en bon état</li>
+                  </ul>
+                  <button onClick={() => setInfoPage('contact')} className="w-full bg-slate-900 text-white font-bold rounded-xl py-3 hover:bg-slate-800 transition-colors">Nous contacter</button>
+                </div>
+              )}
+
+              {infoPage === 'contact' && (
+                <div>
+                  <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center mb-6"><Phone size={28} /></div>
+                  <h3 className="text-2xl font-black text-slate-900 mb-6">Contactez-nous</h3>
+                  <div className="space-y-4">
+                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><Phone size={16}/></span> <strong>+226 00 00 00 00</strong></p>
+                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><Mail size={16}/></span> <strong>contact@ordonnancedirect.bf</strong></p>
+                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><MapPin size={16}/></span> <strong>Ouagadougou, Burkina Faso</strong></p>
+                  </div>
+                </div>
+              )}
+              
+              {infoPage === 'legal' && (
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 mb-4">Mentions Légales</h3>
+                  <div className="text-sm text-slate-500 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    <p><strong>Éditeur du site :</strong> Ordonnance Direct BF</p>
+                    <p><strong>Directeur de la publication :</strong> Direction Générale</p>
+                    <p><strong>Hébergement :</strong> Les services sont hébergés sur des serveurs sécurisés Google Firebase en stricte conformité avec les lois de protection en vigueur.</p>
+                    <p>La plateforme Ordonnance Direct ne remplace pas une consultation médicale. Elle agit en qualité de simple intermédiaire technique de mise en relation de patients avec des professionnels de santé.</p>
+                  </div>
+                </div>
+              )}
+
+              {infoPage === 'privacy' && (
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 mb-4">Politique de Confidentialité</h3>
+                  <div className="text-sm text-slate-500 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    <p>Vos données sont protégées.</p>
+                    <p>Les photographies d'ordonnances que vous déposez via la plateforme sont sécurisées et strictement transmises aux pharmacies de notre réseau avec pour unique objectif de vous établir une estimation (devis) tarifaire.</p>
+                    <p>Aucune information médicale n'est revendue ou utilisée à des fins de prospection non consentie. Dans le cadre des livraisons, le livreur n'aura accès qu'à votre nom, votre numéro et votre position géographique brute.</p>
+                  </div>
+                </div>
+              )}
+
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Reset Confirmation Modal */}
       <AnimatePresence>
@@ -1755,9 +1875,9 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
           initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-          className="w-20 h-20 bg-gradient-to-br from-emerald-500 to-sky-400 rounded-3xl flex items-center justify-center text-white mx-auto mb-8 shadow-2xl shadow-emerald-500/40"
+          className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 shadow-[0_0_30px_rgba(16,185,129,0.3)] bg-white"
         >
-          <LogoIcon size={40} />
+          <LogoIcon size={96} />
         </motion.div>
         
         <h1 className="text-4xl font-bold mb-2 text-white tracking-tight">Ordonnance Direct</h1>
@@ -2001,8 +2121,8 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-16"
         >
-          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center text-emerald-500 mx-auto mb-8 shadow-xl border border-emerald-50">
-            <LogoIcon size={40} />
+          <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center text-emerald-500 mx-auto mb-8 shadow-xl border border-emerald-50">
+            <LogoIcon size={96} />
           </div>
           <h2 className="text-5xl font-bold mb-4 text-slate-900 tracking-tight text-center">Bienvenue sur Ordonnance Direct</h2>
           <p className="text-slate-500 max-w-md mx-auto font-medium text-lg text-center">Choisissez votre profil pour continuer votre expérience au Burkina Faso.</p>
@@ -2031,7 +2151,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
 
                 {/* Decorative element */}
                 <div className={`absolute top-4 right-4 w-10 h-10 rounded-full ${item.light} opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center`}>
-                  <LogoIcon size={14} className="text-current" />
+                  <ChevronRight size={16} className="text-current" />
                 </div>
               </motion.button>
             ))}
@@ -2314,13 +2434,13 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
   const handleDeletePrescription = async (id: string) => {
     try {
       // Check if there is a paid order for this prescription
-      const associatedOrder = orders.find(o => o.prescriptionId === id);
-      const isPaid = associatedOrder && (
-        associatedOrder.status === 'paid' || 
-        associatedOrder.status === 'preparing' || 
-        associatedOrder.status === 'ready' || 
-        associatedOrder.status === 'delivering' || 
-        associatedOrder.status === 'completed'
+      const associatedOrders = orders.filter(o => o.prescriptionId === id);
+      const isPaid = associatedOrders.some(o => 
+        o.status === 'paid' || 
+        o.status === 'preparing' || 
+        o.status === 'ready' || 
+        o.status === 'delivering' || 
+        o.status === 'completed'
       );
 
       if (isPaid) {
@@ -2333,10 +2453,10 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       // Delete the prescription itself
       batch.delete(doc(db, 'prescriptions', id));
 
-      // Also automatically delete the associated order quote to remove it from both patient and pharmacist dashboards
-      if (associatedOrder) {
-        batch.delete(doc(db, 'orders', associatedOrder.id));
-      }
+      // Also automatically delete ALL associated order quotes to remove them from dashboards
+      associatedOrders.forEach(o => {
+        batch.delete(doc(db, 'orders', o.id));
+      });
 
       await batch.commit();
       
@@ -2376,11 +2496,15 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       });
 
       if (prescriptionId) {
-        await updateDoc(doc(db, 'prescriptions', prescriptionId), {
-          status: 'submitted',
-          lockedBy: null,
-          lockedAt: null
-        });
+        try {
+          await updateDoc(doc(db, 'prescriptions', prescriptionId), {
+            status: 'submitted',
+            lockedBy: null,
+            lockedAt: null
+          });
+        } catch (e) {
+          console.warn("Could not update associated prescription (might be deleted)", e);
+        }
       }
       toast.info("Devis rejeté. Votre ordonnance est de nouveau disponible pour d'autres pharmacies.");
     } catch (error) {
@@ -2499,24 +2623,67 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     }
   };
 
-  const toggleVoiceInput = () => {
+  const toggleVoiceInput = async () => {
+    if (isListening) {
+      setIsListening(false);
+      if (Capacitor.isNativePlatform()) {
+        try { await SpeechRecognition.stop(); } catch(e) {}
+      }
+      return;
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const checkResult = await SpeechRecognition.available();
+        if (!checkResult.available) {
+          toast.error("La reconnaissance vocale n'est pas disponible sur cet appareil Android.");
+          return;
+        }
+
+        const permStatus = await SpeechRecognition.requestPermissions();
+        if (permStatus.speechRecognition !== 'granted') {
+          toast.error("Permission MICROPHONE refusée. Veuillez l'activer dans les paramètres Android.");
+          return;
+        }
+
+        setIsListening(true);
+        toast.info("Écoute en cours... Parlez maintenant.");
+        
+        const result = await SpeechRecognition.start({
+          language: 'fr-FR',
+          maxResults: 1,
+          prompt: "Dites votre besoin de soin...",
+          popup: true,
+          partialResults: false
+        });
+
+        if (result && result.matches && result.matches.length > 0) {
+          const transcript = result.matches[0];
+          setManualEntryText(prev => prev ? prev + ' ' + transcript : transcript);
+          toast.success("Message capturé !");
+        }
+        setIsListening(false);
+      } catch (err: any) {
+        setIsListening(false);
+        console.error("Speech recognition plugin error:", err);
+        if (err?.message?.includes('not-allowed') || err?.message?.includes('permission')) {
+          toast.error("Permission refusée ou annulée.");
+        } else if (err?.message?.includes('No speech') || err?.message?.includes('no match')) {
+          toast.error("Aucune voix détectée. Parlez plus fort !");
+        } else {
+           toast.error("Échec de l'écoute vocale (annulée).");
+        }
+      }
+      return;
+    }
+
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast.error("La reconnaissance vocale n'est pas supportée par votre navigateur (ou WebView Android).");
       return;
     }
 
-    if (isListening) {
-      setIsListening(false);
-      return;
-    }
-
-    // On Android APK, we need to remind the user about RECORD_AUDIO permission
-    if (Capacitor.isNativePlatform()) {
-      toast.info("Assurez-vous d'avoir autorisé le MICROPHONE dans les paramètres de l'application Android.");
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRec();
     recognition.lang = 'fr-FR';
     recognition.continuous = false;
     recognition.interimResults = false;
@@ -2675,11 +2842,15 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       });
 
       if (order.prescriptionId) {
-        await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
-          status: 'paid',
-          lockedBy: null,
-          lockedAt: null
-        });
+        try {
+          await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
+            status: 'paid',
+            lockedBy: null,
+            lockedAt: null
+          });
+        } catch (e) {
+          console.warn("Could not update associated prescription (might be deleted)", e);
+        }
       }
 
       await createNotification(order.patientId, "Paiement confirmé", `Votre paiement de ${totalToPay} FCFA pour la commande #${order.id.slice(-6).toUpperCase()} a été reçu.`, 'payment', order.id);
@@ -2703,7 +2874,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     }
   };
 
-  const initPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
+  const initPayment = async (method: 'orange' | 'moov' | 'sank' | 'coris') => {
     if (!showPaymentModal) return;
     if (!paymentPhone) {
       toast.error("Veuillez entrer votre numéro de téléphone.");
@@ -2738,7 +2909,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     }
   };
 
-  const performPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
+  const performPayment = async (method: 'orange' | 'moov' | 'sank' | 'coris') => {
     if (!showPaymentModal || !paymentInvoiceId || !paymentOtp) return;
     setIsProcessingPayment(true);
     setPaymentStep('processing');
@@ -2805,11 +2976,15 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       });
 
       if (order.prescriptionId) {
-        await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
-          status: 'paid',
-          lockedBy: null,
-          lockedAt: null
-        });
+        try {
+          await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
+            status: 'paid',
+            lockedBy: null,
+            lockedAt: null
+          });
+        } catch (e) {
+          console.warn("Could not update associated prescription (might be deleted)", e);
+        }
       }
 
       await createNotification(order.patientId, "Paiement confirmé", `Votre paiement de ${totalToPay} FCFA pour la commande #${order.id.slice(-6).toUpperCase()} a été reçu.`, 'payment', order.id);
@@ -3807,6 +3982,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                 <CreditCard size={40} />
               </div>
               <h3 className="text-2xl font-bold mb-2">Paiement Sécurisé</h3>
+              
+              {/* SANDBOX MODE BANNER */}
+              {(!settings?.paymentConfig || settings.paymentConfig.testMode !== false) && (
+                <div className="mb-4 bg-amber-50 border border-amber-200 flex items-start gap-3 p-3 rounded-xl shadow-sm">
+                  <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                     <p className="text-xs font-bold text-amber-700 uppercase">Mode Sandbox Actif</p>
+                     <p className="text-xs text-amber-600/80">L'application fonctionne en mode test (Sandbox). Les paiements sont simulés et aucun prélèvement réel ne sera effectué sur vos comptes.</p>
+                  </div>
+                </div>
+              )}
+
               <p className="text-slate-500 mb-6 text-sm">
                 Choisissez votre méthode de paiement pour la commande <span className="font-bold text-slate-900">#{showPaymentModal.id.slice(-6).toUpperCase()}</span>
               </p>
@@ -3825,22 +4012,28 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                         onClick={() => setSelectedPaymentMethod('orange')}
                         className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-orange-500 hover:bg-orange-50 transition-all gap-2"
                       >
-                        <div className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center text-white font-black text-xl">O</div>
+                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
+                           <img src="https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg" alt="Orange" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                        </div>
                         <span className="text-xs font-bold text-slate-700">Orange Money</span>
                       </button>
                       <button 
                         onClick={() => setSelectedPaymentMethod('moov')}
                         className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2"
                       >
-                        <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white font-black text-xl">Mo</div>
+                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
+                           <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png" alt="Moov" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                        </div>
                         <span className="text-xs font-bold text-slate-700">Moov Money</span>
                       </button>
                       <button 
-                        onClick={() => setSelectedPaymentMethod('telecel')}
+                        onClick={() => setSelectedPaymentMethod('sank')}
                         className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-red-600 hover:bg-red-50 transition-all gap-2"
                       >
-                        <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center text-white font-black text-xl">T</div>
-                        <span className="text-xs font-bold text-slate-700">Telecel Money</span>
+                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
+                           <img src="https://sankmoney.com/wp-content/uploads/2022/10/Logo-Sank-Money-1.png" alt="Sank" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-red-600 font-black text-[10px]">SANK</span>'; }} />
+                        </div>
+                        <span className="text-xs font-bold text-slate-700">Sank Money</span>
                       </button>
                     </div>
                   </>
@@ -4117,24 +4310,21 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
-              { id: 'om', name: 'Orange Money', color: 'bg-[#FF6600]', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Orange_logo.svg/1200px-Orange_logo.svg.png', desc: 'Paiement instantané' },
-              { id: 'moov', name: 'Moov Money', color: 'bg-[#00529B]', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png', desc: 'Simple et rapide' },
-              { id: 'sank', name: 'Sank Money', color: 'bg-red-600', logo: 'https://sankmoney.com/wp-content/uploads/2022/10/Logo-Sank-Money-1.png', desc: 'Solution locale' },
-              { id: 'card', name: 'Carte Bancaire', color: 'bg-slate-800', icon: CreditCard, desc: 'Visa / Mastercard' },
+              { id: 'om', name: 'Orange Money', color: 'bg-white', borderColor: 'border-slate-100', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg', desc: 'Paiement instantané' },
+              { id: 'moov', name: 'Moov Money', color: 'bg-white', borderColor: 'border-slate-100', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png', desc: 'Simple et rapide' },
+              { id: 'sank', name: 'Sank Money', color: 'bg-white', borderColor: 'border-slate-100', logo: 'https://sankmoney.com/wp-content/uploads/2022/10/Logo-Sank-Money-1.png', fallbackText: 'SANK', desc: 'Solution locale' },
+              { id: 'card', name: 'Carte Bancaire', color: 'bg-slate-900', borderColor: 'border-slate-900', icon: CreditCard, desc: 'Visa / Mastercard' },
             ].map((m) => (
-              <div key={m.id} className="group relative bg-slate-50 p-6 rounded-[2rem] border-2 border-transparent hover:border-primary/20 hover:bg-white hover:shadow-xl transition-all duration-500 cursor-pointer">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className={`w-14 h-14 ${m.color} rounded-2xl flex items-center justify-center overflow-hidden p-2 group-hover:scale-110 transition-transform duration-500 shadow-lg`}>
-                    {m.logo ? <img src={m.logo} alt={m.name} className="w-full h-full object-contain" /> : <m.icon className="text-white" size={28} />}
+              <div key={m.id} className="group relative bg-white p-4 rounded-2xl border border-slate-100 ring-2 ring-transparent hover:border-transparent hover:ring-primary/20 hover:shadow-lg transition-all duration-300 cursor-pointer">
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 shrink-0 ${m.color} border border-slate-100/50 rounded-xl flex items-center justify-center overflow-hidden p-1.5 group-hover:scale-105 transition-transform duration-300 shadow-sm`}>
+                    {m.logo ? <img src={m.logo} alt={m.name} referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[10px] font-black text-center leading-tight ${m.id === 'sank' ? 'text-red-600' : ''}">${m.fallbackText || m.name}</span>`; }} /> : m.icon && <m.icon className="text-white" size={24} />}
                   </div>
-                  <div className="flex-1">
-                    <span className="block text-sm font-black text-slate-900">{m.name}</span>
-                    <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">{m.desc}</span>
+                  <div className="flex-1 flex flex-col justify-center">
+                    <span className="block text-[14px] font-black text-slate-900 leading-tight">{m.name}</span>
+                    <span className="block text-[9px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">{m.desc}</span>
                   </div>
-                </div>
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                  <span className="text-[10px] font-bold text-slate-400">Frais: 0%</span>
-                  <ChevronRight size={16} className="text-slate-300 group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                  <ChevronRight size={16} className="text-slate-300 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0" />
                 </div>
               </div>
             ))}

@@ -16,8 +16,8 @@ async function startServer() {
   // Enable CORS for local development and mobile app access
   app.use(cors());
 
-  // Cloud Run provides the PORT environment variable.
-  const PORT = parseInt(process.env.PORT || "3000", 10);
+  // Hardcode port to 3000 per infrastructure requirements
+  const PORT = 3000;
 
   console.log('--- SERVER STARTUP (V2) ---');
   console.log('Time:', new Date().toISOString());
