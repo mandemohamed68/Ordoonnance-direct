@@ -145,87 +145,128 @@ const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString(
 const generateInvoice = (order: Order, profile: UserProfile) => {
   const doc = new jsPDF();
   
+  // Custom styling elements
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.rect(0, 0, 210, 45, 'F');
+  
   // Header
-  doc.setFontSize(20);
+  doc.setFontSize(26);
+  doc.setFont("helvetica", "bold");
   doc.setTextColor(16, 185, 129); // emerald-600
-  doc.text("FACTURE", 14, 22);
+  doc.text("FACTURE", 14, 25);
   
   doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
   doc.setTextColor(100);
-  doc.text(`Commande #${order.id.slice(-6).toUpperCase()}`, 14, 30);
-  doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString('fr-FR')}`, 14, 35);
+  doc.text(`Réf: #${order.id.slice(-8).toUpperCase()}`, 14, 33);
   
-  // Patient Info
-  doc.setFontSize(12);
-  doc.setTextColor(0);
-  doc.text("Facturé à:", 14, 50);
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  doc.text(profile.name, 14, 55);
-  if (profile.phone) doc.text(profile.phone, 14, 60);
+  let orderDateStr = "Date inconnue";
+  try {
+    if (order.createdAt) {
+      // Handle Firebase Timestamp or fallback to standard Date parsing
+      const d = (order.createdAt as any).toDate ? (order.createdAt as any).toDate() : new Date(order.createdAt as any);
+      if (!isNaN(d.getTime())) {
+        orderDateStr = d.toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      }
+    }
+  } catch (e) {}
+  doc.text(`Date: ${orderDateStr}`, 14, 38);
   
-  // Pharmacy Info
-  doc.setFontSize(12);
-  doc.setTextColor(0);
-  doc.text("Pharmacie:", 120, 50);
+  // Patient & Pharmacy Info Area
   doc.setFontSize(10);
-  doc.setTextColor(100);
-  doc.text(order.pharmacyName || "Pharmacie Partenaire", 120, 55);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(50);
+  doc.text("Facturé à :", 14, 55);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(80);
+  doc.text(profile.name || "Client", 14, 62);
+  if (profile.phone) doc.text(profile.phone, 14, 67);
+  if (profile.email) doc.text(profile.email, 14, 72);
+  
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(50);
+  doc.text("Émis par (Pharmacie) :", 110, 55);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(80);
+  doc.text(order.pharmacyName || "Pharmacie Partenaire", 110, 62);
+  doc.text("Ordonnance Direct - Burkina Faso", 110, 67);
   
   // Items Table
   const tableColumn = ["Désignation", "Prix Unitaire", "Quantité", "Total"];
   const tableRows: any[] = [];
   
-  if (order.items) {
+  if (order.items && order.items.length > 0) {
     order.items.forEach(item => {
       const itemData = [
         item.name,
-        `${item.price} FCFA`,
-        item.quantity,
-        `${item.price * item.quantity} FCFA`
+        `${(item.price || 0).toLocaleString('fr-FR')} FCFA`,
+        item.quantity || 1,
+        `${((item.price || 0) * (item.quantity || 1)).toLocaleString('fr-FR')} FCFA`
       ];
       tableRows.push(itemData);
     });
+  } else {
+    tableRows.push(["Commande globale", "-", "-", `${(order.medicationTotal || 0).toLocaleString('fr-FR')} FCFA`]);
   }
   
   // @ts-ignore
   autoTable(doc, {
-    startY: 70,
+    startY: 85,
     head: [tableColumn],
     body: tableRows,
-    theme: 'striped',
-    headStyles: { fillColor: [16, 185, 129] },
+    theme: 'grid',
+    headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 10, cellPadding: 6 },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    margin: { top: 10, left: 14, right: 14 }
   });
   
   // Totals
   // @ts-ignore
-  const finalY = doc.lastAutoTable?.finalY || 70;
+  const finalY = doc.lastAutoTable?.finalY || 85;
+  
+  // Background for totals block
+  doc.setFillColor(248, 250, 252);
+  doc.rect(96, finalY + 10, 100, 50, 'F');
   
   doc.setFontSize(10);
-  doc.setTextColor(0);
-  doc.text("Sous-total Médicaments:", 120, finalY + 10);
-  doc.text(`${order.medicationTotal || 0} FCFA`, 170, finalY + 10, { align: 'right' });
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(80);
+  
+  let currentY = finalY + 20;
+  
+  doc.text("Sous-total Médicaments :", 102, currentY);
+  doc.text(`${(order.medicationTotal || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
+  currentY += 8;
   
   if (order.deliveryFee) {
-    doc.text("Frais de Livraison:", 120, finalY + 16);
-    doc.text(`${order.deliveryFee} FCFA`, 170, finalY + 16, { align: 'right' });
+    doc.text("Frais de Livraison :", 102, currentY);
+    doc.text(`${(order.deliveryFee).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
+    currentY += 8;
   }
   
   if (order.serviceFee) {
-    doc.text("Frais de Service:", 120, finalY + 22);
-    doc.text(`${order.serviceFee} FCFA`, 170, finalY + 22, { align: 'right' });
+    doc.text("Frais de Service :", 102, currentY);
+    doc.text(`${(order.serviceFee).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
+    currentY += 8;
   }
   
-  doc.setFontSize(12);
+  // Separator line
+  doc.setDrawColor(200, 200, 200);
+  doc.line(102, currentY - 3, 190, currentY - 3);
+  
+  currentY += 5;
+  doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.text("TOTAL PAYÉ:", 120, finalY + 32);
   doc.setTextColor(16, 185, 129);
-  doc.text(`${order.totalAmount || 0} FCFA`, 170, finalY + 32, { align: 'right' });
+  doc.text("TOTAL PAYÉ :", 102, currentY);
+  doc.text(`${(order.totalAmount || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
   
   // Footer
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "italic");
   doc.setTextColor(150);
+  doc.text("Document généré informatiquement par Ordonnance Direct.", 105, 275, { align: 'center' });
   doc.text("Merci de votre confiance !", 105, 280, { align: 'center' });
   
   doc.save(`Facture_${order.id.slice(-6).toUpperCase()}.pdf`);
