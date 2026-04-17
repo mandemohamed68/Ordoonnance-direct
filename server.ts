@@ -1,325 +1,163 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { existsSync } from "fs";
 import dotenv from "dotenv";
 import cors from "cors";
-import { GoogleGenAI } from "@google/genai";
+import { createServer as createViteServer } from "vite";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+async function startServer() {
+  const app = express();
 
-// Enable CORS for local development and mobile app access
-app.use(cors());
+  // Enable CORS for local development and mobile app access
+  app.use(cors());
 
-// Cloud Run provides the PORT environment variable.
-const PORT = parseInt(process.env.PORT || process.env.DEFAULT_APP_PORT || "3000", 10);
+  // Cloud Run provides the PORT environment variable.
+  const PORT = parseInt(process.env.PORT || "3000", 10);
 
-console.log('--- SERVER STARTUP ---');
-console.log('Time:', new Date().toISOString());
-console.log('Directory:', __dirname);
-console.log('Port:', PORT);
+  console.log('--- SERVER STARTUP (V2) ---');
+  console.log('Time:', new Date().toISOString());
+  console.log('Directory:', __dirname);
+  console.log('Port:', PORT);
+  console.log('Environment:', process.env.NODE_ENV);
 
-// Error handling
-process.on('uncaughtException', (err) => {
-  console.error('CRITICAL: Uncaught Exception:', err);
-});
+  app.use(express.json({ limit: '10mb' }));
 
-process.on('unhandledRejection', (reason) => {
-  console.error('CRITICAL: Unhandled Rejection:', reason);
-});
-
-app.use(express.json({ limit: '10mb' }));
-
-// Health check for Cloud Run
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
-// SMS API Endpoint
-app.post("/api/send-sms", async (req, res) => {
-  const { to, message } = req.body;
-  try {
-    if (!process.env.SMS_API_USER || !process.env.SMS_API_HASH) {
-      throw new Error("Identifiants SMS manquants. Veuillez configurer SMS_API_USER et SMS_API_HASH dans les paramètres (Secrets) de AI Studio.");
-    }
-
-    const apiUrl = "https://tfso.sappay.net/index.php";
-    const params = new URLSearchParams({
-      app: "ws",
-      u: process.env.SMS_API_USER,
-      h: process.env.SMS_API_HASH,
-      op: "pv",
-      to: to,
-      msg: message,
-      sender_id: process.env.SMS_SENDER_ID || "PHARMACIE"
-    });
-
-    const response = await fetch(`${apiUrl}?${params.toString()}`);
-    const resultText = await response.text();
-    console.log("SMS API response:", resultText);
-    
-    // Check if the API returned an error JSON
-    try {
-      const jsonResponse = JSON.parse(resultText);
-      if (jsonResponse.status === "ERR") {
-        throw new Error(`SMS API error: ${jsonResponse.error_string}`);
-      }
-    } catch (e) {
-      // If it's not JSON, ignore and proceed
-    }
-    
-    if (response.ok) {
-      res.json({ success: true, response: resultText });
-    } else {
-      throw new Error(`SMS API error: ${response.statusText}`);
-    }
-  } catch (error) {
-    console.error("Failed to send SMS:", error);
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
-  }
-});
-
-// --- AI Analysis API ---
-app.post("/api/ai/analyze", async (req, res) => {
-  const { image, text, prompt } = req.body;
-  try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY manquante dans les variables d'environnement.");
-    }
-
-    const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    let response;
-    if (image) {
-      response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-            {
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: image
-              }
-            },
-            {
-              text: prompt || "Extrait les médicaments de cette ordonnance."
-            }
-          ],
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-    } else {
-      response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `${prompt || "Analyse ces médicaments."} : "${text}"`,
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-    }
-
-    const resultText = response.text;
-    res.json({ success: true, text: resultText });
-  } catch (error) {
-    console.error("AI Analysis Error:", error);
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
-  }
-});
-
-// --- Sappay Payment APIs ---
-
-const SAPPAY_PROCESSORS = {
-  orange: "11688813752134336",
-  moov: "11688813838374580",
-  telecel: "11744695746597207",
-  coris: "11702302492453862"
-};
-
-async function getSappayToken() {
-  if (!process.env.SAPPAY_CLIENT_ID || !process.env.SAPPAY_CLIENT_SECRET || !process.env.SAPPAY_USERNAME || !process.env.SAPPAY_PASSWORD) {
-    throw new Error("Identifiants Sappay manquants. Veuillez configurer SAPPAY_CLIENT_ID, SAPPAY_CLIENT_SECRET, SAPPAY_USERNAME, et SAPPAY_PASSWORD dans les paramètres (Secrets) de AI Studio.");
-  }
-
-  const response = await fetch("https://api.prod.sappay.net/api/public/authentication/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    body: JSON.stringify({
-      grant_type: "password",
-      client_id: process.env.SAPPAY_CLIENT_ID,
-      client_secret: process.env.SAPPAY_CLIENT_SECRET,
-      username: process.env.SAPPAY_USERNAME,
-      password: process.env.SAPPAY_PASSWORD
-    })
+  // Health check for Cloud Run
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Sappay Auth Failed: ${err}`);
-  }
+  // SMS API Endpoint
+  app.post("/api/send-sms", async (req, res) => {
+    const { to, message } = req.body;
+    try {
+      if (!process.env.SMS_API_USER || !process.env.SMS_API_HASH) {
+        throw new Error("Identifiants SMS manquants. Veuillez configurer SMS_API_USER et SMS_API_HASH dans les paramètres (Secrets) de AI Studio.");
+      }
 
-  const data = await response.json();
-  return data.access_token;
-}
-
-app.post("/api/payment/init", async (req, res) => {
-  try {
-    const { amount, phone, email, method } = req.body;
-    const token = await getSappayToken();
-
-    // 1. Create Invoice
-    const invoiceRes = await fetch("https://api.prod.sappay.net/api/public/invoice/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        type: "SIMPLE",
-        customer: {
-          email: email || "client@ordonnance-direct.com",
-          country: 1 // Burkina Faso
-        },
-        amount: amount.toString(),
-        note: "Paiement Ordonnance Direct"
-      })
-    });
-
-    if (!invoiceRes.ok) {
-      const err = await invoiceRes.text();
-      throw new Error(`Invoice creation failed: ${err}`);
+      const apiUrl = `https://www.aqilasms.com/api/v1/send?user=${process.env.SMS_API_USER}&hash=${process.env.SMS_API_HASH}&to=${to}&message=${encodeURIComponent(message)}&sender=${process.env.SMS_SENDER_ID || 'SantéDirect'}`;
+      
+      const response = await fetch(apiUrl);
+      const resultText = await response.text();
+      
+      try {
+        const jsonResponse = JSON.parse(resultText);
+        if (jsonResponse.status === 'error') {
+          throw new Error(`SMS API error: ${jsonResponse.error_string}`);
+        }
+      } catch (e) {
+        // If it's not JSON, ignore and proceed
+      }
+      
+      if (response.ok) {
+        res.json({ success: true, response: resultText });
+      } else {
+        throw new Error(`SMS API error: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error("Failed to send SMS:", error);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
     }
+  });
 
-    const invoiceData = await invoiceRes.json();
-    const invoiceId = invoiceData.invoice_id;
+  // --- Sappay Payment APIs ---
 
-    // 2. If method is Moov (or Coris if configured), trigger get-otp
-    let requiresOtp = false;
-    if (method === 'moov' || method === 'coris') {
-      requiresOtp = true;
-      const otpRes = await fetch("https://api.prod.sappay.net/api/checkout/get-otp/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
+  const SAPPAY_PROCESSORS = {
+    orange: "11688813752134336",
+    moov: "11688813838374580",
+    telecel: "11744695746597207",
+    coris: "11702302492453862"
+  };
+
+  app.post("/api/payments/sappay/initiate", async (req, res) => {
+    const { amount, phone, provider, orderId } = req.body;
+    
+    try {
+      const username = process.env.SAPPAY_USERNAME;
+      const password = process.env.SAPPAY_PASSWORD;
+      const clientId = process.env.SAPPAY_CLIENT_ID;
+      const clientSecret = process.env.SAPPAY_CLIENT_SECRET;
+
+      if (!username || !password || !clientId || !clientSecret) {
+        throw new Error("Sappay credentials missing in environment variables.");
+      }
+
+      // 1. Get Access Token
+      const authResponse = await fetch("https://api.sappay.net/api/v1/oauth/token", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_msisdn: phone,
-          invoice_id: invoiceId,
-          payment_processor_id: SAPPAY_PROCESSORS[method as keyof typeof SAPPAY_PROCESSORS]
+          grant_type: 'password',
+          client_id: clientId,
+          client_secret: clientSecret,
+          username,
+          password,
+          scope: '*'
         })
       });
 
-      if (!otpRes.ok) {
-        const err = await otpRes.text();
-        throw new Error(`Get OTP failed: ${err}`);
+      const authData = await authResponse.json();
+      if (!authData.access_token) {
+        throw new Error("Failed to get Sappay access token: " + JSON.stringify(authData));
       }
-    } else if (method === 'orange' || method === 'telecel') {
-      // Orange and Telecel might also use OTP in some flows, but according to docs:
-      // "Tous les moyens de paiement ne nécessitent pas get-otp/"
-      // We'll assume they still require the user to input an OTP generated via USSD on their phone.
-      requiresOtp = true; 
+
+      // 2. Initiate Payment
+      const processorId = SAPPAY_PROCESSORS[provider as keyof typeof SAPPAY_PROCESSORS] || SAPPAY_PROCESSORS.orange;
+      
+      const paymentResponse = await fetch("https://api.sappay.net/api/v1/payments/collect", {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`
+        },
+        body: JSON.stringify({
+          amount: parseFloat(amount),
+          currency: 'XOF',
+          phone_number: phone,
+          merchant_reference: `ORD-${orderId}-${Date.now()}`,
+          processor_id: processorId,
+          callback_url: 'https://webhook.site/dummy-callback' // For production, use a real callback URL
+        })
+      });
+
+      const paymentData = await paymentResponse.json();
+      res.json({ success: true, data: paymentData });
+
+    } catch (error) {
+      console.error("Sappay error:", error);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
     }
+  });
 
-    res.json({ success: true, invoiceId, requiresOtp });
-  } catch (error) {
-    console.error("Payment Init Error:", error);
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
-  }
-});
-
-app.post("/api/payment/perform", async (req, res) => {
-  try {
-    const { invoiceId, phone, otp, method } = req.body;
-    const token = await getSappayToken();
-
-    const processorId = SAPPAY_PROCESSORS[method as keyof typeof SAPPAY_PROCESSORS];
-    if (!processorId) throw new Error("Invalid payment method");
-
-    const performRes = await fetch("https://api.prod.sappay.net/api/checkout/perform/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        invoice_id: invoiceId,
-        payment_processor_id: processorId,
-        customer_msisdn: phone,
-        otp: otp
-      })
-    });
-
-    if (!performRes.ok) {
-      const err = await performRes.text();
-      throw new Error(`Payment perform failed: ${err}`);
-    }
-
-    const performData = await performRes.json();
-    res.json({ success: true, data: performData });
-  } catch (error) {
-    console.error("Payment Perform Error:", error);
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
-  }
-});
-
-async function startServer() {
-  // Use Vite in development (preview) and static serving in production (deployed).
-  // The platform sets NODE_ENV=production only for the final deployment.
-  const isProd = process.env.NODE_ENV === "production";
-
-  if (!isProd) {
-    console.log('Mode: DEVELOPMENT (Vite)');
-    const { createServer: createViteServer } = await import("vite");
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { 
-        middlewareMode: true,
-        hmr: true
-      },
+      server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    console.log('Mode: PRODUCTION (Static)');
-    
-    // In production, the server is at dist/server.js and assets are in dist/
-    // We serve the directory where the server file resides.
-    const distPath = __dirname;
-    const absoluteDistPath = path.resolve(distPath);
-    
-    console.log('Serving assets from:', absoluteDistPath);
-    
-    if (!existsSync(path.join(absoluteDistPath, 'index.html'))) {
-      console.error('ERROR: index.html not found in:', absoluteDistPath);
-    }
-
-    app.use(express.static(absoluteDistPath));
-    
-    app.get('*', (req, res) => {
-      const indexPath = path.join(absoluteDistPath, 'index.html');
-      if (existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        console.error('ERROR: index.html not found at:', indexPath);
-        res.status(404).send('Application not found. Please check build logs.');
-      }
+    // Serving static files in production
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server ready on 0.0.0.0:${PORT}`);
-    console.log('--- STARTUP COMPLETE ---');
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server listening on port ${PORT}`);
   });
+
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
 }
 
-startServer().catch(err => {
-  console.error('FATAL: Failed to start server:', err);
-  process.exit(1);
+startServer().catch((err) => {
+  console.error("FAILED TO START SERVER:", err);
 });

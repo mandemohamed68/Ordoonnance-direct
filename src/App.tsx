@@ -86,6 +86,7 @@ import autoTable from 'jspdf-autotable';
 import { PullToRefresh } from './components/PullToRefresh';
 import { OrderChat } from './components/OrderChat';
 import { getApiUrl } from './config';
+import { GoogleGenAI } from "@google/genai";
 import { AdminDashboard } from './components/AdminDashboard';
 import { Legal } from './components/Legal';
 import { ReportsView } from './components/ReportsView';
@@ -104,6 +105,18 @@ let DefaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
+
+// --- Global Helpers ---
+const playNotificationSound = () => {
+  try {
+    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    audio.volume = 0.6;
+    const promise = audio.play();
+    if (promise !== undefined) {
+      promise.catch(e => console.log("[DEBUG] Audio blocked by browser:", e));
+    }
+  } catch(e) { console.error("[DEBUG] Sound error:", e); }
+};
 
 // --- Super Admin Utilities moved to shared.ts ---
 
@@ -449,21 +462,8 @@ function NotificationBell({ userId }: { userId: string }) {
         change.type === 'added' && !change.doc.data().read
       );
       
-      // We only play sound if the component is already mounted and it's not the initial load
-      // (Actually onSnapshot fires immediately with current data, so we might need a ref to skip first)
-      if (hasNewUnread && snapshot.metadata.hasPendingWrites === false) {
-        // playNotificationSound function
-        const playSnd = () => {
-          try {
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-            audio.volume = 0.8;
-            const promise = audio.play();
-            if (promise !== undefined) {
-              promise.catch(e => console.warn("[DEBUG] Notification sound blocked:", e));
-            }
-          } catch(e) { console.error("[DEBUG] Sound error:", e); }
-        };
-        playSnd();
+      if (hasNewUnread && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound();
       }
       
       setNotifications(newNotifs);
@@ -642,11 +642,6 @@ export default function App() {
   };
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [lastActivity, setLastActivity] = useState(Date.now());
-
-  const playNotificationSound = () => {
-    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-    audio.play().catch(e => console.log("Audio play blocked by browser", e));
-  };
 
   // Auto-logout logic (15 minutes of inactivity)
   useEffect(() => {
@@ -1823,6 +1818,40 @@ function ImageViewerModal({ imageUrl, onClose }: { imageUrl: string, onClose: ()
   );
 }
 
+const analyzeWithGemini = async (options: { image?: string, text?: string, prompt: string }) => {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("Clé API Gemini non configurée.");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    let response;
+    if (options.image) {
+      response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          { inlineData: { mimeType: "image/jpeg", data: options.image } },
+          { text: options.prompt }
+        ],
+        config: { responseMimeType: "application/json" }
+      });
+    } else {
+      response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `${options.prompt} : "${options.text}"`,
+        config: { responseMimeType: "application/json" }
+      });
+    }
+    return { success: true, text: response.text };
+  } catch (error: any) {
+    console.error("Gemini Error:", error);
+    let msg = error.message || String(error);
+    if (msg.includes("API key not valid") || msg.includes("400")) {
+      msg = "Clé API Gemini invalide ou absente. Assurez-vous qu'elle est configurée dans les paramètres de AI Studio.";
+    }
+    return { success: false, error: msg };
+  }
+};
+
 // --- Patient Dashboard ---
 
 function PatientDashboard({ profile, settings, location }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null }) {
@@ -1945,6 +1974,13 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
   useEffect(() => {
     const q = query(collection(db, 'orders'), where('patientId', '==', profile.uid), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Play sound for new orders or updates
+      const hasChange = snapshot.docChanges().some(change => 
+        change.type === 'added' || change.type === 'modified'
+      );
+      if (hasChange && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound();
+      }
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
@@ -1983,33 +2019,28 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       setUploading(false);
       toast.success("Demande envoyée ! Analyse en cours...");
 
-      // Run parsing with Gemini in the background via server API
+      // Run parsing with Gemini in the background
       (async () => {
         try {
-          const response = await fetch(getApiUrl('/api/ai/analyze'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: manualEntryText,
-              prompt: "Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient. Extrait les noms des médicaments, les dosages et les posologies. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
-            })
+          const data = await analyzeWithGemini({
+            text: manualEntryText,
+            prompt: "Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient. Extrait les noms des médicaments, les dosages et les posologies. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
           });
 
-          const data = await response.json();
           if (!data.success) throw new Error(data.error);
 
           await updateDoc(docRef, {
             extractedData: data.text,
-            status: 'submitted'
+            // Keep status as draft so user can choose total/partial quote
           });
-          toast.success("Analyse terminée ! Les pharmacies peuvent maintenant vous envoyer des devis.");
-        } catch (error) {
+          toast.success("Analyse terminée ! Choisissez votre type de devis.");
+        } catch (error: any) {
           console.error("Gemini Parsing Error:", error);
           await updateDoc(docRef, {
             extractedData: JSON.stringify([{ nom_article: "Erreur d'analyse", dosage: "", posologie: "Veuillez vérifier la saisie" }]),
             status: 'submitted'
           });
-          toast.error("L'analyse a échoué, mais la demande a été transmise.");
+          toast.error(`L'analyse a échoué: ${error.message || "Erreur AI"}. La demande a été transmise pour traitement manuel.`);
         }
       })();
     } catch (err) {
@@ -2097,34 +2128,31 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       setUploading(false);
       toast.success("Ordonnance ajoutée ! Analyse des médicaments en cours...");
 
-      // Run OCR with Gemini in the background via server API
+      // Run OCR with Gemini in the background
       (async () => {
         try {
-          const response = await fetch(getApiUrl('/api/ai/analyze'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image: base64.split(',')[1],
-              prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
-            })
+          const data = await analyzeWithGemini({
+            image: base64.split(',')[1],
+            prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
           });
 
-          const data = await response.json();
           if (!data.success) throw new Error(data.error);
           
           if (data.text) {
             await updateDoc(doc(db, 'prescriptions', docRef.id), {
-              extractedData: data.text
+              extractedData: data.text,
+              // Keep status as draft so user can choose total/partial quote
             });
-            toast.success("Analyse de l'ordonnance terminée !");
+            toast.success("Analyse de l'ordonnance terminée ! Choisissez votre type de devis.");
           } else {
             throw new Error("Aucun texte extrait de l'ordonnance.");
           }
         } catch (err: any) {
           console.error("Gemini OCR failed:", err);
-          toast.error(`L'analyse automatique a échoué: ${err.message || "Erreur inconnue"}. Un pharmacien traitera votre ordonnance manuellement.`);
+          toast.error(`L'analyse automatique a échoué: ${err.message || "Erreur AI"}. Un pharmacien traitera votre ordonnance manuellement.`);
           await updateDoc(doc(db, 'prescriptions', docRef.id), {
-            extractedData: "Erreur d'analyse automatique. Traitement manuel requis."
+            extractedData: "Erreur d'analyse automatique. Traitement manuel requis.",
+            status: 'submitted'
           });
         }
       })();
@@ -2453,57 +2481,60 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
       {/* Background Decorative Element */}
       <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
       
-      {/* Pharmacy Header */}
-      <div className="bg-emerald-600 rounded-[2rem] p-8 mb-12 relative overflow-hidden shadow-lg shadow-emerald-600/10">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+      {/* Pharmacy Header (Android style) */}
+      <div className="bg-emerald-600 rounded-[2rem] p-6 mb-8 relative overflow-hidden shadow-xl shadow-emerald-600/10">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
         <div className="relative flex items-center gap-4 text-white">
-          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
-            <Plus size={24} className="text-white" />
+          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
+            <Plus size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tighter uppercase">Portail Patient Santé</h1>
-            <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest opacity-80">Services Pharmaceutiques & Livraison</p>
+            <h1 className="text-lg font-black tracking-tight uppercase leading-none">Portail Patient</h1>
+            <p className="text-emerald-100 text-[9px] font-bold uppercase tracking-widest mt-1 opacity-80 underline underline-offset-2">Santé & Pharmacie Online</p>
           </div>
         </div>
       </div>
 
       {/* Welcome & Stats */}
-      <div className="space-y-8">
+      <div className="space-y-6">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
           >
-            <h2 className="text-4xl font-bold tracking-tight text-slate-900">Bonjour, {profile.name} 👋</h2>
-            <p className="text-slate-500 mt-2 text-lg">Gérez vos ordonnances et vos livraisons en toute simplicité.</p>
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">Salut, {profile.name} 👋</h2>
+            <p className="text-slate-500 mt-1 text-base sm:text-lg">Gérez vos ordonnances simplement.</p>
           </motion.div>
           
-          <div className="flex gap-4">
-            <div className="medical-card p-6 flex items-center gap-4 min-w-[180px]">
-              <div className="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600 shadow-lg shadow-emerald-100">
-                <FileText size={28} />
+          <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-2 sm:pb-0 scrollbar-hide">
+            <div className="medical-card p-4 sm:p-6 flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[180px]">
+              <div className="w-10 h-10 sm:w-14 sm:h-14 bg-emerald-100 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-600 shadow-sm">
+                <FileText size={20} className="sm:hidden" />
+                <FileText size={28} className="hidden sm:block" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ordonnances</p>
-                <p className="text-3xl font-black text-slate-900">{prescriptions.length}</p>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ordos</p>
+                <p className="text-xl sm:text-3xl font-black text-slate-900">{prescriptions.length}</p>
               </div>
             </div>
-            <div className="medical-card p-6 flex items-center gap-4 min-w-[180px]">
-              <div className="w-14 h-14 bg-sky-100 rounded-2xl flex items-center justify-center text-sky-600 shadow-lg shadow-sky-100">
-                <Package size={28} />
+            <div className="medical-card p-4 sm:p-6 flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[180px]">
+              <div className="w-10 h-10 sm:w-14 sm:h-14 bg-sky-100 rounded-xl sm:rounded-2xl flex items-center justify-center text-sky-600 shadow-sm">
+                <Package size={20} className="sm:hidden" />
+                <Package size={28} className="hidden sm:block" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Commandes</p>
-                <p className="text-3xl font-black text-slate-900">{orders.length}</p>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Suivi</p>
+                <p className="text-xl sm:text-3xl font-black text-slate-900">{orders.filter(o => o.status !== 'completed').length}</p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
+      {/* Navigation Tabs (Desktop Side, Mobile Bottom) */}
       <div className="flex flex-col md:flex-row gap-8">
-        <div className="w-full md:w-64 flex-shrink-0">
+        {/* Desktop Sidebar */}
+        <div className="hidden md:block w-64 flex-shrink-0">
           <div className="sticky top-24 space-y-2 p-3 bg-white rounded-[2.5rem] border border-emerald-100 shadow-xl shadow-emerald-500/5">
             {[
               { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
@@ -2522,6 +2553,41 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               >
                 <tab.icon size={20} />
                 {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Mobile Bottom Navigation (Android Native Feel) */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-[200] px-4 pb-6 pt-2 bg-white/80 backdrop-blur-xl border-t border-slate-100 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
+          <div className="flex items-center justify-around">
+            {[
+              { id: 'prescriptions', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500', iconColor: 'text-emerald-500' },
+              { id: 'orders', label: 'En cours', icon: Package, activeColor: 'bg-sky-500', iconColor: 'text-sky-500' },
+              { id: 'history', label: 'Historique', icon: Clock, activeColor: 'bg-indigo-500', iconColor: 'text-indigo-500' },
+              { id: 'pharmacies', label: 'Santé', icon: MapPin, activeColor: 'bg-amber-500', iconColor: 'text-amber-500' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className="flex flex-col items-center gap-1 min-w-[64px] relative py-2"
+              >
+                <div className={`p-2 rounded-xl transition-all duration-300 ${
+                  activeTab === tab.id 
+                    ? `${tab.activeColor} text-white shadow-lg` 
+                    : `text-slate-400`
+                }`}>
+                  <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                </div>
+                <span className={`text-[10px] font-bold ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400'}`}>
+                  {tab.label}
+                </span>
+                {activeTab === tab.id && (
+                  <motion.div 
+                    layoutId="activeTabUnderline"
+                    className={`absolute -top-2 w-1 h-1 rounded-full ${tab.iconColor.replace('text-', 'bg-')}`} 
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -2613,7 +2679,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               </div>
             )}
 
-            {prescriptions.length === 0 ? (
+            {prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed')).length === 0 ? (
               <div className="bg-white p-12 sm:p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                 <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center text-primary mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
@@ -2642,18 +2708,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                {prescriptions.map(p => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+                {prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed')).map(p => (
                   <motion.div 
                     key={p.id} 
                     layout
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group"
+                    className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group"
                   >
-                    <div className="flex gap-4">
+                    <div className="flex gap-3 sm:gap-4">
                       <div 
-                        className="relative w-24 h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
+                        className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
                         onClick={() => setViewImage(p.imageUrl)}
                       >
                         {p.imageUrl ? (
@@ -2767,13 +2833,21 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                       </div>
                     )}
 
-                    {p.status === 'draft' && (
-                      <div className="flex gap-2">
-                        <button onClick={() => handleRequestQuote(p, 'all')} className="flex-1 bg-primary text-white py-2 rounded-xl text-xs font-bold hover:bg-primary/90 transition-all">
-                          Devis complet
+                    {p.status === 'draft' && p.extractedData && (
+                      <div className="flex gap-3 mt-1">
+                        <button 
+                          onClick={() => handleRequestQuote(p, 'all')} 
+                          className="flex-1 bg-primary text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-primary/90 transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <CheckCircle size={14} />
+                          Complet
                         </button>
-                        <button onClick={() => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} className="flex-1 bg-slate-100 text-slate-600 py-2 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all">
-                          Devis partiel
+                        <button 
+                          onClick={() => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
+                          className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <Plus size={14} />
+                          Partiel
                         </button>
                       </div>
                     )}
@@ -4086,23 +4160,6 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     });
   }, []);
 
-  const playNotificationSound = () => {
-    try {
-      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-      audio.volume = 0.5;
-      const playPromise = audio.play();
-      
-      if (playPromise !== undefined) {
-        playPromise.catch(error => {
-          console.log("[DEBUG] Audio autoplay blocked or failed:", error);
-          // Suggest user interaction if blocked
-        });
-      }
-    } catch (err) {
-      console.error("[DEBUG] Sound execution error:", err);
-    }
-  };
-
   useEffect(() => {
     if (!profile.uid) return;
     if (profile.pharmacyId) {
@@ -4129,6 +4186,12 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allPrescriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
       
+      // Play sound for new prescriptions
+      const hasNew = snapshot.docChanges().some(change => change.type === 'added');
+      if (hasNew && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound();
+      }
+
       // Filter prescriptions:
       // 1. Not rejected by this pharmacy
       // 2. Not locked by another pharmacy (or lock expired > 5 mins)
@@ -4173,6 +4236,13 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      
+      // Play sound for new orders/updates
+      const hasNew = snapshot.docChanges().some(change => change.type === 'added');
+      if (hasNew && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound();
+      }
+
       setOrders(allOrders.filter(o => o.status !== 'completed'));
       
       const completed = allOrders.filter(o => o.status === 'completed');
@@ -4345,6 +4415,27 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     }}>
       <div className="space-y-12 pb-32 pt-2 px-4 sm:px-0 safe-area-pt transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
+      
+      {/* Role Header (Android Style) */}
+      <div className="bg-slate-900 rounded-[2rem] p-6 mb-8 relative overflow-hidden shadow-xl shadow-slate-900/10">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
+        <div className="relative flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center backdrop-blur-md">
+              <Plus size={20} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-black tracking-tight text-white uppercase leading-none">Portail Pharmacien</h1>
+              <p className="text-white/40 text-[9px] font-bold uppercase tracking-widest mt-1">{myPharmacy?.name || "Pharmacie Partenaire"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isOnCallNow && isMyGroupOnCall ? 'bg-indigo-400 animate-pulse' : 'bg-slate-500 opacity-30'}`}></div>
+            <span className="text-[10px] font-black text-white/60 uppercase racking-widest">{isOnCallNow && isMyGroupOnCall ? 'En garde' : 'Standard'}</span>
+          </div>
+        </div>
+      </div>
+
       {/* On-Call Status Banner */}
       {currentCity && isMyGroupOnCall && isOnCallNow && (
         <div className="bg-indigo-600 text-white p-6 rounded-[2rem] shadow-lg flex items-center justify-between">
@@ -4365,53 +4456,50 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
         </div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-        <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl flex items-center justify-between group relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
-          <div className="relative z-10">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Gains Disponibles</p>
-            <h3 className="text-3xl font-bold text-white">{availableGains.toLocaleString()} <span className="text-sm text-slate-400">FCFA</span></h3>
-          </div>
-          <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform relative z-10">
-            <CreditCard size={28} />
-          </div>
-        </div>
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-xl transition-all duration-500">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
-              <Plus size={24} />
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6 mb-8">
+          <div className="bg-slate-900 p-4 sm:p-6 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
+            <div className="relative z-10">
+              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Gains</p>
+              <h3 className="text-sm sm:text-lg font-bold text-white">{availableGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
             </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white/5 rounded-xl flex items-center justify-center text-emerald-400">
+              <CreditCard size={18} />
+            </div>
+          </div>
+          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
             <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Gains du jour / Total</p>
-              <h3 className="text-xl font-bold text-slate-900">
-                {dailyGains.toLocaleString()} / {totalEarned.toLocaleString()} <span className="text-[10px] text-slate-400">FCFA</span>
-              </h3>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Jour</p>
+              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{dailyGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
+            </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+              <TrendingUp size={18} />
+            </div>
+          </div>
+          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+            <div>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Attente</p>
+              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{prescriptions.length}</h3>
+            </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+              <FileText size={18} />
+            </div>
+          </div>
+          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+            <div>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
+              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{completedCount}</h3>
+            </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-secondary/10 rounded-xl flex items-center justify-center text-secondary">
+              <Package size={18} />
             </div>
           </div>
         </div>
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-xl transition-all duration-500">
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">À Traiter</p>
-            <h3 className="text-3xl font-bold text-slate-900">{prescriptions.length}</h3>
-          </div>
-          <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
-            <FileText size={28} />
-          </div>
-        </div>
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-xl transition-all duration-500">
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Commandes traitées</p>
-            <h3 className="text-3xl font-bold text-slate-900">{completedCount}</h3>
-          </div>
-          <div className="w-14 h-14 bg-secondary/10 rounded-2xl flex items-center justify-center text-secondary group-hover:scale-110 transition-transform">
-            <Package size={28} />
-          </div>
-        </div>
-      </div>
 
+      {/* Navigation Tabs (Desktop Side, Mobile Bottom) */}
       <div className="flex flex-col md:flex-row gap-8">
-        <div className="w-full md:w-64 flex-shrink-0">
+        {/* Desktop Sidebar */}
+        <div className="hidden md:block w-64 flex-shrink-0">
           <div className="sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm">
             {[
               { id: 'pending', label: 'À Traiter', icon: FileText, count: prescriptions.length, color: 'text-primary', bg: 'bg-primary/5' },
@@ -4439,6 +4527,35 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                     {tab.count}
                   </span>
                 )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Mobile Bottom Navigation (Android Native Feel) */}
+        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pb-5 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2">
+          <div className="flex items-center justify-around">
+            {[
+              { id: 'pending', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500' },
+              { id: 'active', label: 'Commandes', icon: Package, activeColor: 'bg-sky-500' },
+              { id: 'history', label: 'Archives', icon: Clock, activeColor: 'bg-indigo-500' },
+              { id: 'profile', label: 'Profil', icon: User, activeColor: 'bg-slate-500' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
+              >
+                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
+                  activeTab === tab.id 
+                    ? `${tab.activeColor} text-white shadow-lg` 
+                    : `text-slate-500`
+                }`}>
+                  <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                </div>
+                <span className={`text-[9px] font-black uppercase tracking-tight ${activeTab === tab.id ? 'text-white' : 'text-slate-500'}`}>
+                  {tab.label}
+                </span>
               </button>
             ))}
           </div>
@@ -5432,6 +5549,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settings: Settings | null }) {
   const [missions, setMissions] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'available' | 'active' | 'history' | 'wallet' | 'profile' | 'reports'>('available');
+
   const [showPickupQR, setShowPickupQR] = useState<Order | null>(null);
   const [showDeliveryVerify, setShowDeliveryVerify] = useState<Order | null>(null);
   const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
@@ -5454,6 +5572,12 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
       // Filter and sort in JS to avoid composite index requirement
       const allMissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
       
+      // Play sound for new missions
+      const hasNew = snapshot.docChanges().some(change => change.type === 'added');
+      if (hasNew && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound();
+      }
+
       // Sort by createdAt desc
       allMissions.sort((a, b) => {
         const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
@@ -5595,44 +5719,58 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="space-y-12 pb-20">
-        {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl flex items-center justify-between group relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
-          <div className="relative z-10">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Gains Disponibles</p>
-            <h3 className="text-3xl font-bold text-white">{availableGains.toLocaleString()} <span className="text-sm text-slate-400">FCFA</span></h3>
-          </div>
-          <div className="w-16 h-16 bg-white/5 rounded-3xl flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform relative z-10">
-            <CreditCard size={32} />
-          </div>
-        </div>
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-xl transition-all duration-500">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
-              <Plus size={28} />
+      <div className="space-y-12 pb-32 pt-2 px-4 sm:px-0 safe-area-pt transition-all">
+      
+      {/* Role Header (Android Style) */}
+      <div className="bg-emerald-600 rounded-[2rem] p-6 mb-8 relative overflow-hidden shadow-xl shadow-emerald-600/10">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
+        <div className="relative flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center backdrop-blur-md">
+              <Truck size={20} className="text-white" />
             </div>
             <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Gains du jour / Total</p>
-              <h3 className="text-2xl font-bold text-slate-900">
-                {dailyGains.toLocaleString()} / {totalEarned.toLocaleString()} <span className="text-xs text-slate-400">FCFA</span>
-              </h3>
+              <h1 className="text-lg font-black tracking-tight text-white uppercase leading-none">Espace Livreur</h1>
+              <p className="text-white/60 text-[9px] font-bold uppercase tracking-widest mt-1">Prêt pour livraison</p>
             </div>
           </div>
-        </div>
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-xl transition-all duration-500">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
-              <Truck size={28} />
-            </div>
-            <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Livraisons terminées</p>
-              <h3 className="text-2xl font-bold text-slate-900">{completedMissionsCount}</h3>
-            </div>
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${availableMissions.length > 0 ? 'bg-white animate-pulse' : 'bg-white/30'}`}></div>
+            <span className="text-[10px] font-black text-white/60 uppercase racking-widest">Actif</span>
           </div>
         </div>
       </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 mb-8">
+          <div className="bg-slate-900 p-4 sm:p-6 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
+            <div className="relative z-10">
+              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Gains</p>
+              <h3 className="text-sm sm:text-lg font-bold text-white">{availableGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
+            </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white/5 rounded-xl flex items-center justify-center text-emerald-400">
+              <CreditCard size={18} />
+            </div>
+          </div>
+          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+            <div>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Missions</p>
+              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{availableMissions.length}</h3>
+            </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+              <MapPin size={18} />
+            </div>
+          </div>
+          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+            <div>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
+              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{completedMissionsCount}</h3>
+            </div>
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+              <Package size={18} />
+            </div>
+          </div>
+        </div>
       <div className="bg-primary p-8 rounded-[2.5rem] shadow-xl shadow-primary/20 text-white flex items-center justify-between group">
         <div>
           <p className="text-[10px] font-black text-white/60 uppercase tracking-widest mb-2">Missions disponibles</p>
@@ -5643,8 +5781,10 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
         </div>
       </div>
 
+      {/* Navigation Tabs (Desktop Side, Mobile Bottom) */}
       <div className="flex flex-col md:flex-row gap-8">
-        <div className="w-full md:w-64 flex-shrink-0">
+        {/* Desktop Sidebar */}
+        <div className="hidden md:block w-64 flex-shrink-0">
           <div className="sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm">
             {[
               { id: 'available', label: 'Disponibles', icon: MapPin, count: availableMissions.length, color: 'text-primary', bg: 'bg-primary/5' },
@@ -5671,6 +5811,41 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                   <span className={`text-[10px] px-2.5 py-1 rounded-full ${activeTab === tab.id ? 'bg-white shadow-sm' : 'bg-slate-100'}`}>
                     {tab.count}
                   </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Mobile Bottom Navigation (Android Native Feel) */}
+        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pb-5 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2">
+          <div className="flex items-center justify-around">
+            {[
+              { id: 'available', label: 'Mission', icon: MapPin, activeColor: 'bg-emerald-500' },
+              { id: 'active', label: 'En cours', icon: Truck, activeColor: 'bg-sky-500' },
+              { id: 'history', label: 'Missions', icon: Clock, activeColor: 'bg-indigo-500' },
+              { id: 'profile', label: 'Profil', icon: User, activeColor: 'bg-slate-500' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
+              >
+                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
+                  activeTab === tab.id 
+                    ? `${tab.activeColor} text-white shadow-lg` 
+                    : `text-slate-500`
+                }`}>
+                  <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                </div>
+                <span className={`text-[9px] font-black uppercase tracking-tight ${activeTab === tab.id ? 'text-white' : 'text-slate-500'}`}>
+                  {tab.label}
+                </span>
+                {activeTab === tab.id && (
+                  <motion.div 
+                    layoutId="activeTabGlowDelivery"
+                    className="absolute -top-1 w-8 h-[2px] rounded-full bg-white/30" 
+                  />
                 )}
               </button>
             ))}
