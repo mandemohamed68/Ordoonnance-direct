@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">OrdonnanceDirectApp</string>
-    <string name="title_activity_main">OrdonnanceDirectApp</string>
+    <string name="app_name">PharmaLiv</string>
+    <string name="title_activity_main">PharmaLiv</string>
     <string name="package_name">com.ordonnance_direct.app</string>
     <string name="custom_url_scheme">com.ordonnance_direct.app</string>
 </resources>

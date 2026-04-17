@@ -7,14 +7,14 @@
   "theme_color": "#10b981",
   "icons": [
     {
-      "src": "https://api.iconify.design/lucide:cross.svg?color=%2310b981",
+      "src": "/logo192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/png"
     },
     {
-      "src": "https://api.iconify.design/lucide:cross.svg?color=%2310b981",
+      "src": "/logo512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/png"
     }
   ]
 }

@@ -2,91 +2,144 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { existsSync } from "fs";
 import dotenv from "dotenv";
+import cors from "cors";
+import { createServer as createViteServer } from "vite";
 dotenv.config();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
-var app = express();
-var PORT = parseInt(process.env.PORT || process.env.DEFAULT_APP_PORT || "3000", 10);
-console.log("--- SERVER STARTUP ---");
-console.log("Time:", (/* @__PURE__ */ new Date()).toISOString());
-console.log("Directory:", __dirname);
-console.log("Port:", PORT);
-process.on("uncaughtException", (err) => {
-  console.error("CRITICAL: Uncaught Exception:", err);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("CRITICAL: Unhandled Rejection:", reason);
-});
-app.use(express.json({ limit: "10mb" }));
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-});
-app.post("/api/send-sms", async (req, res) => {
-  const { to, message } = req.body;
-  try {
-    const apiUrl = "https://tfso.sappay.net/index.php";
-    const params = new URLSearchParams({
-      app: "ws",
-      u: process.env.SMS_API_USER || "",
-      h: process.env.SMS_API_HASH || "",
-      op: "pv",
-      to,
-      msg: message,
-      sender_id: process.env.SMS_SENDER_ID || ""
-    });
-    const response = await fetch(`${apiUrl}?${params.toString()}`);
-    const resultText = await response.text();
-    console.log("SMS API response:", resultText);
-    if (response.ok) {
-      res.json({ success: true, response: resultText });
-    } else {
-      throw new Error(`SMS API error: ${response.statusText}`);
-    }
-  } catch (error) {
-    console.error("Failed to send SMS:", error);
-    res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
-  }
-});
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd) {
-    console.log("Mode: DEVELOPMENT (Vite)");
-    const { createServer: createViteServer } = await import("vite");
+  const app = express();
+  app.use(cors());
+  const PORT = parseInt(process.env.PORT || "3000", 10);
+  console.log("--- SERVER STARTUP (V2) ---");
+  console.log("Time:", (/* @__PURE__ */ new Date()).toISOString());
+  console.log("Directory:", __dirname);
+  console.log("Port:", PORT);
+  console.log("Environment:", process.env.NODE_ENV);
+  app.use(express.json({ limit: "10mb" }));
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+  });
+  app.post("/api/send-sms", async (req, res) => {
+    const { to, message } = req.body;
+    try {
+      if (!process.env.SMS_API_USER || !process.env.SMS_API_HASH) {
+        throw new Error("Identifiants SMS manquants. Veuillez configurer SMS_API_USER et SMS_API_HASH dans les param\xE8tres (Secrets) de AI Studio.");
+      }
+      const apiUrl = `https://www.aqilasms.com/api/v1/send?user=${process.env.SMS_API_USER}&hash=${process.env.SMS_API_HASH}&to=${to}&message=${encodeURIComponent(message)}&sender=${process.env.SMS_SENDER_ID || "Sant\xE9Direct"}`;
+      const response = await fetch(apiUrl);
+      const resultText = await response.text();
+      try {
+        const jsonResponse = JSON.parse(resultText);
+        if (jsonResponse.status === "error") {
+          throw new Error(`SMS API error: ${jsonResponse.error_string}`);
+        }
+      } catch (e) {
+      }
+      if (response.ok) {
+        res.json({ success: true, response: resultText });
+      } else {
+        throw new Error(`SMS API error: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error("Failed to send SMS:", error);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  const SAPPAY_PROCESSORS = {
+    orange: "11688813752134336",
+    moov: "11688813838374580",
+    telecel: "11744695746597207",
+    coris: "11702302492453862"
+  };
+  app.post("/api/payment/init", async (req, res) => {
+    const { amount, phone, email, method } = req.body;
+    try {
+      const invoiceId = `INV-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      res.json({ success: true, invoiceId });
+    } catch (error) {
+      res.status(500).json({ success: false, error: "Initialization failed" });
+    }
+  });
+  app.post("/api/payment/perform", async (req, res) => {
+    const { invoiceId, phone, otp, method } = req.body;
+    try {
+      if (!otp) throw new Error("OTP is required");
+      res.json({ success: true, transactionId: `TX-${Date.now()}` });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : "Payment failed" });
+    }
+  });
+  app.post("/api/payments/sappay/initiate", async (req, res) => {
+    const { amount, phone, provider, orderId } = req.body;
+    try {
+      const username = process.env.SAPPAY_USERNAME;
+      const password = process.env.SAPPAY_PASSWORD;
+      const clientId = process.env.SAPPAY_CLIENT_ID;
+      const clientSecret = process.env.SAPPAY_CLIENT_SECRET;
+      if (!username || !password || !clientId || !clientSecret) {
+        throw new Error("Sappay credentials missing in environment variables.");
+      }
+      const authResponse = await fetch("https://api.sappay.net/api/v1/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "password",
+          client_id: clientId,
+          client_secret: clientSecret,
+          username,
+          password,
+          scope: "*"
+        })
+      });
+      const authData = await authResponse.json();
+      if (!authData.access_token) {
+        throw new Error("Failed to get Sappay access token: " + JSON.stringify(authData));
+      }
+      const processorId = SAPPAY_PROCESSORS[provider] || SAPPAY_PROCESSORS.orange;
+      const paymentResponse = await fetch("https://api.sappay.net/api/v1/payments/collect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${authData.access_token}`
+        },
+        body: JSON.stringify({
+          amount: parseFloat(amount),
+          currency: "XOF",
+          phone_number: phone,
+          merchant_reference: `ORD-${orderId}-${Date.now()}`,
+          processor_id: processorId,
+          callback_url: "https://webhook.site/dummy-callback"
+          // For production, use a real callback URL
+        })
+      });
+      const paymentData = await paymentResponse.json();
+      res.json({ success: true, data: paymentData });
+    } catch (error) {
+      console.error("Sappay error:", error);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        hmr: true
-      },
+      server: { middlewareMode: true },
       appType: "spa"
     });
     app.use(vite.middlewares);
   } else {
-    console.log("Mode: PRODUCTION (Static)");
-    const distPath = __dirname;
-    const absoluteDistPath = path.resolve(distPath);
-    console.log("Serving assets from:", absoluteDistPath);
-    if (!existsSync(path.join(absoluteDistPath, "index.html"))) {
-      console.error("ERROR: index.html not found in:", absoluteDistPath);
-    }
-    app.use(express.static(absoluteDistPath));
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      const indexPath = path.join(absoluteDistPath, "index.html");
-      if (existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        console.error("ERROR: index.html not found at:", indexPath);
-        res.status(404).send("Application not found. Please check build logs.");
-      }
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server ready on 0.0.0.0:${PORT}`);
-    console.log("--- STARTUP COMPLETE ---");
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server listening on port ${PORT}`);
   });
+  server.keepAliveTimeout = 65e3;
+  server.headersTimeout = 66e3;
 }
 startServer().catch((err) => {
-  console.error("FATAL: Failed to start server:", err);
-  process.exit(1);
+  console.error("FAILED TO START SERVER:", err);
 });

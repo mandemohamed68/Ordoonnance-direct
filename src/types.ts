@@ -1,4 +1,4 @@
-export type UserRole = 'patient' | 'pharmacist' | 'delivery' | 'admin' | 'super-admin' | 'moderator' | 'support';
+export type UserRole = 'patient' | 'pharmacist' | 'delivery' | 'admin' | 'super-admin';
 
 export interface UserProfile {
   uid: string;
@@ -14,6 +14,9 @@ export interface UserProfile {
   authorizationNumber?: string;
   cityId?: string;
   groupId?: string;
+  idCardFront?: string;
+  idCardBack?: string;
+  acceptedTerms?: boolean;
   location?: { lat: number; lng: number };
   lastLocationUpdate?: any;
   walletBalance?: number;
@@ -73,6 +76,7 @@ export interface Order {
   prescriptionImageUrl?: string;
   patientId: string;
   patientName?: string;
+  patientPhone?: string;
   hospitalLocation?: string;
   pharmacistId?: string;
   pharmacyName?: string;
@@ -92,6 +96,7 @@ export interface Order {
   deliverySignature?: string;
   status: 'pending_quote' | 'pending_payment' | 'paid' | 'preparing' | 'ready' | 'delivering' | 'completed' | 'quote_rejected';
   deliveryMethod?: 'delivery' | 'pickup';
+  quoteType?: 'full' | 'partial';
   items?: OrderItem[];
   totalAmount?: number;
   medicationTotal?: number;

@@ -4,14 +4,14 @@ import {
   Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, 
   Users, Activity, FileText, Package, ShieldCheck, Trash2, Search,
   TrendingUp, DollarSign, BarChart3, Lock, CreditCard, Terminal, UserCog, Power, X, Download, MessageSquare,
-  Plus, MapPin, Percent, Navigation
+  Plus, MapPin, Percent, Navigation, Camera
 } from 'lucide-react';
 import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase';
 import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail } from '../utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
 import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
@@ -244,13 +244,18 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
 
     const q = query(
       collection(db, 'support_messages'),
-      where('chatId', '==', selectedChat),
-      orderBy('createdAt', 'asc')
+      where('chatId', '==', selectedChat)
     );
     
     const unsub = onSnapshot(q, (snapshot) => {
-      setSelectedChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+      const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      messages.sort((a: any, b: any) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateA - dateB; // asc
+      });
+      setSelectedChatMessages(messages);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `support_messages`));
 
     return () => unsub();
   }, [selectedChat]);
@@ -259,7 +264,23 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   const [addingPharmacy, setAddingPharmacy] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
   const [addingUser, setAddingUser] = useState(false);
+  const [deliveryExtra, setDeliveryExtra] = useState({ idCardFront: '', idCardBack: '', acceptedTerms: false });
+  const [viewImage, setViewImage] = useState<string | null>(null);
+  const [editingDeliveryUser, setEditingDeliveryUser] = useState<UserProfile | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+
+  const handleSaveDeliveryProfile = async (updatedData: Partial<UserProfile>) => {
+    if (!editingDeliveryUser) return;
+    try {
+      await updateDoc(doc(db, 'users', editingDeliveryUser.uid), updatedData);
+      toast.success("Profil livreur mis à jour !");
+      setEditingDeliveryUser(null);
+      await addSystemLog('UPDATE_USER', `Mise à jour du profil livreur: ${editingDeliveryUser.name}`);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `users/${editingDeliveryUser.uid}`);
+      toast.error("Erreur lors de la mise à jour");
+    }
+  };
 
   const handleHardReset = async () => {
     if (!window.confirm("ATTENTION: Cette action va supprimer TOUTES les données (commandes, ordonnances, transactions, retraits, logs, notifications) et remettre tous les soldes à zéro. Cette action est irréversible. Êtes-vous sûr ?")) return;
@@ -332,6 +353,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
     }
   };
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterRole, setFilterRole] = useState<string>('all');
   const [seeding, setSeeding] = useState(false);
   const [importingPharmacies, setImportingPharmacies] = useState(false);
 
@@ -403,14 +425,19 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
-    const qOrders = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100));
+    const qOrders = query(collection(db, 'orders'), limit(150));
     const unsubOrders = onSnapshot(qOrders, (snapshot) => {
-      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      // Sort client-side to avoid composite index requirements
+      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
+      setOrders(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
 
-    const qPrescriptions = query(collection(db, 'prescriptions'), orderBy('createdAt', 'desc'), limit(100));
+    const qPrescriptions = query(collection(db, 'prescriptions'), limit(150));
     const unsubPrescriptions = onSnapshot(qPrescriptions, (snapshot) => {
-      setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription)));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
+      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
+      setPrescriptions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'prescriptions'));
 
     const qPharmacies = query(collection(db, 'pharmacies'), limit(100));
@@ -418,19 +445,25 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       setPharmacies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Pharmacy)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'pharmacies'));
 
-    const qWithdrawals = query(collection(db, 'withdrawals'), orderBy('createdAt', 'desc'), limit(100));
+    const qWithdrawals = query(collection(db, 'withdrawals'), limit(100));
     const unsubWithdrawals = onSnapshot(qWithdrawals, (snapshot) => {
-      setWithdrawals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest)));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest));
+      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
+      setWithdrawals(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'withdrawals'));
 
-    const qLogs = query(collection(db, 'system_logs'), orderBy('timestamp', 'desc'), limit(100));
+    const qLogs = query(collection(db, 'system_logs'), limit(100));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
-      setSystemLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SystemLog)));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => parseDate(b.timestamp).getTime() - parseDate(a.timestamp).getTime());
+      setSystemLogs(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'system_logs'));
 
-    const qTransactions = query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(100));
+    const qTransactions = query(collection(db, 'transactions'), limit(150));
     const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
-      setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
+      setTransactions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
 
     const qSupport = query(collection(db, 'support_chats'), orderBy('lastTime', 'desc'));
@@ -574,6 +607,17 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       return;
     }
 
+    if (newUser.role === 'delivery') {
+      if (!deliveryExtra.idCardFront || !deliveryExtra.idCardBack) {
+        toast.error("Veuillez fournir le recto et le verso de la pièce d'identité du livreur.");
+        return;
+      }
+      if (!deliveryExtra.acceptedTerms) {
+        toast.error("Le livreur doit accepter les conditions d'utilisation.");
+        return;
+      }
+    }
+
     setAddingUser(true);
     try {
       // Create a unique ID for the user
@@ -639,6 +683,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         }
       } else if (newUser.role === 'delivery') {
         userData.address = newUser.address;
+        userData.idCardFront = deliveryExtra.idCardFront;
+        userData.idCardBack = deliveryExtra.idCardBack;
+        userData.acceptedTerms = deliveryExtra.acceptedTerms;
       }
 
       await setDoc(doc(db, 'users', uid), userData);
@@ -647,6 +694,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       await addSystemLog('CREATE_USER_AND_PHARMACY', `Création d'un ${roleText}: ${newUser.name}`);
       
       setNewUser({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
+      setDeliveryExtra({ idCardFront: '', idCardBack: '', acceptedTerms: false });
       toast.success(`${roleText} créé avec succès.`);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `users-pharmacies`);
@@ -944,7 +992,48 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       <div className="space-y-12 pb-20">
       <div className="flex flex-col md:flex-row gap-8">
         <div className="w-full md:w-64 flex-shrink-0">
-          <div className="sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
+          {/* Mobile Tab Selector */}
+          <div className="md:hidden flex overflow-x-auto pb-4 gap-2 scrollbar-hide snap-x">
+            {[
+              { id: 'overview', label: "Vue", icon: Activity },
+              { id: 'support', label: 'Support', icon: MessageSquare, badge: (supportChats || []).reduce((acc, chat) => acc + (chat.unreadAdminCount || 0), 0) },
+              { id: 'approvals', label: 'Approb.', icon: ShieldCheck },
+              { id: 'users', label: 'Users', icon: Users },
+              { id: 'pharmacies', label: 'Pharma', icon: Package },
+              { id: 'orders', label: 'CMD', icon: Truck },
+              { id: 'settings', label: 'Param', icon: SettingsIcon },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`snap-start flex flex-col items-center gap-1.5 min-w-[80px] p-3 rounded-2xl transition-all ${
+                  activeTab === tab.id 
+                    ? 'bg-primary text-white shadow-lg shadow-primary/20' 
+                    : 'bg-white text-slate-400 border border-slate-100'
+                }`}
+              >
+                <div className="relative">
+                  <tab.icon size={20} />
+                  {tab.badge > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1 rounded-full">
+                      {tab.badge}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-tight">{tab.label}</span>
+              </button>
+            ))}
+            <button 
+              onClick={() => setActiveTab('users')}
+              className="snap-start flex flex-col items-center justify-center gap-1.5 min-w-[80px] p-3 rounded-2xl bg-slate-50 text-slate-400 border border-slate-200 border-dashed"
+            >
+              <Plus size={20} />
+              <span className="text-[10px] font-black uppercase tracking-tight">Plus</span>
+            </button>
+          </div>
+
+          {/* Desktop Sidebar */}
+          <div className="hidden md:block sticky top-24 space-y-2 p-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
             {[
               { id: 'overview', label: "Vue d'ensemble", icon: Activity, color: 'text-primary', bg: 'bg-primary/5' },
               { id: 'support', label: 'Support Chat', icon: MessageSquare, color: 'text-primary', bg: 'bg-primary/5', badge: (supportChats || []).reduce((acc, chat) => acc + (chat.unreadAdminCount || 0), 0) },
@@ -1224,6 +1313,23 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                                     <span className="font-bold text-slate-700">Adresse:</span> {user.address || '-'}
                                   </div>
                                 )}
+                                {user.role === 'delivery' && (user.idCardFront || user.idCardBack) && (
+                                  <div className="flex gap-2 mt-2">
+                                    {user.idCardFront && (
+                                      <button onClick={() => setViewImage(user.idCardFront)} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold text-slate-600 hover:bg-slate-200">Voir CNI Recto</button>
+                                    )}
+                                    {user.idCardBack && (
+                                      <button onClick={() => setViewImage(user.idCardBack)} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold text-slate-600 hover:bg-slate-200">Voir CNI Verso</button>
+                                    )}
+                                  </div>
+                                )}
+                                {user.role === 'delivery' && user.acceptedTerms && (
+                                  <div className="mt-1">
+                                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 w-fit">
+                                      <CheckCircle size={10} /> Conditions acceptées
+                                    </span>
+                                  </div>
+                                )}
                               </td>
                               <td className="p-6 text-right">
                                 <div className="flex items-center justify-end gap-2">
@@ -1262,22 +1368,40 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             >
               <div className="space-y-8">
                 <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                  <div className="p-8 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="p-8 border-b border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
                     <div>
-                      <h3 className="text-xl font-bold">Gestion des Utilisateurs</h3>
-                      <p className="text-sm text-slate-500 mt-1">Modifiez les rôles et accédez aux informations des utilisateurs.</p>
+                      <h3 className="text-xl font-bold font-sans tracking-tight">Gestion des Utilisateurs</h3>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Gérez les accès et les rôles de la plateforme</p>
                     </div>
-                    <div className="relative">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input 
-                        type="text"
-                        placeholder="Rechercher un utilisateur..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-12 pr-6 py-3 bg-slate-100 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary/20 transition-all w-full sm:w-64"
-              />
-            </div>
-          </div>
+                    <div className="flex flex-col sm:flex-row items-center gap-4 w-full xl:w-auto">
+                      {/* Role Filter Tabs */}
+                      <div className="flex flex-wrap bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-inner w-full sm:w-auto overflow-x-auto shrink-0">
+                        {['all', 'patient', 'pharmacist', 'delivery', 'admin'].map((role) => (
+                          <button
+                            key={role}
+                            onClick={() => setFilterRole(role)}
+                            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex-1 sm:flex-none ${
+                              filterRole === role
+                                ? 'bg-white text-primary shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            {role === 'all' ? 'Tous' : role === 'pharmacist' ? 'Pharmaciens' : role === 'delivery' ? 'Livreurs' : role}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="relative w-full sm:w-64 shrink-0">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                          type="text"
+                          placeholder="Rechercher par nom..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-12 pr-6 py-3 bg-slate-100 border-none rounded-2xl text-xs font-bold focus:ring-2 focus:ring-primary/20 transition-all w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -1294,12 +1418,33 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               <tbody className="divide-y divide-slate-100">
                 {users
                   .filter(u => 
-                    u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                    u.email.toLowerCase().includes(searchTerm.toLowerCase())
+                    (filterRole === 'all' || u.role === filterRole) && (
+                      u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                      u.email.toLowerCase().includes(searchTerm.toLowerCase())
+                    )
                   )
                   .map((user) => (
                   <tr key={user.uid} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6 font-bold text-slate-900">{user.name}</td>
+                    <td className="p-6">
+                      <div className="font-bold text-slate-900">{user.name}</div>
+                      {user.role === 'delivery' && (user.idCardFront || user.idCardBack) && (
+                        <div className="flex gap-2 mt-2">
+                          {user.idCardFront && (
+                            <button onClick={() => setViewImage(user.idCardFront)} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold text-slate-600 hover:bg-slate-200 tracking-tight">Voir CNI Recto</button>
+                          )}
+                          {user.idCardBack && (
+                            <button onClick={() => setViewImage(user.idCardBack)} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold text-slate-600 hover:bg-slate-200 tracking-tight">Voir CNI Verso</button>
+                          )}
+                        </div>
+                      )}
+                      {user.role === 'delivery' && user.acceptedTerms && (
+                        <div className="mt-1">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 w-fit">
+                            <CheckCircle size={10} /> Conditions acceptées
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="p-6 text-slate-500 text-sm">{user.email}</td>
                     <td className="p-6 text-slate-500 text-sm">{user.phone || '-'}</td>
                     <td className="p-6">
@@ -1353,14 +1498,25 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       </select>
                     </td>
                     <td className="p-6 text-right">
-                      <button 
-                        onClick={() => handleDeleteUser(user.uid)}
-                        disabled={isPrimaryAdminEmail(user.email) || (!isPrimaryAdminEmail(profile.email) && user.role === 'super-admin')}
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-30"
-                        title="Supprimer l'utilisateur"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        {user.role === 'delivery' && (
+                          <button 
+                            onClick={() => setEditingDeliveryUser(user)}
+                            className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Editer le profil livreur"
+                          >
+                            <UserCog size={16} />
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => handleDeleteUser(user.uid)}
+                          disabled={isPrimaryAdminEmail(user.email) || (!isPrimaryAdminEmail(profile.email) && user.role === 'super-admin')}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-30"
+                          title="Supprimer l'utilisateur"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1531,6 +1687,91 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                       placeholder="-1.5197"
                     />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {newUser.role === 'delivery' && (
+              <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100 space-y-6">
+                <div className="flex items-center gap-3 mb-2">
+                  <CheckCircle className="text-emerald-600" size={18} />
+                  <h4 className="text-sm font-bold text-slate-900">Documents et Vérification</h4>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto *</label>
+                    <div className="relative">
+                      {deliveryExtra.idCardFront ? (
+                        <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
+                          <img src={deliveryExtra.idCardFront} className="w-full h-full object-cover" />
+                          <button type="button" onClick={() => setDeliveryExtra({...deliveryExtra, idCardFront: ''})} className="absolute top-1 right-1 w-6 h-6 bg-rose-500/90 hover:bg-rose-500 text-white rounded-lg flex items-center justify-center shadow-lg transition-colors"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <label className="w-full aspect-[3/2] bg-white border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all group">
+                          <Camera size={20} className="group-hover:scale-110 transition-transform mb-1" />
+                          <span className="text-[8px] font-bold uppercase tracking-widest text-center px-1">Img Recto</span>
+                          <input 
+                            type="file" accept="image/*" capture="environment" className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                setDeliveryExtra({...deliveryExtra, idCardFront: base64});
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso *</label>
+                    <div className="relative">
+                      {deliveryExtra.idCardBack ? (
+                        <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
+                          <img src={deliveryExtra.idCardBack} className="w-full h-full object-cover" />
+                          <button type="button" onClick={() => setDeliveryExtra({...deliveryExtra, idCardBack: ''})} className="absolute top-1 right-1 w-6 h-6 bg-rose-500/90 hover:bg-rose-500 text-white rounded-lg flex items-center justify-center shadow-lg transition-colors"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <label className="w-full aspect-[3/2] bg-white border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all group">
+                          <Camera size={20} className="group-hover:scale-110 transition-transform mb-1" />
+                          <span className="text-[8px] font-bold uppercase tracking-widest text-center px-1">Img Verso</span>
+                          <input 
+                            type="file" accept="image/*" capture="environment" className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                setDeliveryExtra({...deliveryExtra, idCardBack: base64});
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center h-5 mt-1">
+                    <input
+                      id="terms"
+                      type="checkbox"
+                      checked={deliveryExtra.acceptedTerms}
+                      onChange={(e) => setDeliveryExtra({...deliveryExtra, acceptedTerms: e.target.checked})}
+                      className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 focus:ring-offset-0 bg-slate-50 transition-colors cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex-1 text-sm">
+                    <label htmlFor="terms" className="font-bold text-slate-900 cursor-pointer block mb-1">
+                      Conditions d'utilisation
+                    </label>
+                    <p className="text-slate-500 text-[11px] leading-relaxed mb-2">
+                       En cochant cette case, le livreur s'engage à respecter les normes de confidentialité quant aux ordonnances médicales transportées. Les informations de santé sont strictement confidentielles.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -3140,8 +3381,6 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             {[
               { role: 'super-admin', name: 'Super Admin', desc: 'Accès total à toutes les fonctionnalités et paramètres.', count: users.filter(u => u.role === 'super-admin').length },
               { role: 'admin', name: 'Administrateur', desc: 'Gestion des utilisateurs, commandes et pharmacies.', count: users.filter(u => u.role === 'admin').length },
-              { role: 'moderator', name: 'Modérateur', desc: 'Validation des ordonnances et gestion des litiges.', count: users.filter(u => u.role === 'moderator').length },
-              { role: 'support', name: 'Support Client', desc: 'Accès en lecture seule pour assister les utilisateurs.', count: users.filter(u => u.role === 'support').length },
             ].map(r => (
               <div key={r.role} className="p-6 border border-slate-100 rounded-3xl hover:border-fuchsia-200 transition-colors">
                 <div className="flex items-center justify-between mb-4">
@@ -4034,6 +4273,147 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20"
           >
             Enregistrer la rotation
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )}
+</AnimatePresence>
+
+<AnimatePresence>
+  {editingDeliveryUser && (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white rounded-[2.5rem] p-8 max-w-2xl w-full shadow-2xl overflow-y-auto max-h-[90vh]"
+      >
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-2xl font-black text-slate-900">
+            Editer Profil Livreur
+          </h3>
+          <button onClick={() => setEditingDeliveryUser(null)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom complet</label>
+              <input 
+                type="text" 
+                value={editingDeliveryUser.name}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, name: e.target.value})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Téléphone</label>
+              <input 
+                type="tel" 
+                value={editingDeliveryUser.phone || ''}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, phone: e.target.value})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse</label>
+            <input 
+              type="text" 
+              value={editingDeliveryUser.address || ''}
+              onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, address: e.target.value})}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto</label>
+              <div className="relative">
+                {editingDeliveryUser.idCardFront ? (
+                  <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm group">
+                    <img src={editingDeliveryUser.idCardFront} className="w-full h-full object-cover cursor-pointer" onClick={() => setViewImage(editingDeliveryUser.idCardFront)} />
+                    <button type="button" onClick={() => setEditingDeliveryUser({...editingDeliveryUser, idCardFront: ''})} className="absolute top-1 right-1 w-6 h-6 bg-rose-500/90 hover:bg-rose-500 text-white rounded-lg flex items-center justify-center shadow-lg transition-colors"><Trash2 size={12} /></button>
+                  </div>
+                ) : (
+                  <label className="w-full aspect-[3/2] bg-white border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all group">
+                    <Camera size={20} className="group-hover:scale-110 transition-transform mb-1" />
+                    <span className="text-[8px] font-bold uppercase tracking-widest text-center px-1">Img Recto</span>
+                    <input 
+                      type="file" accept="image/*" capture="environment" className="hidden" 
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const base64 = await compressImage(file, 800, 600, 0.7);
+                          setEditingDeliveryUser({...editingDeliveryUser, idCardFront: base64});
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso</label>
+              <div className="relative">
+                {editingDeliveryUser.idCardBack ? (
+                  <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm group">
+                    <img src={editingDeliveryUser.idCardBack} className="w-full h-full object-cover cursor-pointer" onClick={() => setViewImage(editingDeliveryUser.idCardBack)} />
+                    <button type="button" onClick={() => setEditingDeliveryUser({...editingDeliveryUser, idCardBack: ''})} className="absolute top-1 right-1 w-6 h-6 bg-rose-500/90 hover:bg-rose-500 text-white rounded-lg flex items-center justify-center shadow-lg transition-colors"><Trash2 size={12} /></button>
+                  </div>
+                ) : (
+                  <label className="w-full aspect-[3/2] bg-white border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-blue-500 hover:text-blue-500 transition-all group">
+                    <Camera size={20} className="group-hover:scale-110 transition-transform mb-1" />
+                    <span className="text-[8px] font-bold uppercase tracking-widest text-center px-1">Img Verso</span>
+                    <input 
+                      type="file" accept="image/*" capture="environment" className="hidden" 
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const base64 = await compressImage(file, 800, 600, 0.7);
+                          setEditingDeliveryUser({...editingDeliveryUser, idCardBack: base64});
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+            <div className="flex items-center h-5 mt-1">
+              <input
+                id="edit_terms"
+                type="checkbox"
+                checked={editingDeliveryUser.acceptedTerms || false}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, acceptedTerms: e.target.checked})}
+                className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 focus:ring-offset-0 bg-white transition-colors cursor-pointer"
+              />
+            </div>
+            <div className="flex-1 text-sm">
+              <label htmlFor="edit_terms" className="font-bold text-slate-900 cursor-pointer block mb-1">
+                Conditions d'utilisation acceptées
+              </label>
+            </div>
+          </div>
+
+          <button 
+            onClick={() => handleSaveDeliveryProfile(editingDeliveryUser)}
+            className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"
+          >
+            Enregistrer les modifications
           </button>
         </div>
       </motion.div>

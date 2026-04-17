@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getMessaging, isSupported } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -9,6 +9,18 @@ export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true
 }, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Test database connection on boot
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if(error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration or internet connection.");
+    }
+  }
+}
+testConnection();
 
 // Initialize Firebase Cloud Messaging and get a reference to the service
 export const messaging = async () => {

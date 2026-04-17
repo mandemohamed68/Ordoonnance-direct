@@ -2,10 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-    <script type="module" src="./assets/index-aT12KpiI.js"></script>
-    <link rel="stylesheet" href="./assets/index-lmn1NUTb.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#10b981" />
+    <link rel="manifest" href="./manifest.json" />
+    <title>PharmaLiv - Livraison de Médicaments</title>
+    <script type="module" src="./assets/index-TfucbcYn.js"></script>
+    <link rel="stylesheet" href="./assets/index-Diw5ccC-.css">
   </head>
   <body>
     <div id="root">
@@ -19,6 +21,16 @@
       </style>
     </div>
     <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(registration => {
+            console.log('SW registered: ', registration);
+          }).catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+          });
+        });
+      }
+
       window.addEventListener('error', function(event) {
         var errorLog = document.getElementById('error-log');
         if (errorLog) {

@@ -52,6 +52,8 @@ import {
   Phone,
   FileText,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   AlertCircle,
   CreditCard,
   Search,
@@ -65,18 +67,28 @@ import {
   MessageCircle,
   MessageSquare,
   X,
+  Menu,
   TrendingUp,
   Save,
   Bell,
   BellOff,
+  Terminal,
+  Store,
+  ShoppingCart,
+  Send,
   Building2,
   Navigation,
   PenTool,
-  Mic
+  Mic,
+  FlaskConical,
+  CheckCircle2,
+  Home
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
+import ErrorBoundary from './components/ErrorBoundary';
+
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance } from './utils/shared';
@@ -86,7 +98,7 @@ import autoTable from 'jspdf-autotable';
 import { PullToRefresh } from './components/PullToRefresh';
 import { OrderChat } from './components/OrderChat';
 import { getApiUrl } from './config';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, Modality } from "@google/genai";
 import { AdminDashboard } from './components/AdminDashboard';
 import { Legal } from './components/Legal';
 import { ReportsView } from './components/ReportsView';
@@ -107,15 +119,21 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 // --- Global Helpers ---
+let globalIsFirstLoad = true;
+setTimeout(() => { globalIsFirstLoad = false; }, 3000);
+
 const playNotificationSound = () => {
+  if (globalIsFirstLoad) return;
   try {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     audio.volume = 0.6;
     const promise = audio.play();
     if (promise !== undefined) {
-      promise.catch(e => console.log("[DEBUG] Audio blocked by browser:", e));
+      promise.catch(e => console.log('Audio autoplay blocked or failed:', e));
     }
-  } catch(e) { console.error("[DEBUG] Sound error:", e); }
+  } catch (e) {
+    console.error('Error playing sound:', e);
+  }
 };
 
 // --- Super Admin Utilities moved to shared.ts ---
@@ -394,7 +412,9 @@ const calculateDeliveryFee = (settings: Settings | null) => {
   return isNight ? settings.nightDeliveryFee : settings.dayDeliveryFee;
 };
 
-function StatusTrace({ history }: { history?: Order['history'] }) {
+function StatusTrace({ history, defaultExpanded = false }: { history?: Order['history'], defaultExpanded?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  
   if (!history || history.length === 0) return null;
   
   // Sort history by timestamp descending (newest first)
@@ -403,29 +423,49 @@ function StatusTrace({ history }: { history?: Order['history'] }) {
   );
   
   return (
-    <div className="mt-8 pt-8 border-t border-slate-100">
-      <div className="flex items-center gap-2 mb-6">
-        <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Historique de suivi</p>
-      </div>
-      <div className="space-y-6 relative">
-        <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-primary/50 to-slate-100"></div>
-        {sortedHistory.map((h, i) => (
-          <div key={`${h.timestamp}-${i}`} className="flex items-start gap-4 relative z-10">
-            <div className={`w-6 h-6 rounded-full border-4 border-white flex items-center justify-center ${
-              i === 0 ? 'bg-primary shadow-lg shadow-primary/30 scale-110' : 'bg-slate-200'
-            } transition-all`}>
-              <div className="w-1.5 h-1.5 rounded-full bg-white"></div>
+    <div className="mt-4 pt-4 border-t border-slate-100">
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between group py-2"
+      >
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-primary transition-colors">Historique de suivi</p>
+        </div>
+        <div className="text-slate-300 group-hover:text-primary transition-colors">
+          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-4 space-y-6 relative pb-2">
+              <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-primary/50 to-slate-100"></div>
+              {sortedHistory.map((h, i) => (
+                <div key={`${h.timestamp}-${i}`} className="flex items-start gap-4 relative z-10">
+                  <div className={`w-6 h-6 rounded-full border-4 border-white flex items-center justify-center ${
+                    i === 0 ? 'bg-primary shadow-lg shadow-primary/30' : 'bg-slate-200'
+                  } transition-all`}>
+                    <div className="w-1.5 h-1.5 rounded-full bg-white"></div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-bold leading-tight ${i === 0 ? 'text-slate-900' : 'text-slate-500'}`}>{h.label}</p>
+                    <p className="text-[9px] text-slate-400 font-medium">
+                      {formatDate(h.timestamp, 'short')} {formatDate(h.timestamp, 'time')}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div>
-              <p className={`text-xs font-bold ${i === 0 ? 'text-slate-900' : 'text-slate-500'}`}>{h.label}</p>
-              <p className="text-[10px] text-slate-400 font-medium">
-                {formatDate(h.timestamp, 'short')} {formatDate(h.timestamp, 'time')}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -447,26 +487,32 @@ function NotificationBell({ userId }: { userId: string }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const isFirstRun = useRef(true);
   useEffect(() => {
     const q = query(
       collection(db, 'notifications'),
-      where('userId', '==', userId),
-      orderBy('createdAt', 'desc'),
-      limit(20)
+      where('userId', '==', userId)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const newNotifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      newNotifs.sort((a: any, b: any) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA; // desc
+      });
+      const topNotifs = newNotifs.slice(0, 20);
       
       // Play sound if there's a new unread notification that wasn't there before
       const hasNewUnread = snapshot.docChanges().some(change => 
         change.type === 'added' && !change.doc.data().read
       );
       
-      if (hasNewUnread && !snapshot.metadata.hasPendingWrites) {
+      if (!isFirstRun.current && hasNewUnread && !snapshot.metadata.hasPendingWrites) {
         playNotificationSound();
       }
+      isFirstRun.current = false;
       
-      setNotifications(newNotifs);
+      setNotifications(topNotifs);
     }, (err) => console.error("Error fetching notifications:", err));
     return () => unsubscribe();
   }, [userId]);
@@ -538,7 +584,7 @@ function NotificationBell({ userId }: { userId: string }) {
                       {!n.read && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>}
                       <p className="font-bold text-sm text-slate-900 mb-1">{n.title}</p>
                       <p className="text-xs text-slate-500 leading-relaxed">{n.message}</p>
-                      <p className="text-[10px] text-slate-400 mt-2">{n.createdAt ? new Date(n.createdAt.toDate()).toLocaleString() : 'A l\'instant'}</p>
+                      <p className="text-[10px] text-slate-400 mt-2">{n.createdAt ? (n.createdAt.toDate ? n.createdAt.toDate().toLocaleString() : new Date(n.createdAt).toLocaleString()) : 'A l\'instant'}</p>
                     </div>
                   ))
                 ) : (
@@ -562,15 +608,40 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [viewMode, setViewMode] = useState<UserRole | null>(null);
-  const activeRole = (profile?.role === 'super-admin' && viewMode && viewMode !== 'super-admin') ? viewMode : profile?.role;
-  const effectiveProfile = (profile?.role === 'super-admin' && viewMode && viewMode !== 'super-admin') 
-    ? { ...profile, role: viewMode as UserRole } 
-    : profile;
+  const effectiveProfile = React.useMemo(() => {
+    if (!profile) return null;
+    if (profile.role === 'super-admin' && viewMode && viewMode !== 'super-admin') {
+      return { ...profile, role: viewMode as UserRole };
+    }
+    return profile;
+  }, [profile, viewMode]);
+
+  const activeRole = effectiveProfile?.role;
+
+  useEffect(() => {
+    if (profile?.role === 'super-admin' && activeRole && activeRole !== 'super-admin' && !viewMode) {
+      setViewMode(activeRole);
+    }
+  }, [profile, activeRole, viewMode]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  
+  // Failsafe timeout to prevent infinite loading screen
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!isAuthReady || loading) {
+        console.warn("[App] Loading timeout reached, forcing UI to render");
+        setLoading(false);
+        setIsAuthReady(true);
+      }
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [isAuthReady, loading]);
+
   const [isResetting, setIsResetting] = useState(false);
   const [showSupportChat, setShowSupportChat] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [newSupportMessage, setNewSupportMessage] = useState('');
   const [supportChatMeta, setSupportChatMeta] = useState<any>(null);
@@ -579,11 +650,16 @@ export default function App() {
     if (!user) return;
     const q = query(
       collection(db, 'support_messages'),
-      where('chatId', '==', user.uid),
-      orderBy('createdAt', 'asc')
+      where('chatId', '==', user.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setSupportMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      messages.sort((a: any, b: any) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateA - dateB; // asc
+      });
+      setSupportMessages(messages);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'support_messages'));
 
     const unsubMeta = onSnapshot(doc(db, 'support_chats', user.uid), (docSnap) => {
@@ -714,6 +790,7 @@ export default function App() {
   }, [profile?.uid]);
 
   // Track location for delivery and patients
+  const lastLocationUpdate = useRef<number>(0);
   useEffect(() => {
     if (!profile?.uid || (activeRole !== 'delivery' && activeRole !== 'patient' && activeRole !== 'pharmacist')) return;
 
@@ -724,6 +801,11 @@ export default function App() {
 
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
+        const now = Date.now();
+        // Throttle updates to once every 15 seconds to prevent spamming Firestore and freezing the UI
+        if (now - lastLocationUpdate.current < 15000) return;
+        lastLocationUpdate.current = now;
+
         const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setLocation(newLoc);
         
@@ -738,14 +820,15 @@ export default function App() {
           if (activeRole === 'delivery') {
             const q = query(
               collection(db, 'orders'), 
-              where('deliveryId', '==', profile.uid),
-              where('status', '==', 'delivering')
+              where('deliveryId', '==', profile.uid)
             );
-            const activeOrders = await getDocs(q);
-            activeOrders.forEach(async (orderDoc) => {
-              await updateDoc(doc(db, 'orders', orderDoc.id), {
-                deliveryLocation: newLoc
-              });
+            const activeOrdersSnap = await getDocs(q);
+            activeOrdersSnap.forEach(async (orderDoc) => {
+              if (orderDoc.data().status === 'delivering') {
+                await updateDoc(doc(db, 'orders', orderDoc.id), {
+                  deliveryLocation: newLoc
+                });
+              }
             });
           }
         } catch (err) {
@@ -753,9 +836,15 @@ export default function App() {
         }
       },
       (err) => {
-        console.error("Geolocation error:", err);
+        const errorMessages = {
+          1: "Permission de géolocalisation refusée.",
+          2: "Position indisponible (vérifiez vos paramètres GPS).",
+          3: "Délai d'attente de géolocalisation dépassé."
+        };
+        const msg = errorMessages[err.code as keyof typeof errorMessages] || err.message;
+        console.error("Geolocation error:", msg, err);
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -785,7 +874,7 @@ export default function App() {
       setUser(firebaseUser);
       if (firebaseUser) {
         const docRef = doc(db, 'users', firebaseUser.uid);
-        const unsubProfile = onSnapshot(docRef, async (docSnap) => {
+        const unsubProfile = onSnapshot(docRef, (docSnap) => {
           console.log("[Auth] Profile snapshot for", firebaseUser.email, ":", docSnap.exists() ? "exists" : "not found");
           try {
             if (docSnap.exists()) {
@@ -794,7 +883,7 @@ export default function App() {
               
               // Force super-admin role for the specific emails
               if (isSuperAdminEmail(firebaseUser.email) && data.role !== 'super-admin') {
-                await updateDoc(docRef, { role: 'super-admin', status: 'active' });
+                updateDoc(docRef, { role: 'super-admin', status: 'active' }).catch(console.error);
                 setProfile({ ...data, role: 'super-admin', status: 'active' });
                 setViewMode(prev => prev || 'super-admin');
               } else {
@@ -813,7 +902,7 @@ export default function App() {
                 }
 
                 if (hasUpdates) {
-                  await updateDoc(docRef, updates);
+                  updateDoc(docRef, updates).catch(console.error);
                   const updatedProfile = { ...data, ...updates };
                   setProfile(updatedProfile);
                   setViewMode(prev => prev || updatedProfile.role);
@@ -827,7 +916,7 @@ export default function App() {
               const newProfile: UserProfile = {
                 uid: firebaseUser.uid,
                 name: firebaseUser.displayName || 'Super Admin',
-                email: firebaseUser.email,
+                email: firebaseUser.email || '',
                 role: 'super-admin',
                 walletBalance: 0,
                 pharmacistBalance: 0,
@@ -835,7 +924,7 @@ export default function App() {
                 status: 'active',
                 createdAt: serverTimestamp()
               };
-              await setDoc(docRef, newProfile);
+              setDoc(docRef, newProfile).catch(console.error);
               setProfile(newProfile);
               setViewMode(prev => prev || 'super-admin');
             } else {
@@ -865,7 +954,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthReady || !user) {
+    if (!user) {
       setSettings(null);
       return;
     }
@@ -1002,10 +1091,66 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    console.log("[App] State Update:", {
+      isAuthReady,
+      loading,
+      hasUser: !!user,
+      hasProfile: !!profile,
+      activeRole,
+      viewMode,
+      hasSettings: !!settings
+    });
+  }, [isAuthReady, loading, user, profile, activeRole, viewMode, settings]);
+
   if (!isAuthReady || (user && loading)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        {/* Animated Background */}
+        <div className="absolute inset-0 z-0">
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 rounded-full blur-[120px] animate-pulse"></div>
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-sky-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }}></div>
+        </div>
+
+        <div className="relative z-10 flex flex-col items-center gap-8">
+          <div className="relative">
+            <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full animate-pulse"></div>
+            <div className="w-20 h-20 bg-white rounded-3xl shadow-2xl flex items-center justify-center animate-bounce shadow-primary/20">
+              <LogoIcon size={40} className="text-primary" />
+            </div>
+          </div>
+
+          <div className="space-y-2 text-center">
+            <h1 className="text-xl font-bold text-white tracking-tight">Chargement de l'application</h1>
+            <p className="text-slate-400 text-sm animate-pulse">Synchronisation avec le serveur sécurisé...</p>
+          </div>
+
+          <div className="flex items-center gap-3 bg-white/5 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10">
+            <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping"></div>
+            <div className="flex gap-4 text-[10px] font-mono whitespace-nowrap">
+              <span className={isAuthReady ? "text-emerald-400" : "text-slate-500"}>
+                AUTH: {isAuthReady ? 'PRÊT' : 'PATIENCE...'}
+              </span>
+              <span className="text-white/20">|</span>
+              <span className={!loading ? "text-emerald-400" : "text-slate-500"}>
+                PROFIL: {!loading ? 'CHARGÉ' : 'EN COURS...'}
+              </span>
+              <span className="text-white/20">|</span>
+              <span className={settings ? "text-emerald-400" : "text-slate-500"}>
+                CONFIG: {settings ? 'OK' : 'EN COURS...'}
+              </span>
+            </div>
+          </div>
+          
+          <div className="w-48 h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ x: "-100%" }}
+              animate={{ x: "100%" }}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+              className="w-1/2 h-full bg-gradient-to-r from-transparent via-primary to-transparent"
+            />
+          </div>
+        </div>
       </div>
     );
   }
@@ -1019,7 +1164,7 @@ export default function App() {
           </div>
           <h1 className="text-4xl font-bold text-slate-900 mb-4">Maintenance en cours</h1>
           <p className="text-slate-500 max-w-md text-lg mb-8">
-            {settings.maintenanceMessage || "Notre plateforme est actuellement en maintenance pour vous offrir une meilleure expérience. Veuillez revenir plus tard."}
+                  {settings.maintenanceMessage || "Notre plateforme est actuellement en maintenance pour vous offrir une meilleure expérience. Veuillez revenir plus tard."}
           </p>
           <button 
             onClick={handleLogin}
@@ -1082,7 +1227,7 @@ export default function App() {
     );
   }
 
-  if (profile.status === 'rejected' && !isSuperAdminEmail(user?.email)) {
+  if (profile?.status === 'rejected' && !isSuperAdminEmail(user?.email)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
         <div className="w-24 h-24 bg-red-100 rounded-3xl flex items-center justify-center text-red-500 mb-8">
@@ -1113,7 +1258,7 @@ export default function App() {
 
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50">
         <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between relative z-10">
-          <div className="flex items-center gap-3 group cursor-pointer">
+          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setViewMode(profile?.role || null); setIsMobileMenuOpen(false); }}>
             <motion.div 
               whileHover={{ rotate: 180 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
@@ -1127,115 +1272,195 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
-            {profile.role === 'super-admin' && (
-              <div className="hidden lg:flex items-center gap-2 bg-emerald-50/50 p-1 rounded-2xl border border-emerald-100/50">
-                {(['super-admin', 'patient', 'pharmacist', 'delivery'] as const).map((role) => (
+          <div className="flex items-center gap-2 md:gap-6">
+            {profile?.role === 'super-admin' && (
+              <div className="hidden lg:flex items-center gap-2 bg-slate-900/5 p-1 rounded-2xl border border-slate-900/10">
+                {(['super-admin', 'admin', 'patient', 'pharmacist', 'delivery'] as const).map((role) => (
                   <button
                     key={role}
-                    onClick={() => setViewMode(role as UserRole)}
+                    onClick={() => {
+                      setViewMode(role as UserRole);
+                      toast.success(`Mode de vue : ${role.toUpperCase()}`);
+                    }}
                     className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                      (viewMode === role || (role === 'super-admin' && viewMode === 'super-admin'))
-                        ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
-                        : 'text-emerald-600 hover:bg-emerald-100/50'
+                      (viewMode === role || (role === 'super-admin' && (viewMode === 'super-admin' || !viewMode)))
+                        ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/20 scale-105 z-10'
+                        : 'text-slate-500 hover:bg-slate-900/5'
                     }`}
                   >
-                    {role === 'super-admin' ? 'Admin' : role === 'patient' ? 'Patient' : role === 'pharmacist' ? 'Pharmacie' : 'Livreur'}
+                    {role === 'super-admin' ? 'Super Admin' : 
+                     role === 'admin' ? 'Administrateur' : 
+                     role === 'patient' ? 'Patient' : 
+                     role === 'pharmacist' ? 'Pharmacien' : 'Livreur'}
                   </button>
                 ))}
               </div>
             )}
-            {(isSuperAdminEmail(user.email) || profile.role === 'super-admin') && (
-              <button 
-                onClick={handleSwitchRole}
-                className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all border border-slate-200"
-              >
-                <SettingsIcon size={14} /> Changer de rôle
-              </button>
-            )}
-            <div className="hidden sm:flex flex-col items-end">
-              <span className="text-sm font-black text-slate-900">{profile.name}</span>
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
-                {activeRole === 'patient' ? 'Patient' : 
-                 activeRole === 'pharmacist' ? 'Pharmacien' : 
-                 activeRole === 'delivery' ? 'Livreur' : 
-                 activeRole === 'super-admin' ? 'Super Admin' : 'Administrateur'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {settings?.supportChatEnabled !== false && (
+            
+            <div className="hidden md:flex items-center gap-4">
+              {(isSuperAdminEmail(user?.email) || profile?.role === 'super-admin') && (
                 <button 
-                  onClick={() => setShowSupportChat(true)}
-                  className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-primary hover:bg-primary/5 transition-all border border-slate-100 relative"
-                  title="Support Chat"
+                  onClick={handleSwitchRole}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all border border-slate-200"
                 >
-                  <MessageSquare size={20} />
-                  {supportChatMeta?.unreadUserCount > 0 && (
-                    <span className="absolute top-2 right-2 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white">
-                      {supportChatMeta.unreadUserCount}
-                    </span>
-                  )}
+                  <SettingsIcon size={14} /> Changer
                 </button>
               )}
-              <NotificationBell userId={profile.uid} />
-              <button onClick={() => setShowLegal(true)} className="px-4 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-all border border-slate-100 font-bold text-sm">
-                Mentions Légales
+              <div className="flex flex-col items-end">
+                <span className="text-sm font-black text-slate-900 truncate max-w-[120px]">{profile?.name}</span>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5 whitespace-nowrap">
+                  {activeRole === 'patient' ? 'Patient' : 
+                   activeRole === 'pharmacist' ? 'Pharmacien' : 
+                   activeRole === 'delivery' ? 'Livreur' : 
+                   activeRole === 'super-admin' ? 'Super Admin' : 'Admin'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 sm:gap-2">
+              <NotificationBell userId={profile?.uid || ''} />
+              
+              <button 
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden w-10 h-10 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center hover:bg-slate-100 transition-all border border-slate-200"
+              >
+                {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
               </button>
-              <button onClick={handleLogout} className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all border border-slate-100 group">
-                <LogOut size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+
+              <button 
+                onClick={handleLogout}
+                className="hidden md:flex w-10 h-10 sm:w-11 sm:h-11 bg-white border border-rose-100 text-rose-500 rounded-xl sm:rounded-2xl items-center justify-center hover:bg-rose-500 hover:text-white transition-all shadow-sm"
+                title="Déconnexion"
+              >
+                <LogOut size={18} className="sm:w-5 sm:h-5" />
               </button>
             </div>
           </div>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-12 relative z-10">
-        <AnimatePresence mode="wait">
-          {activeRole === 'patient' && (
+        {/* Mobile menu expanded */}
+        <AnimatePresence>
+          {isMobileMenuOpen && (
             <motion.div
-              key="patient"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.5, ease: "circOut" }}
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden bg-white border-b border-slate-100 overflow-hidden"
             >
-              <PatientDashboard profile={effectiveProfile!} settings={settings} location={location} />
-            </motion.div>
-          )}
-          {activeRole === 'pharmacist' && (
-            <motion.div
-              key="pharmacist"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.5, ease: "circOut" }}
-            >
-              <PharmacistDashboard profile={effectiveProfile!} settings={settings} />
-            </motion.div>
-          )}
-          {activeRole === 'delivery' && (
-            <motion.div
-              key="delivery"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.5, ease: "circOut" }}
-            >
-              <DeliveryDashboard profile={effectiveProfile!} settings={settings} />
-            </motion.div>
-          )}
-          {(activeRole === 'admin' || activeRole === 'super-admin') && (
-            <motion.div
-              key="admin"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.5, ease: "circOut" }}
-            >
-              <AdminDashboard profile={effectiveProfile!} settings={settings} />
+              <div className="p-4 space-y-4">
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
+                  <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-white text-lg font-black">
+                    {profile?.name?.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="font-black text-slate-900 leading-none">{profile?.name}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                      {activeRole === 'patient' ? 'Patient' : 
+                       activeRole === 'pharmacist' ? 'Pharmacien' : 
+                       activeRole === 'delivery' ? 'Livreur' : 'Administrateur'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2">
+                  {(profile?.role === 'super-admin' || isSuperAdminEmail(user?.email)) && (
+                    <div className="space-y-3 mb-4 bg-slate-900/5 p-4 rounded-3xl border border-slate-900/10">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Mode de vue Super Admin</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['super-admin', 'admin', 'patient', 'pharmacist', 'delivery'] as const).map((role) => (
+                          <button
+                            key={role}
+                            onClick={() => { 
+                              setViewMode(role as UserRole); 
+                              setIsMobileMenuOpen(false); 
+                              toast.success(`Mode : ${role.toUpperCase()}`);
+                            }}
+                            className={`flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
+                              (viewMode === role || (role === 'super-admin' && (viewMode === 'super-admin' || !viewMode)))
+                                ? 'bg-slate-900 text-white border-slate-900 shadow-lg' 
+                                : 'bg-white text-slate-600 border-slate-200 shadow-sm'
+                            }`}
+                          >
+                            {role === 'super-admin' ? 'Super Admin' : 
+                             role === 'admin' ? 'Admin' : 
+                             role === 'patient' ? 'Patient' : 
+                             role === 'pharmacist' ? 'Pharmacie' : 'Livreur'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button 
+                    onClick={() => { setShowLegal(true); setIsMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 p-4 bg-slate-50 text-slate-600 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-slate-100"
+                  >
+                    <FileText size={18} /> Mentions Légales
+                  </button>
+
+                  {settings?.supportChatEnabled !== false && (
+                    <button 
+                      onClick={() => { setShowSupportChat(true); setIsMobileMenuOpen(false); }}
+                      className="w-full flex items-center gap-3 p-4 bg-secondary/5 text-secondary rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-secondary/10"
+                    >
+                      <MessageSquare size={18} /> Chat de Support
+                    </button>
+                  )}
+
+                  <button 
+                    onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 p-4 bg-rose-50 text-rose-600 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-rose-100"
+                  >
+                    <LogOut size={18} /> Se déconnecter
+                  </button>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-8 relative z-10 min-h-[60vh]">
+        {activeRole === 'patient' && (
+          <ErrorBoundary>
+            <PatientDashboard profile={effectiveProfile!} settings={settings} location={location} />
+          </ErrorBoundary>
+        )}
+        {activeRole === 'pharmacist' && (
+          <ErrorBoundary>
+            <PharmacistDashboard profile={effectiveProfile!} settings={settings} />
+          </ErrorBoundary>
+        )}
+        {activeRole === 'delivery' && (
+          <ErrorBoundary>
+            <DeliveryDashboard profile={effectiveProfile!} settings={settings} />
+          </ErrorBoundary>
+        )}
+        {(activeRole === 'admin' || activeRole === 'super-admin') && (
+          <ErrorBoundary>
+            <AdminDashboard profile={effectiveProfile!} settings={settings} />
+          </ErrorBoundary>
+        )}
+        {!activeRole && (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+            <div className="w-24 h-24 bg-rose-50 rounded-3xl flex items-center justify-center text-rose-500 shadow-xl shadow-rose-200/20">
+              <AlertCircle size={48} />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-slate-900">Accès restreint</h2>
+              <p className="text-slate-500 max-w-sm mx-auto">
+                Votre compte n'est pas encore associé à un rôle. 
+                Veuillez contacter l'administrateur ou vous déconnecter.
+              </p>
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="px-8 py-3 bg-rose-600 text-white rounded-2xl font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-200"
+            >
+              Se déconnecter
+            </button>
+          </div>
+        )}
       </main>
 
       {/* Support Chat FAB */}
@@ -1612,6 +1837,12 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
     address: '',
     pharmacyName: ''
   });
+  const [deliveryExtra, setDeliveryExtra] = useState({
+    idCardFront: '',
+    idCardBack: '',
+    cguAccepted: false
+  });
+  const [showCGU, setShowCGU] = useState(false);
 
   const roles = [
     { role: 'patient' as UserRole, icon: User, label: 'Patient', desc: 'Commander mes médicaments et me faire livrer.', color: 'from-emerald-500 to-teal-600', light: 'bg-emerald-50' },
@@ -1641,9 +1872,22 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
         toast.error("Veuillez remplir tous les champs obligatoires.");
         return;
       }
-    } else if (selectedRole === 'patient' || selectedRole === 'delivery') {
+    } else if (selectedRole === 'patient') {
       if (!formData.phone || !formData.address) {
         toast.error("Veuillez remplir tous les champs obligatoires.");
+        return;
+      }
+    } else if (selectedRole === 'delivery') {
+      if (!formData.phone || !formData.address) {
+        toast.error("Veuillez remplir tous les champs obligatoires.");
+        return;
+      }
+      if (!deliveryExtra.idCardFront || !deliveryExtra.idCardBack) {
+        toast.error("Veuillez fournir le recto et le verso de votre pièce d'identité.");
+        return;
+      }
+      if (!deliveryExtra.cguAccepted) {
+        toast.error("Vous devez accepter les conditions d'utilisation du service.");
         return;
       }
     }
@@ -1653,16 +1897,58 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
         authorizationNumber: formData.authNumber,
         phone: formData.phone,
         address: formData.address,
-        pharmacyName: formData.pharmacyName
+        pharmacyName: formData.pharmacyName,
+        ...(selectedRole === 'delivery' && {
+          idCardFront: deliveryExtra.idCardFront,
+          idCardBack: deliveryExtra.idCardBack,
+          cguAccepted: deliveryExtra.cguAccepted,
+          cguAcceptedAt: new Date().toISOString()
+        })
       });
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Abstract Background Elements */}
+      {/* Background decoration preserved */}
       <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary/5 rounded-full translate-y-1/2 -translate-x-1/2 blur-3xl"></div>
+
+      <AnimatePresence>
+        {showCGU && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[80vh] flex flex-col overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 className="text-xl font-black text-slate-900">Conditions d'Utilisation (Livreur)</h3>
+                <button onClick={() => setShowCGU(false)} className="text-slate-400 hover:text-rose-500 transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-6 overflow-y-auto prose prose-sm text-slate-600">
+                <p><strong>1. Acceptation des conditions</strong><br/>En vous inscrivant comme livreur sur Ordonnance Direct, vous acceptez d'être lié par les présentes conditions générales.</p>
+                <p><strong>2. Pièce d'identité et Vérification</strong><br/>Vous devez fournir une copie numérisée valide du recto et du verso de votre pièce nationale d'identité (CNI ou Passeport). Toute fausse déclaration entraînera la suspension immédiate du compte.</p>
+                <p><strong>3. Responsabilité de Livraison</strong><br/>En tant que livreur, vous êtes responsable de la sécurité et de la confidentialité des médicaments et ordonnances qui vous sont confiés. Toute altération, perte ou vol doit être immédiatement signalé.</p>
+                <p><strong>4. Confidentialité des Patients</strong><br/>Vous traiterez toute information (adresse, médicaments, nom du patient) avec une stricte confidentialité selon la loi sur la protection des données personnelles.</p>
+                <p><strong>5. Paiements et Commissions</strong><br/>Les montants pour chaque livraison sont crédités sur le portefeuille intégré de votre compte une fois la livraison validée par un code secret au moment du dépôt. Ordonnance Direct prélève une commission transparente sur les frais de livraison.</p>
+                <p><strong>6. Sécurisation</strong><br/>Les retraits doivent obligatoirement être validés physiquement par l'application pour déclencher les transactions. Vous vous engagez à respecter ce flux rigoureusement.</p>
+              </div>
+              <div className="p-4 bg-slate-50 border-t border-slate-100">
+                <button 
+                  onClick={() => setShowCGU(false)}
+                  className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all"
+                >
+                  Fermer
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="max-w-6xl w-full relative z-10">
         <motion.div 
@@ -1678,7 +1964,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
         </motion.div>
 
         {!selectedRole ? (
-          <div className={`grid grid-cols-1 ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-8`}>
+          <div className={`grid grid-cols-1 ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-6`}>
             {roles.map((item, i) => (
               <motion.button
                 key={item.role}
@@ -1686,119 +1972,198 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.1 }}
                 onClick={() => setSelectedRole(item.role)}
-                className="group relative bg-white p-10 rounded-[3rem] text-left border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500"
+                className="group relative bg-white p-6 sm:p-8 rounded-3xl text-left border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
               >
-                <div className={`w-20 h-20 rounded-[2rem] bg-gradient-to-br ${item.color} flex items-center justify-center text-white mb-8 shadow-lg group-hover:scale-110 transition-transform duration-500`}>
-                  <item.icon size={36} />
+                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center text-white mb-6 shadow-md group-hover:scale-105 transition-transform duration-300`}>
+                  <item.icon size={28} />
                 </div>
-                <h3 className="text-2xl font-bold mb-3 text-slate-900">{item.label}</h3>
-                <p className="text-slate-500 leading-relaxed mb-8 text-sm">{item.desc}</p>
+                <h3 className="text-xl font-bold mb-2 text-slate-900">{item.label}</h3>
+                <p className="text-slate-500 leading-relaxed mb-6 text-xs">{item.desc}</p>
                 
-                <div className="flex items-center gap-2 text-primary font-bold text-sm group-hover:gap-4 transition-all">
-                  Choisir <ChevronRight size={16} />
+                <div className="flex items-center gap-2 text-primary font-bold text-xs group-hover:gap-3 transition-all">
+                  Choisir <ChevronRight size={14} />
                 </div>
 
                 {/* Decorative element */}
-                <div className={`absolute top-6 right-6 w-12 h-12 rounded-full ${item.light} opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex items-center justify-center`}>
-                  <LogoIcon size={16} className="text-current" />
+                <div className={`absolute top-4 right-4 w-10 h-10 rounded-full ${item.light} opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center`}>
+                  <LogoIcon size={14} className="text-current" />
                 </div>
               </motion.button>
             ))}
           </div>
         ) : (
           <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="max-w-md mx-auto bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100"
+            className="max-w-md mx-auto bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-slate-100"
           >
             <button 
               onClick={() => setSelectedRole(null)}
-              className="text-slate-400 hover:text-slate-600 mb-6 flex items-center gap-2 text-xs font-bold uppercase"
+              className="text-slate-400 hover:text-slate-600 mb-5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest transition-colors"
             >
               <X size={14} /> Retour
             </button>
             
-            <h3 className="text-2xl font-bold mb-6 text-slate-900">
+            <h3 className="text-xl font-black mb-6 text-slate-900">
               {selectedRole === 'pharmacist' ? "Détails de l'officine" : "Confirmation"}
             </h3>
             
             {selectedRole === 'pharmacist' && (
-              <div className="space-y-4 mb-8">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Nom de la pharmacie *</label>
+              <div className="space-y-4 mb-6">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Nom de la pharmacie *</label>
                   <input 
                     type="text" 
                     value={formData.pharmacyName}
                     onChange={(e) => setFormData({...formData, pharmacyName: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
                     placeholder="Ex: Pharmacie de la Paix"
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Adresse de la pharmacie *</label>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Adresse de la pharmacie *</label>
                   <input 
                     type="text" 
                     value={formData.address}
                     onChange={(e) => setFormData({...formData, address: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
                     placeholder="Ex: Ouagadougou, Secteur 10"
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Numéro d'autorisation *</label>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Numéro d'autorisation *</label>
                   <input 
                     type="text" 
                     value={formData.authNumber}
                     onChange={(e) => setFormData({...formData, authNumber: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
                     placeholder="Ex: AUTH-2024-XXXX"
                     required
                   />
-                  <p className="text-[10px] text-slate-400 ml-4 italic">Ce numéro sera vérifié par nos administrateurs.</p>
+                  <p className="text-[9px] text-slate-400 ml-1 italic">Vérifié par nos administrateurs.</p>
                 </div>
               </div>
             )}
 
             {(selectedRole === 'patient' || selectedRole === 'delivery') && (
-              <div className="space-y-4 mb-8">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Numéro de téléphone *</label>
+              <div className="space-y-4 mb-6">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Numéro de téléphone *</label>
                   <input 
                     type="tel" 
                     value={formData.phone}
                     onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
                     placeholder="Ex: +226 70 00 00 00"
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Adresse complète *</label>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Adresse complète *</label>
                   <input 
                     type="text" 
                     value={formData.address}
                     onChange={(e) => setFormData({...formData, address: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
                     placeholder="Ex: Ouagadougou, Secteur 10"
                     required
                   />
                 </div>
               </div>
             )}
+
+            {selectedRole === 'delivery' && (
+              <div className="space-y-5 mb-6 text-left">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h4 className="font-bold text-xs text-slate-900">Documents Requis</h4>
+                  <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-widest">Livreur</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto *</label>
+                    <div className="relative">
+                      {deliveryExtra.idCardFront ? (
+                        <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
+                          <img src={deliveryExtra.idCardFront} className="w-full h-full object-cover" />
+                          <button onClick={() => setDeliveryExtra({...deliveryExtra, idCardFront: ''})} className="absolute top-1 right-1 w-6 h-6 bg-rose-500/90 hover:bg-rose-500 text-white rounded-lg flex items-center justify-center shadow-lg transition-colors"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <label className="w-full aspect-[3/2] bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all group">
+                          <Camera size={20} className="group-hover:scale-110 transition-transform mb-1" />
+                          <span className="text-[8px] font-bold uppercase tracking-widest text-center px-1">Img Recto</span>
+                          <input 
+                            type="file" accept="image/*" capture="environment" className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                setDeliveryExtra({...deliveryExtra, idCardFront: base64});
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso *</label>
+                    <div className="relative">
+                      {deliveryExtra.idCardBack ? (
+                        <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
+                          <img src={deliveryExtra.idCardBack} className="w-full h-full object-cover" />
+                          <button onClick={() => setDeliveryExtra({...deliveryExtra, idCardBack: ''})} className="absolute top-1 right-1 w-6 h-6 bg-rose-500/90 hover:bg-rose-500 text-white rounded-lg flex items-center justify-center shadow-lg transition-colors"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <label className="w-full aspect-[3/2] bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all group">
+                          <Camera size={20} className="group-hover:scale-110 transition-transform mb-1" />
+                          <span className="text-[8px] font-bold uppercase tracking-widest text-center px-1">Img Verso</span>
+                          <input 
+                            type="file" accept="image/*" capture="environment" className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                setDeliveryExtra({...deliveryExtra, idCardBack: base64});
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 p-3 rounded-xl border border-amber-100">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="mt-0.5 w-4 h-4 rounded border-amber-300 text-amber-500 focus:ring-amber-500"
+                      checked={deliveryExtra.cguAccepted}
+                      onChange={(e) => setDeliveryExtra({...deliveryExtra, cguAccepted: e.target.checked})}
+                    />
+                    <span className="text-xs font-medium text-amber-900 leading-tight">
+                      J'accepte les <button type="button" onClick={() => setShowCGU(true)} className="underline font-bold text-amber-700 hover:text-amber-800">C.G.U.</button> de la livraison. *
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
             
-            <p className="text-slate-500 mb-8 text-sm leading-relaxed">
+            <p className="text-slate-500 mb-6 text-xs leading-relaxed">
               {selectedRole === 'pharmacist' 
-                ? "En tant que pharmacien, vous pourrez gérer vos stocks, traiter les ordonnances et recevoir des paiements sécurisés."
-                : `Vous avez choisi le profil ${roles.find(r => r.role === selectedRole)?.label}. Souhaitez-vous continuer ?`}
+                ? "En tant que pharmacien, vous pourrez gérer vos stocks et ordonnances."
+                : `Vous avez choisi le profil ${roles.find(r => r.role === selectedRole)?.label}.`}
             </p>
             
             <button 
               onClick={handleConfirm}
-              className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm hover:bg-primary/90 transition-all shadow-xl shadow-primary/20"
+              className="w-full py-3.5 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg"
             >
-              Confirmer et continuer
+              Confirmer
             </button>
           </motion.div>
         )}
@@ -1832,13 +2197,19 @@ const analyzeWithGemini = async (options: { image?: string, text?: string, promp
           { inlineData: { mimeType: "image/jpeg", data: options.image } },
           { text: options.prompt }
         ],
-        config: { responseMimeType: "application/json" }
+        config: { 
+          responseMimeType: "application/json",
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+        }
       });
     } else {
       response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `${options.prompt} : "${options.text}"`,
-        config: { responseMimeType: "application/json" }
+        config: { 
+          responseMimeType: "application/json",
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+        }
       });
     }
     return { success: true, text: response.text };
@@ -1914,7 +2285,18 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
         return;
       }
 
-      await deleteDoc(doc(db, 'prescriptions', id));
+      const batch = writeBatch(db);
+      
+      // Delete the prescription itself
+      batch.delete(doc(db, 'prescriptions', id));
+
+      // Also automatically delete the associated order quote to remove it from both patient and pharmacist dashboards
+      if (associatedOrder) {
+        batch.delete(doc(db, 'orders', associatedOrder.id));
+      }
+
+      await batch.commit();
+      
       toast.success("Ordonnance supprimée.");
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `prescriptions/${id}`);
@@ -1963,25 +2345,50 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     }
   };
 
+  const isFirstRunPatientPrescriptions = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'prescriptions'), where('patientId', '==', profile.uid), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'prescriptions'), where('patientId', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription)));
+      isFirstRunPatientPrescriptions.current = false;
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
+      docs.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      setPrescriptions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'prescriptions'));
     return () => unsubscribe();
   }, [profile.uid]);
 
+  const isFirstRunPatientOrders = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('patientId', '==', profile.uid), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'orders'), where('patientId', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      // Play sound for new orders or updates
-      const hasChange = snapshot.docChanges().some(change => 
-        change.type === 'added' || change.type === 'modified'
-      );
-      if (hasChange && !snapshot.metadata.hasPendingWrites) {
+      // Play sound for new orders or important updates (excluding initial load)
+      const hasSignficantChange = snapshot.docChanges().some(change => {
+        if (change.type === 'added') return true;
+        if (change.type === 'modified') {
+          const oldData = change.doc.data();
+          const newData = change.doc.data(); // This is the same in snapshot.docChanges()
+          // In practice, we'd need to compare if we had the previous state
+          // For now, let's play sound on any modification if not local
+          return true;
+        }
+        return false;
+      });
+
+      if (!isFirstRunPatientOrders.current && hasSignficantChange && !snapshot.metadata.hasPendingWrites) {
         playNotificationSound();
       }
-      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+      isFirstRunPatientOrders.current = false;
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      docs.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      setOrders(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
   }, [profile.uid]);
@@ -2811,7 +3218,13 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                             try {
                               const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
                               if (!jsonStr) return null;
-                              const parsed = JSON.parse(jsonStr);
+                              let parsed;
+                              try {
+                                parsed = JSON.parse(jsonStr);
+                              } catch (e) {
+                                console.warn("AI medication parse error:", e);
+                                return null;
+                              }
                               const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
                               const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
 
@@ -2879,326 +3292,256 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
               )}
 
               {activeTab === 'orders' && (
-                <>
-                  <h3 className="text-xl font-bold">Suivi de Commandes</h3>
-                  {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').length === 0 ? (
-              <div className="bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                  <Package size={48} strokeWidth={1.5} />
-                </div>
-                <p className="text-slate-900 font-black text-2xl mb-2">Aucune commande en cours</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">Vos commandes en cours de préparation ou de livraison apparaîtront ici.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').map(o => (
-                  <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-6">
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-secondary/10 rounded-xl flex items-center justify-center text-secondary">
-                            <Package size={20} />
-                          </div>
-                          <div>
-                            <h4 className="font-bold flex items-center gap-2">
-                              Commande #{o.id.slice(-6).toUpperCase()}
-                              <button 
-                                onClick={() => setActiveChatOrderId(o.id)}
-                                className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-all relative"
-                                title="Discuter avec le pharmacien"
-                              >
-                                <MessageCircle size={12} />
-                                {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
-                                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 text-white text-[8px] flex items-center justify-center rounded-full border border-white">
-                                    {o.unreadCounts[profile?.role || 'patient']}
-                                  </span>
-                                )}
-                              </button>
-                            </h4>
-                            <p className="text-xs text-slate-400">{formatDate(o.createdAt)}</p>
-                          </div>
-                        </div>
-                        <span className={`px-4 py-1 rounded-full text-xs font-bold ${
-                          o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 
-                          o.status === 'pending_quote' ? 'bg-amber-100 text-amber-700' : 
-                          o.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 
-                          o.status === 'paid' ? 'bg-blue-100 text-blue-700' :
-                          o.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
-                          o.status === 'ready' ? 'bg-emerald-100 text-emerald-700' :
-                          o.status === 'delivering' ? 'bg-secondary/10 text-secondary' :
-                          'bg-slate-100 text-slate-700'
-                        }`}>
-                          {o.status === 'pending_quote' ? 'DEVIS REÇU - CHOIX DE LIVRAISON' : 
-                           o.status === 'pending_payment' ? 'ATTENTE DE PAIEMENT' : 
-                           o.status === 'paid' ? 'PAYÉ - PRÉPARATION À COMMENCER' :
-                           o.status === 'preparing' ? 'PRÉPARATION EN COURS' :
-                           o.status === 'ready' ? 'COMMANDE PRÊTE' :
-                           o.status === 'delivering' ? 'LIVRAISON EN COURS' :
-                           o.status === 'completed' ? 'LIVRÉE ET TERMINÉE' :
-                           'STATUT INCONNU'}
-                        </span>
-                      </div>
-                      
-                      {o.prescriptionImageUrl && (
-                        <div 
-                          className="w-full h-32 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 mb-4 cursor-pointer relative group"
-                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                        >
-                          <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700 ease-out" />
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
-                            <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={24} />
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-2 mb-4">
-                        {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
-                          <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl mb-4 flex items-center justify-between">
-                            <div className="flex items-center gap-3 text-amber-900">
-                              <ShieldCheck size={20} />
-                              <div>
-                                <p className="text-[10px] font-black uppercase tracking-widest">Code de Livraison</p>
-                                <p className="text-xl font-black">{o.deliveryCode}</p>
-                              </div>
-                            </div>
-                            <p className="text-[10px] text-amber-700 font-medium max-w-[120px] text-right">À donner au livreur pour confirmer la réception</p>
-                          </div>
-                        )}
-                        {o.items?.map((item, i) => (
-                          <div key={`${item.name}-${i}`} className="flex flex-col text-sm bg-slate-50/50 p-3 rounded-2xl border border-slate-100/50">
-                            <div className="flex justify-between items-start">
-                              <div className="flex flex-col">
-                                <span className="font-bold text-slate-800">
-                                  {item.isUnavailable ? (
-                                    <span className="text-rose-600 font-bold flex items-center gap-1">
-                                      <BellOff size={12} />
-                                      {item.name} (INDISPONIBLE)
-                                    </span>
-                                  ) : item.equivalent ? (
-                                    <span className="flex flex-col">
-                                      <span className="line-through text-slate-400 text-[10px]">{item.name}</span>
-                                      <span className="text-amber-700">{item.equivalent}</span>
-                                    </span>
-                                  ) : (
-                                    item.name
-                                  )}
-                                </span>
-                                <span className="text-[10px] text-slate-500 mt-1">
-                                  {item.isUnavailable ? (
-                                    "Non facturé"
-                                  ) : item.equivalent ? (
-                                    `${(item.equivalentPrice || item.price).toLocaleString()} FCFA x ${item.equivalentQuantity || item.quantity}`
-                                  ) : (
-                                    `${item.price.toLocaleString()} FCFA x ${item.quantity}`
-                                  )}
-                                </span>
-                              </div>
-                              <span className="font-black text-primary">
-                                {item.isUnavailable ? "0 FCFA" : (item.equivalent ? ((item.equivalentPrice || item.price) * (item.equivalentQuantity || item.quantity)) : (item.price * item.quantity)).toLocaleString() + " FCFA"}
-                              </span>
-                            </div>
-                            {item.equivalent && (
-                              <span className="text-[9px] text-amber-600 font-medium italic bg-amber-50 px-2 py-0.5 rounded-full w-fit mt-2 border border-amber-100">
-                                Proposé comme équivalent
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                        <div className="flex flex-col">
-                          <span className="text-slate-400 text-sm">Total à payer</span>
-                          {o.deliveryFee && o.deliveryFee > 0 && (
-                            <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">
-                              Inclut {o.deliveryFee} CFA de livraison
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <button 
-                            onClick={() => setActiveChatOrderId(o.id)}
-                            className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all relative"
-                            title="Discuter avec le pharmacien"
-                          >
-                            <MessageCircle size={20} />
-                            {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white">
-                                {o.unreadCounts[profile?.role || 'patient']}
-                              </span>
-                            )}
-                          </button>
-                          {['paid', 'preparing', 'ready', 'delivering'].includes(o.status) && (
-                            <button 
-                              onClick={() => setShowMapForOrder(o)}
-                              className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-primary hover:bg-primary/5 transition-all"
-                              title="Voir la pharmacie sur la carte"
-                            >
-                              <MapPin size={20} />
-                            </button>
-                          )}
-                          <span className="text-xl font-bold text-primary">{(o.totalAmount || 0).toLocaleString()} FCFA</span>
-                        </div>
-                      </div>
-                      {o.status === 'completed' && (
-                        <div className="mt-4 pt-4 border-t border-slate-50 flex flex-col gap-4">
-                          <button
-                            onClick={() => generateInvoice(o, profile)}
-                            className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
-                          >
-                            <FileText size={18} />
-                            Télécharger la facture PDF
-                          </button>
-                          {(o.deliveryPhoto || o.deliverySignature) && (
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
-                              <div className="flex gap-4">
-                                {o.deliveryPhoto && (
-                                  <button 
-                                    onClick={() => setViewImage(o.deliveryPhoto!)}
-                                    className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group"
-                                  >
-                                    <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
-                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                      <Search className="text-white" size={20} />
-                                    </div>
-                                  </button>
-                                )}
-                                {o.deliverySignature && (
-                                  <button 
-                                    onClick={() => setViewImage(o.deliverySignature!)}
-                                    className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative"
-                                  >
-                                    <img src={o.deliverySignature} className="max-h-full object-contain" />
-                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                      <Search className="text-white" size={20} />
-                                    </div>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <StatusTrace history={o.history} />
-
-                      {o.status === 'delivering' && o.deliveryId && (
-                        <div className="mt-6 p-6 bg-slate-900 text-white rounded-[2.5rem] shadow-xl shadow-slate-200">
-                          <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-4">
-                              <div className="w-14 h-14 bg-slate-800 rounded-2xl flex items-center justify-center text-slate-400 overflow-hidden border border-slate-700">
-                                {o.deliveryPersonPhoto ? (
-                                  <img src={o.deliveryPersonPhoto} alt={o.deliveryPersonName} className="w-full h-full object-cover" />
-                                ) : (
-                                  <Truck size={28} />
-                                )}
-                              </div>
-                              <div>
-                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Votre livreur</p>
-                                <h5 className="text-lg font-bold">{o.deliveryPersonName}</h5>
-                                <p className="text-xs text-slate-400">{o.deliveryPersonPhone}</p>
-                              </div>
-                            </div>
-                            <div className="bg-emerald-500/10 text-emerald-400 p-3 rounded-2xl border border-emerald-500/20">
-                              <ShieldCheck size={24} />
-                            </div>
-                          </div>
-                          
-                          <div className="bg-white/5 p-6 rounded-3xl border border-white/10 text-center">
-                            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-3">Code de livraison à donner au livreur</p>
-                            <div className="flex items-center justify-center gap-4">
-                              <div className="bg-white text-slate-900 px-6 py-3 rounded-2xl text-3xl font-black tracking-[0.3em]">
-                                {o.deliveryCode}
-                              </div>
-                              <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-white">
-                                <QrCode size={24} />
-                              </div>
-                            </div>
-                            <p className="mt-4 text-[10px] text-slate-500 italic">Ne donnez ce code qu'une fois la commande reçue et vérifiée.</p>
-                          </div>
-                        </div>
-                      )}
-
-                      {o.status === 'pending_quote' && !o.deliveryMethod && (
-                        <div className="mt-6 space-y-3">
-                          <p className="text-sm text-amber-800 p-4 bg-amber-50 rounded-2xl border border-amber-100">Un pharmacien a analysé votre ordonnance et vous propose ce devis. Comment souhaitez-vous récupérer vos médicaments ?</p>
-                          <div className="grid grid-cols-2 gap-4">
-                            <button 
-                              onClick={() => handleSelectDeliveryMethod(o.id, 'delivery')}
-                              className="flex flex-col items-center gap-3 p-4 bg-white rounded-2xl border border-emerald-200 hover:border-emerald-500 transition-all group"
-                            >
-                              <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all">
-                                <Truck size={24} />
-                              </div>
-                              <span className="text-xs font-bold text-center">Livraison à domicile</span>
-                            </button>
-                            <button 
-                              onClick={() => handleSelectDeliveryMethod(o.id, 'pickup')}
-                              className="flex flex-col items-center gap-3 p-4 bg-white rounded-2xl border border-emerald-200 hover:border-emerald-500 transition-all group"
-                            >
-                              <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all">
-                                <Package size={24} />
-                              </div>
-                              <span className="text-xs font-bold text-center">Retrait en pharmacie</span>
-                            </button>
-                          </div>
-                          <button 
-                            onClick={() => handleRejectQuote(o.id, o.prescriptionId)}
-                            className="w-full py-4 bg-rose-50 text-rose-600 rounded-xl font-bold hover:bg-rose-100 transition-all mt-2"
-                          >
-                            Rejeter le devis
-                          </button>
-                        </div>
-                      )}
-
-                      {o.status === 'pending_payment' && (
-                        <div className="mt-6 space-y-3">
-                          <p className="text-sm text-amber-800 p-4 bg-amber-50 rounded-2xl border border-amber-100">Veuillez procéder au paiement pour valider votre commande.</p>
-                          <button 
-                            onClick={() => handleApproveQuote(o)}
-                            className="btn-primary w-full"
-                          >
-                            Payer {o.totalAmount?.toLocaleString()} FCFA
-                          </button>
-                        </div>
-                      )}
-
-                      {o.status === 'ready' && o.deliveryMethod === 'pickup' && (
-                        <div className="mt-6 p-4 bg-blue-50 rounded-2xl border border-blue-100 flex items-center gap-4">
-                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 shrink-0">
-                            <MapPin size={20} />
-                          </div>
-                          <p className="text-xs text-blue-800 font-medium">Vous avez choisi le retrait physique. Veuillez vous présenter à la pharmacie avec votre ID de commande.</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="md:w-64 bg-slate-50 p-6 rounded-2xl space-y-4">
-                      <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest">État de livraison</h5>
-                      <div className="space-y-4">
-                        {[
-                          { label: 'Devis reçu', done: ['pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'].includes(o.status) },
-                          { label: 'Payé / Validé', done: ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(o.status) },
-                          { label: 'Préparation', done: ['preparing', 'ready', 'delivering', 'completed'].includes(o.status) },
-                          { label: 'En route', done: ['delivering', 'completed'].includes(o.status) },
-                          { label: 'Livré', done: o.status === 'completed' },
-                        ].map((step) => (
-                          <div key={step.label} className="flex items-center gap-3">
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center ${step.done ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>
-                              {step.done && <CheckCircle size={12} />}
-                            </div>
-                            <span className={`text-sm font-medium ${step.done ? 'text-slate-900' : 'text-slate-400'}`}>{step.label}</span>
-                          </div>
-                        ))}
-                      </div>
+                <div className="max-w-4xl mx-auto space-y-8">
+                  <div className="flex flex-col gap-2">
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tight">Mes Commandes</h3>
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-12 bg-primary rounded-full"></div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                        {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').length} commandes actives
+                      </p>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-                </>
+
+                  {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').length === 0 ? (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-white p-20 rounded-[3rem] border border-slate-100 text-center shadow-xl shadow-slate-200/50"
+                    >
+                      <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center text-blue-500 mx-auto mb-8 rotate-3 hover:rotate-0 transition-transform duration-500">
+                        <Package size={48} strokeWidth={1.5} />
+                      </div>
+                      <h4 className="text-slate-900 font-black text-2xl mb-3">Aucune commande en cours</h4>
+                      <p className="text-slate-500 text-sm max-w-xs mx-auto leading-relaxed">
+                        Vos commandes actives et leur suivi en temps réel apparaîtront ici dès que vous aurez soumis une ordonnance.
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-6">
+                      {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').map(o => (
+                        <motion.div 
+                          key={o.id}
+                          layout
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all duration-300 group"
+                        >
+                          <div className="flex flex-col md:flex-row h-full">
+                            {/* Left Summary Pane */}
+                            <div className="md:w-64 bg-slate-50/50 p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between">
+                              <div>
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
+                                    <Package size={18} className="text-primary" />
+                                  </div>
+                                  <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
+                                    o.status === 'ready' || o.status === 'delivering' ? 'bg-emerald-500 text-white shadow-sm' : 
+                                    o.status === 'pending_payment' ? 'bg-rose-500 text-white shadow-sm' : 
+                                    'bg-slate-900 text-white'
+                                  }`}>
+                                    {o.status === 'pending_quote' ? 'En attente' : 
+                                     o.status === 'pending_payment' ? 'A Payer' : 
+                                     o.status === 'paid' ? 'Payé' :
+                                     o.status === 'preparing' ? 'Prépa' :
+                                     o.status === 'ready' ? 'Prêt' :
+                                     o.status === 'delivering' ? 'En livraison' : o.status}
+                                  </span>
+                                </div>
+                                <h4 className="text-base font-black text-slate-900 leading-tight">#{o.id.slice(-6).toUpperCase()}</h4>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Créée le {formatDate(o.createdAt, 'dateTime')}</p>
+                                
+                                <div className="mt-4 space-y-2">
+                                  <div className="flex items-center gap-2 text-xs text-slate-600 font-bold">
+                                    <Building2 size={14} className="text-slate-400" />
+                                    <span className="truncate">{o.pharmacyName || 'Pharmacie en attente'}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-100">
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
+                                    <span className="text-sm font-black text-primary">{(o.totalAmount || 0).toLocaleString()} F</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 md:mt-2 flex gap-2">
+                                <button 
+                                  onClick={() => setActiveChatOrderId(o.id)}
+                                  className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                                >
+                                  <MessageCircle size={14} /> Chat
+                                </button>
+                                {o.prescriptionImageUrl && (
+                                  <button 
+                                    onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                                    className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform"
+                                  >
+                                    <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Right Tracking Pane */}
+                            <div className="flex-1 p-5 flex flex-col justify-center">
+                              {/* Horizontal Minimal Stepper */}
+                              <div className="relative mb-6 px-2">
+                                <div className="absolute top-[14px] left-0 w-full h-[2px] bg-slate-100 rounded-full"></div>
+                                <div 
+                                  className="absolute top-[14px] left-0 h-[2px] bg-primary rounded-full transition-all duration-1000"
+                                  style={{ 
+                                    width: (() => {
+                                      const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+                                      const idx = stepsArr.indexOf(o.status);
+                                      if (idx < 4) return '0%';
+                                      if (idx === 4) return '25%';
+                                      if (idx === 5) return '50%';
+                                      if (idx === 6) return '75%';
+                                      return '100%';
+                                    })()
+                                  }}
+                                ></div>
+                                <div className="flex justify-between relative z-10">
+                                  {[
+                                    { label: 'Payé', status: 'paid', icon: CreditCard },
+                                    { label: 'Prépa', status: 'preparing', icon: FlaskConical },
+                                    { label: 'Prêt', status: 'ready', icon: CheckCircle2 },
+                                    { label: 'Livré', status: 'completed', icon: Home },
+                                  ].map((s, idx) => {
+                                    const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+                                    const currentStepIdx = stepsArr.indexOf(o.status);
+                                    const targetStepIdx = stepsArr.indexOf(s.status);
+                                    const isDone = currentStepIdx >= targetStepIdx && targetStepIdx !== -1;
+                                    const isActive = o.status === s.status;
+                                    
+                                    return (
+                                      <div key={s.label} className="flex flex-col items-center gap-2">
+                                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-500 scale-100 ${
+                                          isDone ? 'bg-primary text-white shadow-sm' : 'bg-white border text-slate-200'
+                                        } ${isActive ? 'ring-2 ring-primary/20 scale-110' : ''}`}>
+                                          <s.icon size={12} />
+                                        </div>
+                                        <span className={`text-[9px] font-black uppercase tracking-tight ${isDone ? 'text-slate-900' : 'text-slate-300'}`}>
+                                          {s.label}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Specialized Content Area */}
+                              <div className="space-y-4">
+                                {o.status === 'pending_payment' && (
+                                  <motion.div 
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="bg-primary/5 border border-primary/10 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
+                                  >
+                                    <div className="text-center sm:text-left">
+                                      <p className="text-sm font-black text-slate-900">Devis disponible !</p>
+                                      <p className="text-xs text-slate-500">Validez et payez pour lancer la préparation.</p>
+                                    </div>
+                                    <button 
+                                      onClick={() => handleApproveQuote(o)}
+                                      className="w-full sm:w-auto px-6 py-2.5 bg-primary text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-sm hover:scale-105 transition-all"
+                                    >
+                                      Payer {(o.totalAmount || 0).toLocaleString()} F
+                                    </button>
+                                  </motion.div>
+                                )}
+
+                                {o.status === 'pending_quote' && !o.deliveryMethod && (
+                                  <div className="bg-amber-50/50 border border-amber-100 p-5 rounded-2xl space-y-4">
+                                    <div className="flex items-center gap-4">
+                                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-amber-600 shadow-sm shrink-0 border border-amber-100/50">
+                                        <Package size={24} />
+                                      </div>
+                                      <div>
+                                        <h5 className="text-sm font-black text-slate-900 tracking-tight">Comment recevoir ?</h5>
+                                        <p className="text-xs text-slate-500 font-medium leading-relaxed">Choisissez pour passer au paiement.</p>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                      <button 
+                                        onClick={() => handleSelectDeliveryMethod(o.id, 'pickup')}
+                                        className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-primary hover:bg-primary/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
+                                      >
+                                        <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                                          <Store size={16} />
+                                        </div>
+                                        <div>
+                                          <p className="font-black text-xs text-slate-900 group-hover:text-primary transition-colors">Sur place</p>
+                                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Gratuit</p>
+                                        </div>
+                                      </button>
+
+                                      <button 
+                                        onClick={() => handleSelectDeliveryMethod(o.id, 'delivery')}
+                                        className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-orange-500 hover:bg-orange-500/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
+                                      >
+                                        <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-orange-500/10 group-hover:text-orange-500 transition-all">
+                                          <Truck size={16} />
+                                        </div>
+                                        <div>
+                                          <p className="font-black text-xs text-slate-900 group-hover:text-orange-500 transition-colors">Livraison</p>
+                                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{calculateDeliveryFee(settings)} F</p>
+                                        </div>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
+                                  <div className="bg-slate-900 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
+                                    <div className="flex items-center gap-4">
+                                      <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 backdrop-blur-md">
+                                        <QrCode size={24} className="text-primary" />
+                                      </div>
+                                      <div>
+                                        <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-0.5">Code de securité</p>
+                                        <p className="text-2xl font-black tracking-widest">#{o.deliveryCode}</p>
+                                      </div>
+                                    </div>
+                                    {o.status === 'delivering' && o.deliveryId && (
+                                      <div className="flex items-center gap-3 bg-white/5 p-2 pr-3 rounded-xl border border-white/10">
+                                        <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/20 shrink-0 bg-white/10 flex items-center justify-center">
+                                          {o.deliveryPersonPhoto ? <img src={o.deliveryPersonPhoto} className="w-full h-full object-cover" /> : <User size={16} />}
+                                        </div>
+                                        <div className="hidden sm:block">
+                                          <p className="text-[8px] font-black text-white/40 uppercase tracking-widest leading-none mb-0.5">Coursier</p>
+                                          <p className="text-[10px] font-black truncate max-w-[80px]">{o.deliveryPersonName}</p>
+                                        </div>
+                                        <button onClick={() => setShowMapForOrder(o)} className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white hover:bg-primary/80 transition-all shrink-0">
+                                          <MapPin size={14} />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-4 pt-4 border-t border-slate-50">
+                                <details className="group">
+                                  <summary className="list-none flex items-center justify-between cursor-pointer">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Historique du statut</span>
+                                      <div className="h-[1px] w-8 bg-slate-100"></div>
+                                    </div>
+                                    <ChevronDown size={14} className="text-slate-400 group-open:rotate-180 transition-transform" />
+                                  </summary>
+                                  <div className="mt-4">
+                                    <StatusTrace history={o.history} />
+                                  </div>
+                                </details>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {activeTab === 'history' && (
@@ -3216,81 +3559,52 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').map(o => (
-                        <div key={o.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4 opacity-75 hover:opacity-100 transition-opacity">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${o.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                  {o.status === 'completed' ? <CheckCircle size={20} /> : <X size={20} />}
+                        <div key={o.id} className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:opacity-100 opacity-90 transition-all flex flex-col">
+                          <div className={`px-5 py-3 border-b border-slate-50 flex items-center justify-between ${o.status === 'completed' ? 'bg-emerald-50/30' : 'bg-rose-50/30'}`}>
+                            <div className="flex items-center gap-2">
+                               <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                  {o.status === 'completed' ? <CheckCircle size={14} /> : <X size={14} />}
                                 </div>
-                                <div>
-                                  <h4 className="font-bold text-sm">#{o.id.slice(-6).toUpperCase()}</h4>
-                                  <p className="text-[10px] text-slate-400">{formatDate(o.createdAt)}</p>
-                                </div>
-                              </div>
-                              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                              }`}>
-                                {o.status === 'completed' ? 'Terminée' : 'Annulée'}
-                              </span>
+                                <span className="text-[10px] font-black text-slate-900 leading-none tracking-tight">#{o.id.slice(-6).toUpperCase()}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-bold">{formatDate(o.createdAt, 'date')}</span>
+                          </div>
+
+                          <div className="p-5 flex-1 flex flex-col gap-3">
+                            <div className="flex items-center gap-2">
+                              <Building2 size={12} className="text-slate-400" />
+                              <span className="font-bold text-xs text-slate-600 truncate">{o.pharmacyName || "Pharmacie"}</span>
                             </div>
 
-                            <div className="bg-slate-50 p-3 rounded-2xl mb-2 flex-grow">
-                              <div className="flex items-center gap-2 mb-1">
-                                <Building2 size={14} className="text-slate-400" />
-                                <span className="font-bold text-sm text-slate-700 truncate">{o.pharmacyName || "Pharmacie"}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <MapPin size={14} className="text-slate-400" />
-                                <span className="text-[11px] text-slate-500 truncate">{o.hospitalLocation}</span>
-                              </div>
-                            </div>
-
-                            {o.items && o.items.length > 0 && (
-                              <div className="space-y-1.5 mb-2">
-                                {o.items.map((item, idx) => (
-                                  <div key={idx} className="flex justify-between items-center text-xs">
-                                    <span className="text-slate-600 truncate mr-2">{item.name} x{item.quantity}</span>
-                                    <span className="font-bold whitespace-nowrap">{item.price * item.quantity} FCFA</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-between pt-3 border-t border-slate-50 mt-auto">
-                              <span className="text-slate-400 text-xs">Total payé</span>
-                              <span className="text-lg font-bold text-primary">{(o.totalAmount || 0).toLocaleString()} FCFA</span>
+                            <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-auto">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
+                              <span className="text-sm font-black text-primary">{(o.totalAmount || 0).toLocaleString()} F</span>
                             </div>
 
                             {o.status === 'completed' && (
                               <div className="mt-2 flex gap-2">
                                 <button
                                   onClick={() => generateInvoice(o, profile)}
-                                  className="flex-1 bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                                  className="flex-1 bg-slate-900 text-white py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
                                 >
-                                  <FileText size={14} /> Facture
+                                  <FileText size={12} /> Facture
                                 </button>
                                 {(o.deliveryPhoto || o.deliverySignature) && (
-                                  <div className="flex gap-2">
+                                  <div className="flex gap-1.5">
                                       {o.deliveryPhoto && (
                                         <button 
                                           onClick={() => setViewImage(o.deliveryPhoto!)}
-                                          className="w-10 h-10 aspect-square rounded-xl overflow-hidden border border-slate-200 relative group flex-shrink-0"
+                                          className="w-9 h-9 aspect-square rounded-xl overflow-hidden border border-slate-200 relative group flex-shrink-0"
                                         >
                                           <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
-                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                            <Search className="text-white" size={14} />
-                                          </div>
                                         </button>
                                       )}
                                       {o.deliverySignature && (
                                         <button 
                                           onClick={() => setViewImage(o.deliverySignature!)}
-                                          className="w-10 h-10 aspect-square rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 group relative flex-shrink-0"
+                                          className="w-9 h-9 aspect-square rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 group relative flex-shrink-0"
                                         >
                                           <img src={o.deliverySignature} className="max-h-full object-contain" />
-                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                            <Search className="text-white" size={14} />
-                                          </div>
                                         </button>
                                       )}
                                   </div>
@@ -3298,6 +3612,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                               </div>
                             )}
                           </div>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -3453,13 +3768,13 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                 Choisissez votre méthode de paiement pour la commande <span className="font-bold text-slate-900">#{showPaymentModal.id.slice(-6).toUpperCase()}</span>
               </p>
               
-              <div className="bg-slate-50 p-4 rounded-2xl mb-8 flex justify-between items-center border border-slate-100">
-                <span className="text-slate-600 font-medium">Total à payer</span>
+              <div className="bg-slate-50 p-4 rounded-2xl mb-8 flex justify-between items-center border border-slate-100 shadow-inner">
+                <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Total à régler</span>
                 <span className="text-2xl font-black text-emerald-600">{(showPaymentModal.totalAmount || 0).toLocaleString()} FCFA</span>
               </div>
 
               <div className="space-y-4">
-                {(!settings.paymentConfig || settings.paymentConfig.mobileMoneyEnabled) && !selectedPaymentMethod && (
+                {(!settings?.paymentConfig || settings.paymentConfig.mobileMoneyEnabled) && !selectedPaymentMethod && (
                   <>
                     <p className="text-left text-sm font-bold text-slate-700 mb-2">Mobile Money</p>
                     <div className="grid grid-cols-3 gap-3">
@@ -3606,7 +3921,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
                   </div>
                 )}
 
-                {(!settings.paymentConfig || settings.paymentConfig.cardEnabled) && !selectedPaymentMethod && (
+                {(!settings?.paymentConfig || settings.paymentConfig.cardEnabled) && !selectedPaymentMethod && (
                   <>
                     <div className="relative py-2">
                       <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
@@ -4090,17 +4405,17 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   useEffect(() => {
     const q = query(
       collection(db, 'transactions'), 
-      where('userId', '==', profile.uid),
-      where('userRole', '==', 'pharmacist')
+      where('userId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-      txs.sort((a, b) => {
+      const filtered = txs.filter(t => t.userRole === 'pharmacist');
+      filtered.sort((a, b) => {
         const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
         const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
         return dateB - dateA;
       });
-      setTransactions(txs.slice(0, 10));
+      setTransactions(filtered.slice(0, 10));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
     return () => unsubscribe();
   }, [profile.uid]);
@@ -4108,12 +4423,11 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   useEffect(() => {
     const q = query(
       collection(db, 'withdrawals'),
-      where('userId', '==', profile.uid),
-      where('userRole', '==', 'pharmacist')
+      where('userId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ws = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest));
-      setWithdrawals(ws);
+      setWithdrawals(ws.filter(w => w.userRole === 'pharmacist'));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'withdrawals'));
     return () => unsubscribe();
   }, [profile.uid]);
@@ -4174,23 +4488,34 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
   }, [profile.uid, profile.pharmacyId]);
 
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid), where('status', '==', 'completed'));
+    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setCompletedCount(snapshot.size);
+      const completed = snapshot.docs.filter(doc => doc.data().status === 'completed');
+      setCompletedCount(completed.length);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
   }, [profile.uid]);
 
+  const isFirstRunPharmacistPrescriptions = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'prescriptions'), where('status', '==', 'submitted'), orderBy('createdAt', 'desc'));
+    // Get prescriptions with status submitted, sort in JS to avoid index requirement
+    const q = query(collection(db, 'prescriptions'), where('status', '==', 'submitted'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allPrescriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
       
-      // Play sound for new prescriptions
+      // Sort client side
+      allPrescriptions.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+
+      // Play sound for new prescriptions (excluding initial load)
       const hasNew = snapshot.docChanges().some(change => change.type === 'added');
-      if (hasNew && !snapshot.metadata.hasPendingWrites) {
+      if (!isFirstRunPharmacistPrescriptions.current && hasNew && !snapshot.metadata.hasPendingWrites) {
         playNotificationSound();
       }
+      isFirstRunPharmacistPrescriptions.current = false;
 
       // Filter prescriptions:
       // 1. Not rejected by this pharmacy
@@ -4199,7 +4524,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
       let filtered = allPrescriptions.filter(p => {
         const isRejectedByMe = p.rejectedBy?.includes(profile.uid);
         const isLockedByOther = p.lockedBy && p.lockedBy !== profile.uid;
-        const lockExpired = p.lockedAt && (new Date().getTime() - new Date(p.lockedAt.toDate()).getTime() > 5 * 60 * 1000);
+        const lockExpired = p.lockedAt && (new Date().getTime() - (p.lockedAt.toDate ? p.lockedAt.toDate().getTime() : new Date(p.lockedAt).getTime()) > 5 * 60 * 1000);
         const isTooManyRejections = (p.rejectionCount || 0) >= 5;
 
         if (isRejectedByMe || isTooManyRejections) return false;
@@ -4232,16 +4557,25 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     return () => unsubscribe();
   }, [profile.uid, settings, myPharmacy]);
 
+  const isFirstRunPharmacistOrders = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
       
-      // Play sound for new orders/updates
+      // Sort in JS
+      allOrders.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+      
+      // Play sound for new orders/updates (excluding initial load)
       const hasNew = snapshot.docChanges().some(change => change.type === 'added');
-      if (hasNew && !snapshot.metadata.hasPendingWrites) {
+      if (!isFirstRunPharmacistOrders.current && hasNew && !snapshot.metadata.hasPendingWrites) {
         playNotificationSound();
       }
+      isFirstRunPharmacistOrders.current = false;
 
       setOrders(allOrders.filter(o => o.status !== 'completed'));
       
@@ -4318,10 +4652,13 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     if (!selectedPrescription) return;
 
     const totalAmount = quoteItems.reduce((sum, item) => {
+      if (item.isUnavailable) return sum;
       const price = item.equivalent ? (item.equivalentPrice || 0) : item.price;
       const quantity = item.equivalent ? (item.equivalentQuantity || 1) : item.quantity;
       return sum + (price * quantity);
     }, 0);
+
+    const isPartialQuote = quoteItems.some(item => item.isUnavailable) || selectedPrescription.requestType === 'partial';
     
     try {
       // Create Order
@@ -4337,7 +4674,9 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
         pharmacyLocation: profile.pharmacyLocation || "Non spécifiée",
         pharmacyLocationCoords: profile.location || null, // Real-time location of the pharmacy
         status: 'pending_quote',
-        items: quoteItems,
+        quoteType: isPartialQuote ? 'partial' : 'full',
+        items: quoteItems.filter(item => !item.isUnavailable),
+        unavailableItems: quoteItems.filter(item => item.isUnavailable),
         totalAmount,
         medicationTotal: totalAmount,
         deliveryFee: 0, // Will be calculated when patient selects delivery method
@@ -4583,48 +4922,47 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
               </div>
             ) : (
               prescriptions.map(p => (
-                <div key={p.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4">
+                <div key={p.id} className="bg-white p-4 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-3 hover:shadow-md transition-all">
                   <div className="flex gap-4">
                     <div 
-                      className="w-24 h-24 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group shrink-0"
+                      className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group shrink-0"
                       onClick={() => setViewImage(p.imageUrl)}
                     >
                       <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={16} />
+                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={14} />
                       </div>
                     </div>
                     
-                    <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
-                      <div>
-                        <div className="flex justify-between items-start mb-1">
-                          <h4 className="text-sm font-bold text-slate-900 truncate">{p.patientName || "Anonyme"}</h4>
-                          <span className="text-[10px] bg-primary/5 text-primary px-2 py-1 rounded-lg font-black uppercase">#{p.id.slice(-4).toUpperCase()}</span>
+                    <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-start">
+                          <h4 className="text-sm font-black text-slate-900 truncate pr-2">{p.patientName || "Anonyme"}</h4>
+                          <span className="text-[9px] bg-primary/5 text-primary px-2 py-0.5 rounded-lg font-black uppercase shrink-0">#{p.id.slice(-4).toUpperCase()}</span>
                         </div>
-                        <p className="text-[10px] text-slate-500 truncate mb-1">{p.hospitalLocation || "Lieu non spécifié"}</p>
+                        <p className="text-[10px] text-slate-400 font-bold truncate">{p.hospitalLocation || "Lieu non spécifié"}</p>
                       </div>
                       
                       <div className="flex items-center gap-2 mt-auto">
-                        <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg text-[10px] font-bold">
+                        <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase">
                           <MapPin size={10} />
                           {p.distance || 2} km
                         </div>
-                        {p.requestType === 'partial' && (
-                          <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
-                            <Plus size={10} /> Partielle
+                        {p.requestType === 'partial' ? (
+                          <span className="text-[9px] bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
+                            <Package size={10} /> Partiel
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
+                            <CheckCircle size={10} /> Complet
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 max-h-32 overflow-hidden relative">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                        <FileText size={10} /> IA Détection
-                      </p>
-                    </div>
-                    <div className="text-xs text-slate-600">
+                  <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100/50 max-h-24 overflow-hidden relative">
+                    <div className="text-[10px] text-slate-600">
                       {p.extractedData ? (
                         <div className="space-y-1">
                           {(() => {
@@ -4640,12 +4978,10 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 
                               return displayMeds.map((m: any, i: number) => {
                                 const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
-                                const dosage = typeof m === 'string' ? '' : (m.dosage || '');
                                 return (
                                   <div key={`${name}-${i}`} className="flex items-center gap-1.5 truncate">
                                     <div className="w-1 h-1 rounded-full bg-slate-300 shrink-0"></div>
                                     <span className="font-bold text-slate-700">{name}</span>
-                                    {dosage && <span className="text-[10px] text-slate-400"> {dosage}</span>}
                                   </div>
                                 );
                               });
@@ -4655,23 +4991,22 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                           })()}
                         </div>
                       ) : (
-                        <span className="flex items-center gap-2"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse en cours...</span>
+                        <span className="flex items-center gap-2"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse...</span>
                       )}
                     </div>
-                    {/* Fade out bottom to indicate scroll/more if needed without taking space */}
-                    <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
+                    <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
                   </div>
 
-                  <div className="flex gap-2 mt-auto">
+                  <div className="flex gap-2">
                     <button 
                       onClick={() => handleStartQuote(p)}
-                      className="flex-1 btn-primary py-2.5 text-xs font-bold rounded-xl"
+                      className="flex-1 bg-primary text-white py-3 text-[11px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-95"
                     >
                       Devis
                     </button>
                     <button 
                       onClick={() => handleValidatePrescription(p.id, 'rejected')}
-                      className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-100 hover:text-rose-600 transition-all shadow-sm"
+                      className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm"
                       title="Rejeter"
                     >
                       <X size={16} />
@@ -4698,91 +5033,89 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
               </div>
             ) : (
               orders.map(o => (
-                <div key={o.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary">
-                        <Package size={16} />
+                <div key={o.id} className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
+                  {/* Compact Header */}
+                  <div className="px-5 py-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-white shadow-sm flex items-center justify-center text-slate-400 font-black text-[10px]">
+                        {o.id.slice(-2).toUpperCase()}
                       </div>
                       <div>
-                        <span className="font-bold text-sm block leading-tight">#{o.id.slice(-6).toUpperCase()}</span>
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md inline-block ${
-                          o.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 
-                          o.status === 'pending_quote' ? 'bg-amber-100 text-amber-700' : 
-                          o.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 
-                          o.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
-                          o.status === 'ready' ? 'bg-emerald-100 text-emerald-700' :
-                          o.status === 'delivering' ? 'bg-secondary/10 text-secondary' :
-                          'bg-blue-100 text-blue-700'
-                        }`}>
-                          {o.status === 'pending_quote' ? 'ATTENTE VALID.' : 
-                           o.status === 'pending_payment' ? 'ATTENTE PAIEMENT' : 
-                           o.status === 'paid' ? 'À PRÉPARER' :
-                           o.status === 'preparing' ? 'PRÉPARATION' :
-                           o.status === 'ready' ? 'PRÊT' :
-                           o.status === 'delivering' ? 'EN LIVRAISON' :
-                           o.status.replace('_', ' ').toUpperCase()}
-                        </span>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setActiveChatOrderId(o.id)}
-                      className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all relative shrink-0"
-                      title="Discuter avec le patient"
-                    >
-                      <MessageCircle size={18} />
-                      {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                          {o.unreadCounts[profile?.role || 'pharmacist']}
-                        </span>
-                      )}
-                    </button>
-                  </div>
-
-                  {o.prescriptionImageUrl && (
-                    <div 
-                      className="w-full h-24 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group"
-                      onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                    >
-                      <img src={o.prescriptionImageUrl} alt="Prescription" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={20} />
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="space-y-3 mb-8">
-                    {o.items?.map((item, i) => (
-                      <div key={`${item.name}-${i}`} className="flex flex-col text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-slate-600">
-                            {item.equivalent ? (
-                              <span className="flex flex-col">
-                                <span className="line-through text-slate-400 text-[10px]">{item.name}</span>
-                                <span className="font-bold text-amber-700">{item.equivalent} x{item.equivalentQuantity || item.quantity}</span>
-                              </span>
-                            ) : (
-                              `${item.name} x${item.quantity}`
-                            )}
-                          </span>
-                          <span className="font-bold">
-                            {(item.equivalent ? (item.equivalentPrice || item.price) : item.price).toLocaleString()} F
-                          </span>
+                        <p className="text-xs font-black text-slate-900 leading-none mb-1">#{o.id.slice(-6).toUpperCase()}</p>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {o.quoteType === 'partial' ? (
+                            <span className="text-[8px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">
+                              Devis Partiel
+                            </span>
+                          ) : (
+                            <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">
+                              Devis Complet
+                            </span>
+                          )}
                         </div>
-                        {item.equivalent && (
-                          <span className="text-[9px] text-amber-600 font-medium italic bg-amber-50 px-2 py-0.5 rounded-full w-fit mt-1 border border-amber-100">
-                            Équivalent: {item.equivalent}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
+                        o.status === 'paid' ? 'bg-emerald-500 text-white' : 
+                        o.status === 'preparing' ? 'bg-indigo-500 text-white' :
+                        o.status === 'ready' ? 'bg-emerald-600 text-white' :
+                        o.status === 'delivering' ? 'bg-sky-500 text-white' :
+                        'bg-slate-200 text-slate-600'
+                      }`}>
+                        {o.status === 'paid' ? 'À Préparer' :
+                         o.status === 'preparing' ? 'En cours' :
+                         o.status === 'ready' ? 'Prêt' :
+                         o.status === 'delivering' ? 'En cours de livr.' :
+                         o.status}
+                      </span>
+                      <button 
+                        onClick={() => setActiveChatOrderId(o.id)}
+                        className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
+                      >
+                        <MessageCircle size={14} />
+                        {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
+                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+                            {o.unreadCounts[profile?.role || 'pharmacist']}
                           </span>
                         )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div className="flex gap-4">
+                      {o.prescriptionImageUrl && (
+                        <div 
+                          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
+                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                        >
+                          <img src={o.prescriptionImageUrl} alt="Ordo" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-bold text-slate-400 leading-tight mb-2 uppercase tracking-tight">Articles & Traitement</p>
+                        <div className="space-y-1">
+                          {o.items?.slice(0, 2).map((item, i) => (
+                            <p key={i} className="text-xs text-slate-600 truncate flex items-center gap-2">
+                              <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                              {item.name} x{item.quantity}
+                            </p>
+                          ))}
+                          {o.items && o.items.length > 2 && (
+                            <p className="text-[10px] text-slate-400 italic">+{o.items.length - 2} autres articles</p>
+                          )}
+                        </div>
                       </div>
-                    ))}
+                    </div>
+
                     <div className="pt-3 border-t border-slate-50 flex flex-col gap-1">
-                      <div className="flex justify-between text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
-                        <span>Votre Gain Net (Médicaments - Commission)</span>
+                      <div className="flex justify-between text-[8px] font-bold text-emerald-600 uppercase tracking-widest">
+                        <span>Gain Net Estimé</span>
                         <span>{o.pharmacyAmount?.toLocaleString()} FCFA</span>
                       </div>
                     </div>
-                  </div>
 
                   <div className="flex flex-col gap-2">
                     {o.deliveryId && !o.isHandedOver && o.deliveryMethod === 'delivery' && (
@@ -4813,71 +5146,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 
                     {o.status === 'ready' && o.deliveryMethod === 'pickup' && (
                       <button 
-                        onClick={async () => {
-                          const toastId = toast.loading("Confirmation du retrait...");
-                          try {
-                            const batch = writeBatch(db);
-                            const orderRef = doc(db, 'orders', o.id);
-                            const pharmacyAmount = o.pharmacyAmount || 0;
-
-                            // 1. Update order status
-                            batch.update(orderRef, { 
-                              status: 'completed', 
-                              updatedAt: serverTimestamp(),
-                              history: arrayUnion({
-                                status: 'completed',
-                                timestamp: new Date().toISOString(),
-                                label: 'Commande retirée en pharmacie'
-                              })
-                            });
-
-                            // 2. Credit Pharmacy Wallet and Update Stats
-                            if (pharmacyAmount > 0 && o.pharmacistId) {
-                              const pharmacistRef = doc(db, 'users', o.pharmacistId);
-                              
-                              batch.update(pharmacistRef, {
-                                pharmacistBalance: increment(pharmacyAmount),
-                                walletBalance: increment(pharmacyAmount)
-                              });
-
-                              // 3. Log Transaction
-                              const transactionRef = doc(collection(db, 'transactions'));
-                              batch.set(transactionRef, {
-                                userId: o.pharmacistId,
-                                userName: o.pharmacyName || 'Pharmacie',
-                                userRole: 'pharmacist',
-                                amount: pharmacyAmount,
-                                type: 'credit',
-                                description: `Gains médicaments (net de commission) pour commande #${o.id.slice(-6).toUpperCase()}`,
-                                referenceId: o.id,
-                                createdAt: serverTimestamp()
-                              });
-
-                              // 4. Create Notification
-                              const notificationRef = doc(collection(db, 'notifications'));
-                              batch.set(notificationRef, {
-                                userId: o.pharmacistId,
-                                title: "Paiement reçu",
-                                message: `Vous avez reçu ${pharmacyAmount} FCFA (montant net après commission) pour la commande #${o.id.slice(-6).toUpperCase()}.`,
-                                type: 'payment',
-                                referenceId: o.id,
-                                read: false,
-                                createdAt: serverTimestamp()
-                              });
-                            }
-
-                            await batch.commit();
-                            console.log(`[DEBUG] Batch commit SUCCESS for order ${o.id}`);
-                            toast.success("Retrait confirmé ! Vos gains ont été crédités.", { id: toastId });
-                          } catch (err: any) {
-                            console.error(`[DEBUG] Batch commit ERROR for order ${o.id}:`, err);
-                            if (err.message?.includes('permission-denied')) {
-                              console.error("[DEBUG] SECURITY RULE REJECTION detected.");
-                            }
-                            handleFirestoreError(err, OperationType.UPDATE, `orders/${o.id}`);
-                            toast.error("Erreur lors de la confirmation du retrait.", { id: toastId });
-                          }
-                        }}
+                        onClick={() => setShowHandoverVerify(o)}
                         className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
                       >
                         <CheckCircle size={18} />
@@ -4968,7 +5237,8 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                     )}
                   </div>
                 </div>
-              ))
+              </div>
+            ))
             )}
                   </div>
                 </>
@@ -5382,49 +5652,76 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
       {/* Handover Verify Modal */}
       <AnimatePresence>
         {showHandoverVerify && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[2.5rem] shadow-2xl max-w-md w-full p-8 text-center"
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 text-center overflow-hidden"
             >
-              <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 mx-auto mb-6">
-                <ShieldCheck size={32} />
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-black text-slate-900 leading-tight">Vérification</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Remise Sécurisée</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowHandoverVerify(null);
+                    setPickupCodeInput('');
+                  }}
+                  className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 transition-colors"
+                >
+                  <X size={20} />
+                </button>
               </div>
-              <h3 className="text-2xl font-bold mb-2">Vérification d'Identité</h3>
-              <p className="text-slate-500 mb-6 text-sm">Assurez-vous que la personne devant vous correspond à ce profil avant de remettre la commande.</p>
               
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-8 flex items-center gap-4 text-left">
-                <div className="w-16 h-16 bg-white rounded-xl flex items-center justify-center text-slate-400 overflow-hidden border border-slate-200 shrink-0">
-                  {showHandoverVerify.deliveryPersonPhoto ? (
-                    <img src={showHandoverVerify.deliveryPersonPhoto} alt={showHandoverVerify.deliveryPersonName} className="w-full h-full object-cover" />
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-6 flex items-center gap-4 text-left">
+                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-slate-400 overflow-hidden border border-slate-200 shrink-0 shadow-sm">
+                  {showHandoverVerify.deliveryMethod === 'delivery' ? (
+                    showHandoverVerify.deliveryPersonPhoto ? (
+                      <img src={showHandoverVerify.deliveryPersonPhoto} alt={showHandoverVerify.deliveryPersonName} className="w-full h-full object-cover" />
+                    ) : (
+                      <Truck size={20} />
+                    )
                   ) : (
-                    <Truck size={24} />
+                     <User size={20} />
                   )}
                 </div>
-                <div>
-                  <p className="font-bold text-slate-900 text-lg">{showHandoverVerify.deliveryPersonName}</p>
-                  <p className="text-sm text-slate-500">{showHandoverVerify.deliveryPersonPhone}</p>
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-900 text-sm truncate">
+                    {showHandoverVerify.deliveryMethod === 'delivery' ? showHandoverVerify.deliveryPersonName : showHandoverVerify.patientName}
+                  </p>
+                  <p className="text-xs text-slate-400 font-medium">
+                    {showHandoverVerify.deliveryMethod === 'delivery' ? showHandoverVerify.deliveryPersonPhone : showHandoverVerify.patientPhone || 'Patient'}
+                  </p>
                 </div>
               </div>
 
-              <div className="space-y-4 mb-8">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-left">Code de retrait du livreur</p>
+              <div className="space-y-3 mb-6">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left ml-1">
+                  {showHandoverVerify.deliveryMethod === 'delivery' ? "Code de retrait du livreur" : "Code de retrait du patient"}
+                </p>
                 <input 
                   type="text" 
                   maxLength={6}
-                  placeholder="Code à 6 chiffres"
+                  placeholder="000000"
                   value={pickupCodeInput}
                   onChange={(e) => setPickupCodeInput(e.target.value)}
-                  className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 text-center text-3xl font-bold tracking-[0.2em] outline-none focus:border-amber-500 transition-all"
+                  className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 text-center text-3xl font-black tracking-[0.2em] outline-none focus:border-amber-500 transition-all shadow-inner"
                 />
               </div>
 
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <button 
                   onClick={async () => {
-                    if (pickupCodeInput === showHandoverVerify.pickupCode) {
+                    const expectedCode = showHandoverVerify.deliveryMethod === 'delivery' ? showHandoverVerify.pickupCode : showHandoverVerify.deliveryCode;
+                    
+                    if (pickupCodeInput === expectedCode && expectedCode) {
                       setIsVerifyingHandover(true);
                       const toastId = toast.loading("Validation du code...");
                       try {
@@ -5506,15 +5803,6 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
                 >
                   {isVerifyingHandover ? "Vérification..." : "Confirmer la Remise"}
                 </button>
-                <button 
-                  onClick={() => {
-                    setShowHandoverVerify(null);
-                    setPickupCodeInput('');
-                  }}
-                  className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-bold"
-                >
-                  Annuler
-                </button>
               </div>
             </motion.div>
           </div>
@@ -5563,20 +5851,22 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   const [showSignaturePad, setShowSignaturePad] = useState(false);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
 
+  const isFirstRunDeliveryMissions = useRef(true);
   useEffect(() => {
     const q = query(
-      collection(db, 'orders'), 
-      where('status', 'in', ['pending_payment', 'paid', 'preparing', 'ready', 'delivering'])
+      collection(db, 'orders'),
+      where('status', 'in', ['paid', 'preparing', 'ready', 'delivering'])
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       // Filter and sort in JS to avoid composite index requirement
       const allMissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
       
-      // Play sound for new missions
+      // Play sound for new missions (excluding initial load)
       const hasNew = snapshot.docChanges().some(change => change.type === 'added');
-      if (hasNew && !snapshot.metadata.hasPendingWrites) {
+      if (!isFirstRunDeliveryMissions.current && hasNew && !snapshot.metadata.hasPendingWrites) {
         playNotificationSound();
       }
+      isFirstRunDeliveryMissions.current = false;
 
       // Sort by createdAt desc
       allMissions.sort((a, b) => {
@@ -5601,17 +5891,17 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   useEffect(() => {
     const q = query(
       collection(db, 'transactions'), 
-      where('userId', '==', profile.uid),
-      where('userRole', '==', 'delivery')
+      where('userId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-      txs.sort((a, b) => {
+      const filtered = txs.filter(t => t.userRole === 'delivery');
+      filtered.sort((a, b) => {
         const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
         const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
         return dateB - dateA;
       });
-      setTransactions(txs.slice(0, 10));
+      setTransactions(filtered.slice(0, 10));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
     return () => unsubscribe();
   }, [profile.uid]);
@@ -5619,12 +5909,11 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   useEffect(() => {
     const q = query(
       collection(db, 'withdrawals'),
-      where('userId', '==', profile.uid),
-      where('userRole', '==', 'delivery')
+      where('userId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ws = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest));
-      setWithdrawals(ws);
+      setWithdrawals(ws.filter(w => w.userRole === 'delivery'));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'withdrawals'));
     return () => unsubscribe();
   }, [profile.uid]);
@@ -5651,9 +5940,15 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
           });
         },
         (error) => {
-          console.error("Error watching position:", error);
+          const errorMessages = {
+            1: "Permission de géolocalisation refusée.",
+            2: "Position indisponible (vérifiez vos paramètres GPS).",
+            3: "Délai d'attente de géolocalisation dépassé."
+          };
+          const msg = errorMessages[error.code as keyof typeof errorMessages] || error.message;
+          console.error("Error watching position:", msg, error);
         },
-        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
       );
     }
 
@@ -5678,12 +5973,18 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   useEffect(() => {
     const q = query(
       collection(db, 'orders'), 
-      where('deliveryId', '==', profile.uid), 
-      where('status', '==', 'completed'),
-      orderBy('createdAt', 'desc')
+      where('deliveryId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const allDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const docs = allDocs.filter(d => d.status === 'completed');
+      
+      // Sort in JS
+      docs.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
       
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -5874,52 +6175,47 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
               </div>
             ) : (
               availableMissions.map(m => (
-                <div key={m.id} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-md transition-all">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
-                      <MapPin size={24} />
+                <div key={m.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-md transition-all flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                      <MapPin size={20} />
                     </div>
                     <div className="text-right">
-                      <span className="text-xl font-bold text-emerald-600 block">+{m.deliveryFee || 1500} FCFA</span>
-                      {m.status === 'pending_payment' && (
-                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Attente Paiement</span>
-                      )}
+                      <span className="text-lg font-black text-emerald-600 block leading-none">+{m.deliveryFee || 1500} <span className="text-[10px]">CFA</span></span>
                     </div>
                   </div>
                   
-                  <div className="space-y-4 mb-8">
+                  <div className="space-y-3">
                     <div className="flex gap-3">
-                      <div className="flex flex-col items-center gap-1">
-                        <div className="w-2 h-2 rounded-full bg-primary"></div>
-                        <div className="w-0.5 h-8 bg-slate-100"></div>
-                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                      <div className="flex flex-col items-center gap-1 py-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                        <div className="w-0.5 flex-1 bg-slate-100"></div>
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
                       </div>
-                      <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-3 min-w-0">
                         <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Départ (Pharmacie)</p>
-                          <p className="font-bold text-slate-800">{m.pharmacyName || "Pharmacie Partenaire"}</p>
-                          <p className="text-xs text-slate-500">{m.pharmacyLocation || "Ouagadougou"}</p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Pharmacie</p>
+                          <p className="text-xs font-bold text-slate-800 truncate">{m.pharmacyName || "Pharmacie Partenaire"}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Arrivée (Patient)</p>
-                          <p className="font-bold text-slate-800">{m.patientName}</p>
-                          <p className="text-xs text-slate-500">{m.hospitalLocation}</p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Patient</p>
+                          <p className="text-xs font-bold text-slate-800 truncate">{m.hospitalLocation}</p>
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-4 pt-4 border-t border-slate-50">
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Clock size={14} /> 15 min
+                    <div className="flex gap-3 pt-3 border-t border-slate-50">
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                        <Package size={12} /> {m.items?.length || 0} art.
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Package size={14} /> {m.items?.length || 0} articles
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg ml-auto">
+                        {m.status === 'pending_payment' ? 'En attente paiement' : 'Prêt'}
                       </div>
                     </div>
                   </div>
 
                   <StatusTrace history={m.history} />
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-2">
                     <button 
                       onClick={async () => {
                         try {
@@ -5941,15 +6237,15 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                           handleFirestoreError(err, OperationType.UPDATE, `orders/${m.id}`);
                         }
                       }}
-                      className="btn-primary flex-1"
+                      className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-900/10"
                     >
                       Accepter
                     </button>
                     <button 
                       onClick={() => handleRejectMission(m.id)}
-                      className="px-6 py-4 bg-rose-50 text-rose-600 rounded-2xl font-bold hover:bg-rose-100 transition-all"
+                      className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm"
                     >
-                      Refuser
+                      <X size={18} />
                     </button>
                   </div>
                 </div>
@@ -5973,69 +6269,65 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
               </div>
             ) : (
               activeMissions.map(m => (
-                <div key={m.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-4">
-                  <div className="flex items-center justify-between">
+                <div key={m.id} className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
+                  {/* Status Header */}
+                  <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                        <Truck size={16} />
+                      <div className="w-7 h-7 bg-white rounded-lg shadow-sm flex items-center justify-center text-blue-600">
+                        <Truck size={14} />
+                      </div>
+                      <span className="text-xs font-black text-slate-900 leading-none tracking-tight">#{m.id.slice(-6).toUpperCase()}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
+                        m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-500 text-white'
+                      }`}>
+                        {m.status === 'pending_payment' ? 'Att. Paiement' : 'En Livraison'}
+                      </span>
+                      <button 
+                        onClick={() => setActiveChatOrderId(m.id)}
+                        className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
+                      >
+                        <MessageCircle size={14} />
+                        {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
+                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+                            {m.unreadCounts[profile?.role || 'delivery']}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                          <MapPin size={10} /> Livraison
+                        </p>
+                        <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{m.hospitalLocation}</p>
                       </div>
                       <div>
-                        <span className="font-bold text-sm block leading-tight">#{m.id.slice(-6).toUpperCase()}</span>
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md inline-block ${
-                          m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                        }`}>
-                          {m.status === 'pending_payment' ? 'ATT. PAIEM.' : 'EN COURS'}
-                        </span>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                          <Phone size={10} /> Contact
+                        </p>
+                        <p className="text-[11px] font-bold text-slate-700 leading-tight">+226 70.. ..</p>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => setActiveChatOrderId(m.id)}
-                      className="w-10 h-10 rounded-xl bg-slate-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-50 transition-all relative shrink-0"
-                      title="Chatter avec le client/pharmacien"
-                    >
-                      <MessageCircle size={18} />
-                      {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                          {m.unreadCounts[profile?.role || 'delivery']}
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
-                        <MapPin size={14} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Adresse</p>
-                        <p className="font-bold text-xs text-slate-800 truncate">Secteur 15, Rue 15.22, Porte 102</p>
+
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Package size={10} /> Colis</p>
+                      <div className="space-y-1">
+                        {m.items?.slice(0, 1).map((item, i) => (
+                          <div key={i} className="flex justify-between text-[10px]">
+                            <span className="text-slate-600 truncate mr-2">{item.name}</span>
+                            <span className="font-bold shrink-0">x{item.quantity}</span>
+                          </div>
+                        ))}
+                        {m.items && m.items.length > 1 && (
+                          <p className="text-[9px] text-slate-400 italic">+{m.items.length - 1} autres</p>
+                        )}
                       </div>
                     </div>
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
-                        <Phone size={14} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Contact</p>
-                        <p className="font-bold text-xs text-slate-800 truncate">+226 70 00 00 00</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 mt-auto">
-                    <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Résumé commande</p>
-                    <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                      {m.items?.map((item, i) => (
-                        <div key={`${item.name}-${i}`} className="flex justify-between text-xs">
-                          <span className="text-slate-600 truncate mr-2">
-                            {item.equivalent || item.name}
-                          </span>
-                          <span className="font-bold shrink-0">x{item.equivalent ? (item.equivalentQuantity || item.quantity) : item.quantity}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
 
                   <div className="flex flex-col gap-2 mt-2">
                     {!m.isHandedOver ? (
@@ -6063,7 +6355,8 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
                     </button>
                   </div>
                 </div>
-              ))
+              </div>
+            ))
             )}
                   </div>
                 </>
@@ -6267,122 +6560,153 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
         </div>
       </div>
 
-  {/* Pickup QR Modal */}
-  <AnimatePresence>
-    {showPickupQR && (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-        <motion.div 
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          className="bg-white rounded-[2.5rem] shadow-2xl max-w-md w-full p-8 text-center"
-        >
-          <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 mx-auto mb-6">
-            <QrCode size={32} />
-          </div>
-          <h3 className="text-2xl font-bold mb-2">Code de Retrait</h3>
-          <p className="text-slate-500 mb-8 text-sm">Montrez ce code au pharmacien pour récupérer la commande.</p>
-          
-          <div className="bg-slate-50 p-8 rounded-3xl mb-8 flex flex-col items-center justify-center border border-slate-100">
-            <QRCodeCanvas value={showPickupQR.pickupCode || ""} size={200} />
-            <p className="mt-6 text-4xl font-black tracking-[0.5em] text-slate-900">{showPickupQR.pickupCode}</p>
-          </div>
+   {/* Pickup QR Modal */}
+   <AnimatePresence>
+     {showPickupQR && (
+       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+         <motion.div 
+           initial={{ scale: 0.95, opacity: 0, y: 20 }}
+           animate={{ scale: 1, opacity: 1, y: 0 }}
+           exit={{ scale: 0.95, opacity: 0, y: 20 }}
+           className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 text-center overflow-hidden"
+         >
+           <div className="flex items-center justify-between mb-6">
+             <div className="flex items-center gap-3">
+               <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+                 <QrCode size={20} />
+               </div>
+               <div className="text-left">
+                 <h3 className="text-lg font-black text-slate-900 leading-tight">Code de Retrait</h3>
+                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Commande #{showPickupQR.id.slice(-6).toUpperCase()}</p>
+               </div>
+             </div>
+             <button 
+               onClick={() => setShowPickupQR(null)}
+               className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 transition-colors"
+             >
+               <X size={20} />
+             </button>
+           </div>
+           
+           <div className="bg-slate-50 p-6 rounded-3xl mb-6 flex flex-col items-center justify-center border border-slate-100 ring-4 ring-slate-50/50">
+             <div className="bg-white p-4 rounded-2xl shadow-sm">
+               <QRCodeCanvas value={showPickupQR.pickupCode || ""} size={160} />
+             </div>
+             <div className="mt-4 text-center">
+               <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1">Code numérique</p>
+               <p className="text-3xl font-black tracking-[0.3em] text-slate-900 leading-tight">{showPickupQR.pickupCode}</p>
+             </div>
+           </div>
 
-          <button 
-            onClick={() => setShowPickupQR(null)}
-            className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold"
-          >
-            Fermer
-          </button>
-        </motion.div>
-      </div>
-    )}
-  </AnimatePresence>
+           <p className="text-slate-500 text-xs font-medium leading-relaxed px-4 mb-2">
+             Présentez ce QR Code au pharmacien pour valider le retrait de votre commande en officine.
+           </p>
+         </motion.div>
+       </div>
+     )}
+   </AnimatePresence>
 
   {/* Delivery Verify Modal */}
   <AnimatePresence>
     {showDeliveryVerify && (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-        <motion.div 
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          className="bg-white rounded-[2.5rem] shadow-2xl max-w-md w-full p-8 text-center"
-        >
-          <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 mx-auto mb-6">
-            <ShieldCheck size={32} />
-          </div>
-          <h3 className="text-2xl font-bold mb-2">Vérification Patient</h3>
-          <p className="text-slate-500 mb-8 text-sm">Demandez le code de livraison au patient pour finaliser.</p>
-          
-          <div className="space-y-6 mb-8 text-left">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Preuve Photo (Optionnel)</label>
-              <div className="flex flex-col items-center gap-4">
-                {deliveryPhoto ? (
-                  <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-emerald-500">
-                    <img src={deliveryPhoto} className="w-full h-full object-cover" />
-                    <button onClick={() => setDeliveryPhoto(null)} className="absolute top-2 right-2 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg"><X size={16} /></button>
-                  </div>
-                ) : (
-                  <label className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all">
-                    <Camera size={32} />
-                    <span className="text-xs font-bold mt-2">Prendre une photo</span>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      capture="environment" 
-                      className="hidden" 
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          const base64 = await compressImage(file, 800, 600, 0.7);
-                          setDeliveryPhoto(base64);
-                        }
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-            </div>
+       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+         <motion.div 
+           initial={{ scale: 0.95, opacity: 0, y: 20 }}
+           animate={{ scale: 1, opacity: 1, y: 0 }}
+           exit={{ scale: 0.95, opacity: 0, y: 20 }}
+           className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 text-center overflow-hidden"
+         >
+           <div className="flex items-center justify-between mb-6">
+             <div className="flex items-center gap-3">
+               <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                 <ShieldCheck size={20} />
+               </div>
+               <div className="text-left">
+                 <h3 className="text-lg font-black text-slate-900 leading-tight">Vérification Patient</h3>
+                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Finalisation Livraison</p>
+               </div>
+             </div>
+             <button 
+               onClick={() => {
+                 setShowDeliveryVerify(null);
+                 setDeliveryCodeInput('');
+               }}
+               className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 transition-colors"
+             >
+               <X size={20} />
+             </button>
+           </div>
+           
+           <div className="grid grid-cols-2 gap-3 mb-6">
+             <div className="space-y-2">
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-left ml-1">Preuve Photo</p>
+               <div className="relative">
+                 {deliveryPhoto ? (
+                   <div className="relative w-full aspect-square rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-sm">
+                     <img src={deliveryPhoto} className="w-full h-full object-cover" />
+                     <button onClick={() => setDeliveryPhoto(null)} className="absolute top-1 right-1 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg"><X size={12} /></button>
+                   </div>
+                 ) : (
+                   <label className="w-full aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all group">
+                     <Camera size={24} className="group-hover:scale-110 transition-transform" />
+                     <span className="text-[9px] font-bold mt-1 uppercase tracking-tighter">Photo</span>
+                     <input 
+                       type="file" 
+                       accept="image/*" 
+                       capture="environment" 
+                       className="hidden" 
+                       onChange={async (e) => {
+                         const file = e.target.files?.[0];
+                         if (file) {
+                           const base64 = await compressImage(file, 800, 600, 0.7);
+                           setDeliveryPhoto(base64);
+                         }
+                       }}
+                     />
+                   </label>
+                 )}
+               </div>
+             </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Signature du Patient (Optionnel)</label>
-              {deliverySignature ? (
-                <div className="relative w-full h-32 bg-white border-2 border-emerald-500 rounded-2xl overflow-hidden">
-                  <img src={deliverySignature} className="w-full h-full object-contain" />
-                  <button onClick={() => setDeliverySignature(null)} className="absolute top-2 right-2 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg"><X size={16} /></button>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => setShowSignaturePad(true)}
-                  className="w-full h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary hover:text-primary transition-all"
-                >
-                  <PenTool size={32} />
-                  <span className="text-xs font-bold mt-2">Signer ici</span>
-                </button>
-              )}
-            </div>
+             <div className="space-y-2">
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-left ml-1">Signature</p>
+               <div className="relative">
+                 {deliverySignature ? (
+                   <div className="relative w-full aspect-square bg-slate-50 border-2 border-emerald-500 rounded-2xl overflow-hidden shadow-sm">
+                     <img src={deliverySignature} className="w-full h-full object-contain" />
+                     <button onClick={() => setDeliverySignature(null)} className="absolute top-1 right-1 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg"><X size={12} /></button>
+                   </div>
+                 ) : (
+                   <button 
+                     onClick={() => setShowSignaturePad(true)}
+                     className="w-full aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 hover:border-primary hover:text-primary transition-all group"
+                   >
+                     <PenTool size={24} className="group-hover:scale-110 transition-transform" />
+                     <span className="text-[9px] font-bold mt-1 uppercase tracking-tighter">Signer</span>
+                   </button>
+                 )}
+               </div>
+             </div>
+           </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Code de Livraison (6 chiffres)</label>
-              <input 
-                type="text" 
-                maxLength={6}
-                placeholder="000000"
-                value={deliveryCodeInput}
-                onChange={(e) => setDeliveryCodeInput(e.target.value)}
-                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 text-center text-3xl font-bold tracking-[0.2em] outline-none focus:border-primary transition-all"
-              />
-            </div>
-          </div>
+           <div className="space-y-3 mb-6">
+             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left ml-1">Code de Livraison (6 chiffres)</p>
+             <input 
+               type="text" 
+               maxLength={6}
+               placeholder="000000"
+               value={deliveryCodeInput}
+               onChange={(e) => setDeliveryCodeInput(e.target.value)}
+               className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 text-center text-3xl font-black tracking-[0.2em] outline-none focus:border-emerald-500 transition-all shadow-inner"
+             />
+           </div>
 
-          <div className="flex flex-col gap-3">
-            <button 
-              onClick={async () => {
-                if (deliveryCodeInput === showDeliveryVerify.deliveryCode) {
-                  setIsVerifying(true);
-                  const toastId = toast.loading("Validation du code...");
+           <div className="flex flex-col gap-2">
+             <button 
+               onClick={async () => {
+                 if (deliveryCodeInput === showDeliveryVerify.deliveryCode) {
+                   setIsVerifying(true);
+                   const toastId = toast.loading("Validation du code...");
                   try {
                     const order = showDeliveryVerify;
                     const batch = writeBatch(db);

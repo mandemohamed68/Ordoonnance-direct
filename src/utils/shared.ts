@@ -12,7 +12,7 @@ export const isPrimaryAdminEmail = (email: string | null | undefined) =>
 export const isSuperAdminEmail = (email: string | null | undefined) => 
   email ? SUPER_ADMIN_EMAILS.includes(email) : false;
 
-export const formatDate = (date: any, format: 'full' | 'date' | 'time' | 'short' = 'full') => {
+export const formatDate = (date: any, format: 'full' | 'date' | 'time' | 'short' | 'dateTime' = 'full') => {
   if (!date) return 'Date inconnue';
   
   let d: Date;
@@ -33,6 +33,11 @@ export const formatDate = (date: any, format: 'full' | 'date' | 'time' | 'short'
       return d.toLocaleDateString('fr-FR');
     case 'time':
       return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    case 'dateTime':
+      return d.toLocaleString('fr-FR', { 
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit' 
+      });
     case 'short':
       return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
     default:
