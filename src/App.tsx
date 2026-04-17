@@ -2192,23 +2192,21 @@ const analyzeWithGemini = async (options: { image?: string, text?: string, promp
     let response;
     if (options.image) {
       response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: [
           { inlineData: { mimeType: "image/jpeg", data: options.image } },
           { text: options.prompt }
         ],
         config: { 
-          responseMimeType: "application/json",
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+          responseMimeType: "application/json"
         }
       });
     } else {
       response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: `${options.prompt} : "${options.text}"`,
         config: { 
-          responseMimeType: "application/json",
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
+          responseMimeType: "application/json"
         }
       });
     }
