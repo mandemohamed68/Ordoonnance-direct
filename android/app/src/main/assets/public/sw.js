@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pharmaliv-v2';
+const CACHE_NAME = 'ordonnance-direct-v1';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

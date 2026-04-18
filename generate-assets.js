@@ -7,7 +7,7 @@ if (!fs.existsSync(assetsDir)) {
   fs.mkdirSync(assetsDir);
 }
 
-const logoPath = path.join(process.cwd(), 'public', 'logo192.png');
+const logoPath = path.join(process.cwd(), 'public', 'logo-web.png');
 
 async function generateAssets() {
   if (fs.existsSync(logoPath)) {
