@@ -1602,7 +1602,7 @@ export default function App() {
         <>
           <button 
             onClick={() => setShowSupportChat(true)}
-            className="fixed bottom-6 right-6 w-16 h-16 bg-primary text-white rounded-full shadow-2xl shadow-primary/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-40"
+            className="fixed md:bottom-6 bottom-24 right-6 w-16 h-16 bg-primary text-white rounded-full shadow-2xl shadow-primary/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-[150]"
           >
             <MessageCircle size={28} />
             {supportChatMeta?.unreadUserCount > 0 && (
@@ -1618,7 +1618,7 @@ export default function App() {
                 initial={{ opacity: 0, y: 20, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 20, scale: 0.9 }}
-                className="fixed bottom-28 right-6 w-80 h-[450px] bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 border border-slate-100 z-50 overflow-hidden flex flex-col"
+                className="fixed md:bottom-28 bottom-44 right-6 w-80 h-[450px] bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 border border-slate-100 z-[200] overflow-hidden flex flex-col"
               >
                 <div className="bg-primary p-6 text-white relative">
                   <button 
@@ -3259,7 +3259,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
                 className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
                   activeTab === tab.id 
                     ? `${tab.bg} ${tab.color} shadow-sm` 
@@ -3284,7 +3284,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
                 className="flex flex-col items-center gap-1 min-w-[64px] relative py-2"
               >
                 <div className={`p-2 rounded-xl transition-all duration-300 ${
@@ -4053,13 +4053,23 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       {/* Payment Modal */}
       <AnimatePresence>
         {showPaymentModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[2.5rem] shadow-2xl max-w-md w-full p-8 text-center relative overflow-hidden"
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="bg-white rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl max-w-md w-full p-6 sm:p-8 text-center relative flex flex-col max-h-[85vh] overflow-y-auto pb-10 sm:pb-8"
             >
+              <button 
+                onClick={() => {
+                  setShowPaymentModal(null);
+                  setSelectedPaymentMethod(null);
+                }}
+                className="absolute top-4 right-4 w-8 h-8 sm:w-10 sm:h-10 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full flex items-center justify-center transition-colors z-50"
+                aria-label="Fermer"
+              >
+                <X size={20} />
+              </button>
               {isProcessingPayment && (
                 <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
                   <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -4068,29 +4078,30 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                 </div>
               )}
               
-              <div className="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center text-emerald-600 mx-auto mb-6">
-                <CreditCard size={40} />
-              </div>
-              <h3 className="text-2xl font-bold mb-2">Paiement Sécurisé</h3>
+              {!selectedPaymentMethod && (
+                <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 mx-auto mb-4">
+                  <CreditCard size={32} />
+                </div>
+              )}
+              <h3 className="text-xl font-bold mb-2">Paiement Sécurisé</h3>
               
               {/* SANDBOX MODE BANNER */}
               {(!settings?.paymentConfig || settings.paymentConfig.testMode !== false) && (
-                <div className="mb-4 bg-amber-50 border border-amber-200 flex items-start gap-3 p-3 rounded-xl shadow-sm">
-                  <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
-                  <div>
-                     <p className="text-xs font-bold text-amber-700 uppercase">Mode Sandbox Actif</p>
-                     <p className="text-xs text-amber-600/80">L'application fonctionne en mode test (Sandbox). Les paiements sont simulés et aucun prélèvement réel ne sera effectué sur vos comptes.</p>
-                  </div>
+                <div className="mb-4 bg-amber-50 border border-amber-200 flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg w-fit mx-auto shadow-sm">
+                  <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                  <span className="text-[10px] font-bold text-amber-700 uppercase tracking-tighter">Mode Sandbox Actif</span>
                 </div>
               )}
 
-              <p className="text-slate-500 mb-6 text-sm">
-                Choisissez votre méthode de paiement pour la commande <span className="font-bold text-slate-900">#{showPaymentModal.id.slice(-6).toUpperCase()}</span>
-              </p>
+              {!selectedPaymentMethod && (
+                <p className="text-slate-500 mb-4 text-xs">
+                  Choisissez une méthode pour la commande <span className="font-bold text-slate-900">#{showPaymentModal.id.slice(-6).toUpperCase()}</span>
+                </p>
+              )}
               
-              <div className="bg-slate-50 p-4 rounded-2xl mb-8 flex justify-between items-center border border-slate-100 shadow-inner">
-                <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Total à régler</span>
-                <span className="text-2xl font-black text-emerald-600">{(showPaymentModal.totalAmount || 0).toLocaleString()} FCFA</span>
+              <div className="bg-slate-50 p-3 rounded-xl mb-6 flex justify-between items-center border border-slate-100 shadow-inner">
+                <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Total</span>
+                <span className="text-xl font-black text-emerald-600">{(showPaymentModal.totalAmount || 0).toLocaleString()} FCFA</span>
               </div>
 
               <div className="space-y-4">
@@ -4171,6 +4182,9 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                             placeholder="Ex: 0102030405"
                             value={paymentPhone}
                             onChange={(e) => setPaymentPhone(e.target.value)}
+                            onFocus={(e) => {
+                              setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+                            }}
                             className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold focus:border-primary outline-none transition-all"
                           />
                         </div>
@@ -4277,6 +4291,10 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                             placeholder="Ex: 12345"
                             value={paymentOtp}
                             onChange={(e) => setPaymentOtp(e.target.value)}
+                            onFocus={(e) => {
+                              // Scroll into view on mobile keyboard popups
+                              setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+                            }}
                             className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold text-center tracking-widest focus:border-primary outline-none transition-all"
                           />
                         </div>
@@ -5225,7 +5243,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
                 className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
                   activeTab === tab.id 
                     ? `${tab.bg} ${tab.color} shadow-sm` 
@@ -5257,7 +5275,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
                 className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
               >
                 <div className={`p-2.5 rounded-xl transition-all duration-300 ${
@@ -6478,7 +6496,7 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
                 className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
                   activeTab === tab.id 
                     ? `${tab.bg} ${tab.color} shadow-sm` 
@@ -6510,7 +6528,7 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
                 className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
               >
                 <div className={`p-2.5 rounded-xl transition-all duration-300 ${
