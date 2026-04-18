@@ -2472,7 +2472,7 @@ const analyzeWithGemini = async (options: { image?: string, text?: string, promp
 
 // --- Patient Dashboard ---
 
-function PatientDashboard({ profile, settings, location }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null }) {
+const PatientDashboard = React.memo(({ profile, settings, location }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
@@ -2599,7 +2599,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
 
   const isFirstRunPatientPrescriptions = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'prescriptions'), where('patientId', '==', profile.uid));
+    const q = query(collection(db, 'prescriptions'), where('patientId', '==', profile.uid), limit(50));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       isFirstRunPatientPrescriptions.current = false;
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
@@ -2615,7 +2615,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
 
   const isFirstRunPatientOrders = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('patientId', '==', profile.uid));
+    const q = query(collection(db, 'orders'), where('patientId', '==', profile.uid), limit(50));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       // Play sound for new orders or important updates (excluding initial load)
       const hasSignficantChange = snapshot.docChanges().some(change => {
@@ -4628,7 +4628,7 @@ function PatientDashboard({ profile, settings, location }: { profile: UserProfil
     )}
   </PullToRefresh>
   );
-}
+});
 
 function WithdrawalModal({ 
   profile, 
@@ -4773,7 +4773,7 @@ function WithdrawalModal({
 
 // --- Pharmacist Dashboard ---
 
-function PharmacistDashboard({ profile, settings }: { profile: UserProfile, settings: Settings | null }) {
+const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'history' | 'wallet' | 'reports' | 'profile'>('pending');
@@ -4828,7 +4828,6 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
     equivalentQuantity?: number;
     isUnavailable?: boolean;
   }[]>([]);
-  const [completedCount, setCompletedCount] = useState(0);
   const [showHandoverVerify, setShowHandoverVerify] = useState<Order | null>(null);
   const [pickupCodeInput, setPickupCodeInput] = useState('');
   const [isVerifyingHandover, setIsVerifyingHandover] = useState(false);
@@ -4871,15 +4870,6 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
       setMyPharmacy(null);
     }
   }, [profile.uid, profile.pharmacyId]);
-
-  useEffect(() => {
-    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const completed = snapshot.docs.filter(doc => doc.data().status === 'completed');
-      setCompletedCount(completed.length);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
-    return () => unsubscribe();
-  }, [profile.uid]);
 
   const isFirstRunPharmacistPrescriptions = useRef(true);
   useEffect(() => {
@@ -4944,7 +4934,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
 
   const isFirstRunPharmacistOrders = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid));
+    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid), limit(150));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
       
@@ -5212,7 +5202,7 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
           <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
             <div>
               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
-              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{completedCount}</h3>
+              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{historyOrders.length}</h3>
             </div>
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-secondary/10 rounded-xl flex items-center justify-center text-secondary">
               <Package size={18} />
@@ -6219,12 +6209,12 @@ function PharmacistDashboard({ profile, settings }: { profile: UserProfile, sett
       />
     )}
   </PullToRefresh>
-);
-}
+  );
+});
 
 // --- Delivery Dashboard ---
 
-function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settings: Settings | null }) {
+const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
   const [missions, setMissions] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'available' | 'active' | 'history' | 'wallet' | 'profile' | 'reports'>('available');
 
@@ -6363,7 +6353,8 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
   useEffect(() => {
     const q = query(
       collection(db, 'orders'), 
-      where('deliveryId', '==', profile.uid)
+      where('deliveryId', '==', profile.uid),
+      limit(150)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
@@ -7295,5 +7286,5 @@ function DeliveryDashboard({ profile, settings }: { profile: UserProfile, settin
         />
       )}
   </PullToRefresh>
-);
-};
+  );
+});

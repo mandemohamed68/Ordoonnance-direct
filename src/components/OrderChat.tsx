@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { MessageCircle, X, ChevronRight } from 'lucide-react';
 import { doc, collection, query, where, onSnapshot, addDoc, updateDoc, serverTimestamp, increment } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -39,11 +39,6 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      msgs.sort((a: any, b: any) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
-        return dateA - dateB;
-      });
       setMessages(msgs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'chat_messages'));
     
@@ -52,6 +47,14 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
       unsubscribe();
     };
   }, [orderId, userRole]);
+
+  const sortedMessages = React.useMemo(() => {
+    return [...messages].sort((a: any, b: any) => {
+      const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+      const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+      return dateA - dateB;
+    });
+  }, [messages]);
 
   const sendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -114,20 +117,27 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
-          {messages.map((m, idx) => (
-            <div key={m.id || idx} className={`flex flex-col ${m.senderId === userId ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${
-                m.senderId === userId ? `${getRoleColor(m.senderRole || userRole)} text-white rounded-tr-none` : 'bg-white text-slate-800 rounded-tl-none shadow-sm'
-              }`}>
-                <div className="flex items-center gap-2 mb-1 opacity-70">
-                  <span className="font-bold text-[10px]">{m.senderName}</span>
-                  <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 uppercase tracking-wider">{m.senderRole || 'User'}</span>
+          <AnimatePresence mode="popLayout">
+            {sortedMessages.map((m, idx) => (
+              <motion.div 
+                key={m.id || idx} 
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                className={`flex flex-col ${m.senderId === userId ? 'items-end' : 'items-start'}`}
+              >
+                <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${
+                  m.senderId === userId ? `${getRoleColor(m.senderRole || userRole)} text-white rounded-tr-none` : 'bg-white text-slate-800 rounded-tl-none shadow-sm'
+                }`}>
+                  <div className="flex items-center gap-2 mb-1 opacity-70">
+                    <span className="font-bold text-[10px]">{m.senderName}</span>
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 uppercase tracking-wider">{m.senderRole || 'User'}</span>
+                  </div>
+                  <p>{m.text}</p>
                 </div>
-                <p>{m.text}</p>
-              </div>
-              <p className="text-[9px] text-slate-400 mt-1">{m.createdAt ? formatDate(m.createdAt, 'time') : 'Envoi...'}</p>
-            </div>
-          ))}
+                <p className="text-[9px] text-slate-400 mt-1">{m.createdAt ? formatDate(m.createdAt, 'time') : 'Envoi...'}</p>
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
 
         <div className="p-4 bg-white border-t border-slate-100 flex gap-2">

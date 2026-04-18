@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, 
@@ -46,7 +46,7 @@ const parseDate = (date: any): Date => {
   return isNaN(d.getTime()) ? new Date(0) : d;
 };
 
-const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
+const FinancialReconciliation = React.memo(({ orders }: { orders: Order[] }) => {
   const completedOrders = orders.filter(o => o.status === 'completed');
   
   const discrepancies = completedOrders.filter(o => {
@@ -151,9 +151,9 @@ const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
       </div>
     </div>
   );
-};
+});
 
-export function AdminDashboard({ profile, settings }: { profile: UserProfile, settings: Settings | null }) {
+export const AdminDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall'>('overview');
   const [cities, setCities] = useState<City[]>([]);
@@ -284,6 +284,46 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [editingDeliveryUser, setEditingDeliveryUser] = useState<UserProfile | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterRole, setFilterRole] = useState<string>('all');
+  const [seeding, setSeeding] = useState(false);
+  const [importingPharmacies, setImportingPharmacies] = useState(false);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const searchMatch = !searchTerm || 
+        user.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.phone.includes(searchTerm);
+      const roleMatch = filterRole === 'all' || user.role === filterRole;
+      return searchMatch && roleMatch;
+    });
+  }, [users, searchTerm, filterRole]);
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      const searchMatch = !searchTerm || 
+        order.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        order.patientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.hospitalLocation?.toLowerCase().includes(searchTerm.toLowerCase());
+      return searchMatch;
+    });
+  }, [orders, searchTerm]);
+
+  const financialStats = useMemo(() => {
+    const totalRevenue = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    const completedOrders = orders.filter(o => o.status === 'completed');
+    const pharmacyRevenue = orders.reduce((sum, o) => sum + (o.pharmacyAmount || 0), 0);
+    const platformRevenue = orders.reduce((sum, o) => sum + (o.platformFee || 0), 0);
+    
+    return {
+      totalRevenue,
+      completedCount: completedOrders.length,
+      pharmacyRevenue,
+      platformRevenue,
+      pendingApprovals: users.filter(u => u.status === 'pending').length
+    };
+  }, [orders, users]);
 
   const handleSaveDeliveryProfile = async (updatedData: Partial<UserProfile>) => {
     if (!editingDeliveryUser) return;
@@ -368,10 +408,6 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       setIsResetting(false);
     }
   };
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterRole, setFilterRole] = useState<string>('all');
-  const [seeding, setSeeding] = useState(false);
-  const [importingPharmacies, setImportingPharmacies] = useState(false);
 
   const handleImportPharmacies = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -436,49 +472,43 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   }, [settings]);
 
   useEffect(() => {
-    const qUsers = query(collection(db, 'users'), limit(100));
+    const qUsers = query(collection(db, 'users'), limit(500));
     const unsubUsers = onSnapshot(qUsers, (snapshot) => {
       setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
-    const qOrders = query(collection(db, 'orders'), limit(150));
+    const qOrders = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(150));
     const unsubOrders = onSnapshot(qOrders, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-      // Sort client-side to avoid composite index requirements
-      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
       setOrders(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
 
-    const qPrescriptions = query(collection(db, 'prescriptions'), limit(150));
+    const qPrescriptions = query(collection(db, 'prescriptions'), orderBy('createdAt', 'desc'), limit(150));
     const unsubPrescriptions = onSnapshot(qPrescriptions, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
-      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
       setPrescriptions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'prescriptions'));
 
-    const qPharmacies = query(collection(db, 'pharmacies'), limit(100));
+    const qPharmacies = query(collection(db, 'pharmacies'), limit(500));
     const unsubPharmacies = onSnapshot(qPharmacies, (snapshot) => {
       setPharmacies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Pharmacy)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'pharmacies'));
 
-    const qWithdrawals = query(collection(db, 'withdrawals'), limit(100));
+    const qWithdrawals = query(collection(db, 'withdrawals'), orderBy('createdAt', 'desc'), limit(100));
     const unsubWithdrawals = onSnapshot(qWithdrawals, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WithdrawalRequest));
-      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
       setWithdrawals(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'withdrawals'));
 
-    const qLogs = query(collection(db, 'system_logs'), limit(100));
+    const qLogs = query(collection(db, 'system_logs'), orderBy('timestamp', 'desc'), limit(100));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => parseDate(b.timestamp).getTime() - parseDate(a.timestamp).getTime());
       setSystemLogs(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'system_logs'));
 
-    const qTransactions = query(collection(db, 'transactions'), limit(150));
+    const qTransactions = query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(150));
     const unsubTransactions = onSnapshot(qTransactions, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime());
       setTransactions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
 
@@ -4574,5 +4604,5 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       )}
   </PullToRefresh>
   );
-}
+});
 
