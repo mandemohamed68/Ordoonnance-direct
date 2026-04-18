@@ -19,6 +19,7 @@ import { DataAnalyst } from './DataAnalyst';
 import { OrderChat } from './OrderChat';
 import { PHARMACIES_OUAGA } from '../data/pharmacies_ouaga';
 
+import { getApiUrl } from '../config';
 import { PullToRefresh } from './PullToRefresh';
 
 const calculateDeliveryFee = (settings: Settings | null) => {
@@ -62,9 +63,9 @@ const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
   const totalPlatformGains = completedOrders.reduce((sum, o) => sum + (o.platformFee || 0), 0);
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between mb-8">
+    <div className="space-y-4">
+      <div className="bg-white p-4 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold flex items-center gap-2">
             <ShieldCheck className="text-emerald-600" size={24} />
             Concordance des Sommes
@@ -74,26 +75,26 @@ const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
           </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Total Payé par Clients</p>
-            <p className="text-2xl font-black text-slate-900">{totalAmount.toLocaleString()} F</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Payé par Clients</p>
+            <p className="text-xl font-black text-slate-900">{totalAmount.toLocaleString()} F</p>
           </div>
-          <div className="p-6 bg-emerald-50 rounded-3xl border border-emerald-100">
-            <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-2">Total Gains Pharmacies</p>
-            <p className="text-2xl font-black text-emerald-700">{totalPharmacyGains.toLocaleString()} F</p>
+          <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+            <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1">Total Gains Pharmacies</p>
+            <p className="text-xl font-black text-emerald-700">{totalPharmacyGains.toLocaleString()} F</p>
           </div>
-          <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100">
-            <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-2">Total Gains Livreurs</p>
-            <p className="text-2xl font-black text-amber-700">{totalDeliveryGains.toLocaleString()} F</p>
+          <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100">
+            <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-1">Total Gains Livreurs</p>
+            <p className="text-xl font-black text-amber-700">{totalDeliveryGains.toLocaleString()} F</p>
           </div>
-          <div className="p-6 bg-blue-50 rounded-3xl border border-blue-100">
-            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2">Total Revenus Plateforme</p>
-            <p className="text-2xl font-black text-blue-700">{totalPlatformGains.toLocaleString()} F</p>
+          <div className="p-3 bg-blue-50 rounded-2xl border border-blue-100">
+            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Total Revenus Plateforme</p>
+            <p className="text-xl font-black text-blue-700">{totalPlatformGains.toLocaleString()} F</p>
           </div>
         </div>
 
-        <div className="p-6 bg-slate-900 text-white rounded-3xl mb-8">
+        <div className="p-3 bg-slate-900 text-white rounded-2xl mb-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Vérification de Distribution</p>
@@ -137,7 +138,7 @@ const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
             </div>
           </div>
         ) : (
-          <div className="bg-emerald-50 p-8 rounded-3xl border border-emerald-100 flex flex-col items-center text-center gap-4">
+          <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 flex flex-col items-center text-center gap-3">
             <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-emerald-500 shadow-sm">
               <CheckCircle size={32} />
             </div>
@@ -153,8 +154,23 @@ const FinancialReconciliation = ({ orders }: { orders: Order[] }) => {
 };
 
 export function AdminDashboard({ profile, settings }: { profile: UserProfile, settings: Settings | null }) {
+  const [systemStatus, setSystemStatus] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall'>('overview');
   const [cities, setCities] = useState<City[]>([]);
+
+  useEffect(() => {
+    if (activeTab === 'security') {
+      fetch(getApiUrl('/api/admin/system-status'))
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setSystemStatus(data.services);
+          }
+        }).catch(err => {
+          console.error("Could not fetch system status: ", err);
+        });
+    }
+  }, [activeTab]);
   const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   const [showCityModal, setShowCityModal] = useState(false);
   const [editingCity, setEditingCity] = useState<City | null>(null);
@@ -943,7 +959,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
   };
 
   const recentActivity = [...orders, ...prescriptions]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime())
     .slice(0, 10);
 
   const getChartData = () => {
@@ -955,12 +971,12 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       const dateStr = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
       
       const dayOrders = orders.filter(o => {
-        const oDate = new Date(o.createdAt);
+        const oDate = parseDate(o.createdAt);
         return oDate.getDate() === d.getDate() && oDate.getMonth() === d.getMonth() && oDate.getFullYear() === d.getFullYear();
       }).length;
 
       const dayPrescriptions = prescriptions.filter(p => {
-        const pDate = new Date(p.createdAt);
+        const pDate = parseDate(p.createdAt);
         return pDate.getDate() === d.getDate() && pDate.getMonth() === d.getMonth() && pDate.getFullYear() === d.getFullYear();
       }).length;
 
@@ -989,8 +1005,8 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="space-y-12 pb-20">
-      <div className="flex flex-col md:flex-row gap-8">
+      <div className="space-y-4 pb-10">
+      <div className="flex flex-col md:flex-row gap-4">
         <div className="w-full md:w-64 flex-shrink-0">
           {/* Mobile Tab Selector */}
           <div className="md:hidden flex overflow-x-auto pb-4 gap-2 scrollbar-hide snap-x">
@@ -1033,7 +1049,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           </div>
 
           {/* Desktop Sidebar */}
-          <div className="hidden md:block sticky top-24 p-4 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar">
+          <div className="hidden md:block sticky top-20 p-4 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm max-h-[calc(100vh-100px)] overflow-y-auto custom-scrollbar">
             {[
               {
                 category: 'Général',
@@ -1128,53 +1144,53 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             >
               {activeTab === 'overview' && (
                 <>
-                  <div className="space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all duration-500">
-                    <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
-                      <Users size={24} />
+                  <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60 group hover:shadow-md transition-all duration-300">
+                    <div className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center text-slate-600 mb-3 group-hover:scale-105 transition-transform">
+                      <Users size={18} />
                     </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Utilisateurs</p>
-                    <p className="text-3xl font-black text-slate-900">{stats.totalUsers}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Utilisateurs</p>
+                    <p className="text-xl font-black text-slate-900">{stats.totalUsers}</p>
                   </div>
-                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all duration-500">
-                    <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 mb-4 group-hover:scale-110 transition-transform">
-                      <Package size={24} />
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60 group hover:shadow-md transition-all duration-300">
+                    <div className="w-10 h-10 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 mb-3 group-hover:scale-105 transition-transform">
+                      <Package size={18} />
                     </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Commandes</p>
-                    <p className="text-3xl font-black text-slate-900">{stats.totalOrders}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Commandes</p>
+                    <p className="text-xl font-black text-slate-900">{stats.totalOrders}</p>
                   </div>
-                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all duration-500">
-                    <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mb-4 group-hover:scale-110 transition-transform">
-                      <FileText size={24} />
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60 group hover:shadow-md transition-all duration-300">
+                    <div className="w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600 mb-3 group-hover:scale-105 transition-transform">
+                      <FileText size={18} />
                     </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ordonnances</p>
-                    <p className="text-3xl font-black text-slate-900">{stats.totalPrescriptions}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ordonnances</p>
+                    <p className="text-xl font-black text-slate-900">{stats.totalPrescriptions}</p>
                   </div>
-                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 group hover:shadow-xl transition-all duration-500">
-                    <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 mb-4 group-hover:scale-110 transition-transform">
-                      <ShieldCheck size={24} />
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60 group hover:shadow-md transition-all duration-300">
+                    <div className="w-10 h-10 bg-amber-50 border border-amber-100 rounded-xl flex items-center justify-center text-amber-600 mb-3 group-hover:scale-105 transition-transform">
+                      <ShieldCheck size={18} />
                     </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Livrées</p>
-                    <p className="text-3xl font-black text-slate-900">{stats.completedOrders}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Livrées</p>
+                    <p className="text-xl font-black text-slate-900">{stats.completedOrders}</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
-                    <div className="flex items-center justify-between mb-8">
-                      <h3 className="text-xl font-bold">Activité Récente</h3>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2 bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-bold text-slate-800">Activité Récente</h3>
                       <button className="text-xs font-bold text-primary hover:underline">Voir tout</button>
                     </div>
-                    <div className="space-y-4">
-                      {recentActivity.map((activity: any) => (
-                        <div key={activity.id} className="flex items-center justify-between p-5 bg-slate-50/50 rounded-3xl border border-slate-100 hover:border-primary/20 hover:bg-white hover:shadow-lg transition-all duration-300">
-                          <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${'patientId' in activity && !('items' in activity) ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                              {'patientId' in activity && !('items' in activity) ? <FileText size={20} /> : <Package size={20} />}
+                    <div className="space-y-3">
+                      {recentActivity.slice(0, 5).map((activity: any) => (
+                        <div key={activity.id} className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-slate-100 hover:border-primary/20 hover:bg-white hover:shadow-md transition-all duration-300">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${'patientId' in activity && !('items' in activity) ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                              {'patientId' in activity && !('items' in activity) ? <FileText size={18} /> : <Package size={18} />}
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-slate-900">
+                              <p className="text-sm font-bold text-slate-900 leading-tight mb-0.5">
                                 {'patientId' in activity && !('items' in activity) ? 'Nouvelle Ordonnance' : 'Nouvelle Commande'}
                               </p>
                               <p className="text-[10px] text-slate-500 font-medium">
@@ -1183,7 +1199,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                             </div>
                           </div>
                           <div className="text-right">
-                            <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                            <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
                               activity.status === 'completed' || activity.status === 'validated' ? 'bg-emerald-100 text-emerald-700' :
                               activity.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
                             }`}>
@@ -1193,7 +1209,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         </div>
                       ))}
                       {recentActivity.length === 0 && (
-                        <div className="text-center py-20">
+                        <div className="text-center py-10">
                           <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 mx-auto mb-4">
                             <Activity size={32} />
                           </div>
@@ -1203,21 +1219,22 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     </div>
                   </div>
 
-                  <div className="space-y-8">
-                    <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
-                      <h3 className="text-xl font-bold mb-8">Utilisateurs</h3>
-                      <div className="space-y-6">
+                  <div className="space-y-6">
+                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/60">
+                      <h3 className="text-lg font-bold text-slate-800 mb-6">Utilisateurs</h3>
+                      <div className="space-y-5">
                         {[
+                          { label: 'Administrateurs', count: stats.totalUsers - stats.patients - stats.pharmacists - stats.deliveries, color: 'bg-primary' },
                           { label: 'Patients', count: stats.patients, color: 'bg-emerald-500' },
                           { label: 'Pharmaciens', count: stats.pharmacists, color: 'bg-blue-500' },
                           { label: 'Livreurs', count: stats.deliveries, color: 'bg-amber-500' },
-                        ].map(item => (
+                        ].filter(item => item.count > 0).map(item => (
                           <div key={item.label} className="space-y-2">
                             <div className="flex items-center justify-between">
                               <span className="text-sm font-bold text-slate-600">{item.label}</span>
                               <span className="text-sm font-black text-slate-900">{item.count}</span>
                             </div>
-                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                               <motion.div 
                                 initial={{ width: 0 }}
                                 animate={{ width: `${(item.count / Math.max(stats.totalUsers, 1)) * 100}%` }}
@@ -1230,22 +1247,22 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       </div>
                     </div>
 
-                    <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white relative overflow-hidden group">
+                    <div className="bg-slate-900 p-6 rounded-2xl shadow-xl text-white relative overflow-hidden group border border-slate-800">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl group-hover:scale-150 transition-transform duration-1000"></div>
                       <div className="relative z-10">
-                        <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-primary mb-6">
-                          <Activity size={24} />
+                        <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-primary mb-5">
+                          <Activity size={20} />
                         </div>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Gains Plateforme (Jour / Total)</p>
-                        <p className="text-3xl font-black">{stats.dailyPlatformGains.toLocaleString()} / {stats.totalPlatformGains.toLocaleString()} <span className="text-sm text-slate-500">FCFA</span></p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Gains Plateforme (Jour / Total)</p>
+                        <p className="text-2xl font-black">{stats.dailyPlatformGains.toLocaleString()} / {stats.totalPlatformGains.toLocaleString()} <span className="text-xs text-slate-500 font-bold">FCFA</span></p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
-                  <div className="flex items-center justify-between mb-8">
-                    <h3 className="text-xl font-bold">Activité (7 derniers jours)</h3>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100/60">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-bold text-slate-800">Activité (7 derniers jours)</h3>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-primary"></div>
@@ -1295,9 +1312,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               exit={{ opacity: 0, y: -20 }}
               className="w-full"
             >
-              <div className="space-y-8">
+              <div className="space-y-4">
                 <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                  <div className="p-8 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h3 className="text-xl font-bold">Approbations en attente</h3>
                       <p className="text-sm text-slate-500 mt-1">Validez ou refusez les nouvelles inscriptions.</p>
@@ -1307,28 +1324,28 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                          <th className="p-6 font-bold">Utilisateur</th>
-                          <th className="p-6 font-bold">Rôle</th>
-                          <th className="p-6 font-bold">Détails</th>
-                          <th className="p-6 font-bold text-right">Actions</th>
+                          <th className="p-4 font-bold">Utilisateur</th>
+                          <th className="p-4 font-bold">Rôle</th>
+                          <th className="p-4 font-bold">Détails</th>
+                          <th className="p-4 font-bold text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {users.filter(u => u.status === 'pending').length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="p-12 text-center text-slate-500 font-medium">
+                            <td colSpan={4} className="p-8 text-center text-slate-500 font-medium">
                               Aucune demande en attente.
                             </td>
                           </tr>
                         ) : (
                           users.filter(u => u.status === 'pending').map((user) => (
                             <tr key={user.uid} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="p-6">
+                              <td className="p-4">
                                 <div className="font-bold text-slate-900">{user.name}</div>
                                 <div className="text-sm text-slate-500">{user.email}</div>
                                 {user.phone && <div className="text-sm text-slate-500">{user.phone}</div>}
                               </td>
-                              <td className="p-6">
+                              <td className="p-4">
                                 <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest ${
                                   user.role === 'pharmacist' ? 'bg-blue-100 text-blue-700' :
                                   user.role === 'delivery' ? 'bg-amber-100 text-amber-700' :
@@ -1337,7 +1354,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                                   {user.role}
                                 </span>
                               </td>
-                              <td className="p-6">
+                              <td className="p-4">
                                 {user.role === 'pharmacist' && (
                                   <div className="text-sm">
                                     <span className="font-bold text-slate-700">Pharmacie:</span> {user.pharmacyName || '-'}<br/>
@@ -1351,7 +1368,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                                   </div>
                                 )}
                                 {user.role === 'delivery' && (user.idCardFront || user.idCardBack) && (
-                                  <div className="flex gap-2 mt-2">
+                                  <div className="flex gap-2 mt-1">
                                     {user.idCardFront && (
                                       <button onClick={() => setViewImage(user.idCardFront)} className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold text-slate-600 hover:bg-slate-200">Voir CNI Recto</button>
                                     )}
@@ -1368,7 +1385,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                                   </div>
                                 )}
                               </td>
-                              <td className="p-6 text-right">
+                              <td className="p-4 text-right">
                                 <div className="flex items-center justify-end gap-2">
                                   <button 
                                     onClick={() => handleUpdateUserStatus(user.uid, 'active')}
@@ -1403,9 +1420,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               exit={{ opacity: 0, y: -20 }}
               className="w-full"
             >
-              <div className="space-y-8">
+              <div className="space-y-4">
                 <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                  <div className="p-8 border-b border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+                  <div className="p-6 border-b border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                     <div>
                       <h3 className="text-xl font-bold font-sans tracking-tight">Gestion des Utilisateurs</h3>
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Gérez les accès et les rôles de la plateforme</p>
@@ -1443,13 +1460,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-6 font-bold">Nom</th>
-                  <th className="p-6 font-bold">Email</th>
-                  <th className="p-6 font-bold">Téléphone</th>
-                  <th className="p-6 font-bold">Rôle</th>
-                  <th className="p-6 font-bold">Portefeuille</th>
-                  <th className="p-6 font-bold">Statut</th>
-                  <th className="p-6 font-bold text-right">Actions</th>
+                  <th className="p-4 font-bold">Nom</th>
+                  <th className="p-4 font-bold">Email</th>
+                  <th className="p-4 font-bold">Téléphone</th>
+                  <th className="p-4 font-bold">Rôle</th>
+                  <th className="p-4 font-bold">Portefeuille</th>
+                  <th className="p-4 font-bold">Statut</th>
+                  <th className="p-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1462,7 +1479,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   )
                   .map((user) => (
                   <tr key={user.uid} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6">
+                    <td className="p-4">
                       <div className="font-bold text-slate-900">{user.name}</div>
                       {user.role === 'delivery' && (user.idCardFront || user.idCardBack) && (
                         <div className="flex gap-2 mt-2">
@@ -1482,9 +1499,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         </div>
                       )}
                     </td>
-                    <td className="p-6 text-slate-500 text-sm">{user.email}</td>
-                    <td className="p-6 text-slate-500 text-sm">{user.phone || '-'}</td>
-                    <td className="p-6">
+                    <td className="p-4 text-slate-500 text-sm">{user.email}</td>
+                    <td className="p-4 text-slate-500 text-sm">{user.phone || '-'}</td>
+                    <td className="p-4">
                       <select 
                         value={user.role}
                         onChange={(e) => handleUpdateRole(user.uid, e.target.value)}
@@ -1500,7 +1517,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         <option value="support">Support</option>
                       </select>
                     </td>
-                    <td className="p-6">
+                    <td className="p-4">
                       <div className="flex flex-col gap-1">
                         <span className="font-bold text-slate-900">{(user.walletBalance || 0).toLocaleString()} F</span>
                         {user.pharmacistBalance !== undefined && user.pharmacistBalance > 0 && (
@@ -1514,7 +1531,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         )}
                       </div>
                     </td>
-                    <td className="p-6">
+                    <td className="p-4">
                       <select 
                         value={user.status || 'active'}
                         onChange={(e) => handleUpdateUserStatus(user.uid, e.target.value)}
@@ -1534,7 +1551,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         <option value="pending">En attente</option>
                       </select>
                     </td>
-                    <td className="p-6 text-right">
+                    <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {user.role === 'delivery' && (
                           <button 
@@ -1562,14 +1579,14 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           </div>
         </div>
 
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl mt-8">
-            <div className="flex items-center gap-4 mb-8">
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl mt-8">
+            <div className="flex items-center gap-4 mb-4">
               <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
                 <UserCog size={24} />
               </div>
               <h3 className="text-xl font-bold">Créer un Compte (Pharmacie / Livreur)</h3>
             </div>
-          <form onSubmit={handleAddUser} className="space-y-6">
+          <form onSubmit={handleAddUser} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom complet</label>
@@ -1849,9 +1866,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             exit={{ opacity: 0, y: -20 }}
             className="w-full"
           >
-            <div className="space-y-8">
+            <div className="space-y-4">
               <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                   <div>
                 <h3 className="text-xl font-bold">Pharmacies Partenaires</h3>
                 <p className="text-sm text-slate-500 mt-1">Liste des pharmacies enregistrées sur la plateforme.</p>
@@ -1928,7 +1945,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   ))}
                   {pharmacies.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="p-8 text-center text-slate-500">Aucune pharmacie enregistrée.</td>
+                      <td colSpan={4} className="p-4 text-center text-slate-500 font-medium">Aucune pharmacie enregistrée.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1936,7 +1953,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             </div>
           </div>
 
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
             <div className="flex items-center gap-4 mb-8">
               <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
                 <Package size={24} />
@@ -2150,7 +2167,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     ))}
                     {cities.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="p-8 text-center text-slate-500">Aucune ville enregistrée.</td>
+                        <td colSpan={4} className="p-6 text-center text-slate-500 font-medium">Aucune ville enregistrée.</td>
                       </tr>
                     )}
                   </tbody>
@@ -2189,13 +2206,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-6 font-bold">ID</th>
-                  <th className="p-6 font-bold">Patient</th>
-                  <th className="p-6 font-bold">Pharmacie</th>
-                  <th className="p-6 font-bold">Statut</th>
-                  <th className="p-6 font-bold">Montant</th>
-                  <th className="p-6 font-bold">Date</th>
-                  <th className="p-6 font-bold text-right">Actions</th>
+                  <th className="p-4 font-bold">ID</th>
+                  <th className="p-4 font-bold">Patient</th>
+                  <th className="p-4 font-bold">Pharmacie</th>
+                  <th className="p-4 font-bold">Statut</th>
+                  <th className="p-4 font-bold">Montant</th>
+                  <th className="p-4 font-bold">Date</th>
+                  <th className="p-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2211,10 +2228,10 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   const patient = users.find(u => u.uid === order.patientId);
                   return (
                     <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-6 font-mono text-xs text-slate-500">{order.id.slice(0, 8)}...</td>
-                      <td className="p-6 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
-                      <td className="p-6 text-slate-600 text-sm">{order.pharmacyName}</td>
-                      <td className="p-6">
+                      <td className="p-4 font-mono text-xs text-slate-500">{order.id.slice(0, 8)}...</td>
+                      <td className="p-4 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
+                      <td className="p-4 text-slate-600 text-sm">{order.pharmacyName}</td>
+                      <td className="p-4">
                         <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
                           order.status === 'delivering' ? 'bg-blue-100 text-blue-700' :
                           order.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
@@ -2232,9 +2249,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                            order.status.replace('_', ' ')}
                         </span>
                       </td>
-                      <td className="p-6 font-bold text-slate-900">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
-                      <td className="p-6 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
-                      <td className="p-6 text-right">
+                      <td className="p-4 font-bold text-slate-900">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
+                      <td className="p-4 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
+                      <td className="p-4 text-right">
                         <button 
                           onClick={() => setActiveChatOrderId(order.id)}
                           className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all relative"
@@ -2253,7 +2270,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 })}
                 {orders.filter(o => o.status !== 'completed').length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-500">Aucune commande active trouvée.</td>
+                    <td colSpan={6} className="p-6 text-center text-slate-500 font-medium">Aucune commande active trouvée.</td>
                   </tr>
                 )}
               </tbody>
@@ -2292,12 +2309,12 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-6 font-bold">ID</th>
-                  <th className="p-6 font-bold">Patient</th>
-                  <th className="p-6 font-bold">Pharmacie</th>
-                  <th className="p-6 font-bold">Livreur</th>
-                  <th className="p-6 font-bold">Montant</th>
-                  <th className="p-6 font-bold">Date</th>
+                  <th className="p-4 font-bold">ID</th>
+                  <th className="p-4 font-bold">Patient</th>
+                  <th className="p-4 font-bold">Pharmacie</th>
+                  <th className="p-4 font-bold">Livreur</th>
+                  <th className="p-4 font-bold">Montant</th>
+                  <th className="p-4 font-bold">Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2313,18 +2330,18 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   const patient = users.find(u => u.uid === order.patientId);
                   return (
                     <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-6 font-mono text-xs text-slate-500">{order.id.slice(0, 8)}...</td>
-                      <td className="p-6 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
-                      <td className="p-6 text-slate-600 text-sm">{order.pharmacyName}</td>
-                      <td className="p-6 text-slate-600 text-sm">{order.deliveryPersonName || '-'}</td>
-                      <td className="p-6 font-bold text-emerald-600">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
-                      <td className="p-6 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
+                      <td className="p-4 font-mono text-xs text-slate-500">{order.id.slice(0, 8)}...</td>
+                      <td className="p-4 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
+                      <td className="p-4 text-slate-600 text-sm">{order.pharmacyName}</td>
+                      <td className="p-4 text-slate-600 text-sm">{order.deliveryPersonName || '-'}</td>
+                      <td className="p-4 font-bold text-emerald-600">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
+                      <td className="p-4 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
                     </tr>
                   );
                 })}
                 {orders.filter(o => o.status === 'completed').length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-500">Aucun historique trouvé.</td>
+                    <td colSpan={6} className="p-6 text-center text-slate-500 font-medium">Aucun historique trouvé.</td>
                   </tr>
                 )}
               </tbody>
@@ -2363,10 +2380,11 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-6 font-bold">ID</th>
-                  <th className="p-6 font-bold">Patient</th>
-                  <th className="p-6 font-bold">Statut</th>
-                  <th className="p-6 font-bold">Date</th>
+                  <th className="p-4 font-bold">ID</th>
+                  <th className="p-4 font-bold">Patient</th>
+                  <th className="p-4 font-bold font-sans tracking-tight">Statut</th>
+                  <th className="p-4 font-bold">Date</th>
+                  <th className="p-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2380,9 +2398,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   const patient = users.find(u => u.uid === prescription.patientId);
                   return (
                     <tr key={prescription.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-6 font-mono text-xs text-slate-500">{prescription.id.slice(0, 8)}...</td>
-                      <td className="p-6 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
-                      <td className="p-6">
+                      <td className="p-4 font-mono text-xs text-slate-500">{prescription.id.slice(0, 8)}...</td>
+                      <td className="p-4 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
+                      <td className="p-4">
                         <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
                           prescription.status === 'validated' ? 'bg-emerald-100 text-emerald-700' :
                           prescription.status === 'rejected' ? 'bg-rose-100 text-rose-700' :
@@ -2397,13 +2415,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                            prescription.status.toUpperCase()}
                         </span>
                       </td>
-                      <td className="p-6 text-slate-500 text-sm">{formatDate(prescription.createdAt, 'date')}</td>
+                      <td className="p-4 text-slate-500 text-sm">{formatDate(prescription.createdAt, 'date')}</td>
                     </tr>
                   );
                 })}
                 {prescriptions.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500">Aucune ordonnance trouvée.</td>
+                    <td colSpan={4} className="p-6 text-center text-slate-500 font-medium">Aucune ordonnance trouvée.</td>
                   </tr>
                 )}
               </tbody>
@@ -2421,12 +2439,12 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             exit={{ opacity: 0, y: -20 }}
             className="w-full"
           >
-            <div className="space-y-8">
-              <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="space-y-4">
+              <div className="bg-white p-6 rounded-[3rem] shadow-sm border border-slate-100 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
             
             <div className="relative">
-              <div className="flex items-center gap-4 mb-8">
+              <div className="flex items-center gap-4 mb-4">
                 <div className="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600 shadow-lg shadow-emerald-100">
                   <TrendingUp size={28} />
                 </div>
@@ -2436,8 +2454,8 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-                <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-500">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <div className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-500">
                   <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600 mb-6 group-hover:scale-110 transition-transform">
                     <DollarSign size={24} />
                   </div>
@@ -2446,7 +2464,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   <p className="text-xs text-slate-500 leading-relaxed">Prélevés sur chaque commande validée par le patient pour couvrir les frais de maintenance et d'IA.</p>
                 </div>
 
-                <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-500">
+                <div className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-500">
                   <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600 mb-6 group-hover:scale-110 transition-transform">
                     <Truck size={24} />
                   </div>
@@ -2455,7 +2473,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   <p className="text-xs text-slate-500 leading-relaxed">Commission prélevée sur le tarif de livraison payé par le patient. Le reste ({100 - (settings?.deliveryCommissionPercentage || 10)}%) revient au livreur.</p>
                 </div>
 
-                <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-500">
+                <div className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-500">
                   <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600 mb-6 group-hover:scale-110 transition-transform">
                     <Package size={24} />
                   </div>
@@ -2465,9 +2483,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 </div>
               </div>
 
-              <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden mb-12">
+              <div className="bg-slate-900 text-white p-6 rounded-[3rem] shadow-2xl relative overflow-hidden mb-6">
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/20 to-transparent"></div>
-                <div className="relative flex flex-col md:flex-row items-center justify-between gap-10">
+                <div className="relative flex flex-col md:flex-row items-center justify-between gap-8">
                   <div className="space-y-6 flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full border border-white/10">
                       <BarChart3 size={16} className="text-primary" />
@@ -2476,7 +2494,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                     <h4 className="text-4xl font-bold leading-tight">Revenus Totaux Estimés</h4>
                     <p className="text-slate-400 text-lg">Basé sur les {stats.completedOrders} commandes terminées.</p>
                     
-                    <div className="grid grid-cols-2 gap-8 pt-6">
+                    <div className="grid grid-cols-2 gap-4 pt-4">
                       <div>
                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Frais de Service</p>
                         <p className="text-2xl font-bold">{(stats.completedOrders * 150).toLocaleString()} FCFA</p>
@@ -2487,7 +2505,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                       </div>
                     </div>
                   </div>
-                  <div className="w-full md:w-64 aspect-square bg-white/5 rounded-[2.5rem] border border-white/10 flex flex-col items-center justify-center p-8 text-center">
+                  <div className="w-full md:w-64 aspect-square bg-white/5 rounded-[2.5rem] border border-white/10 flex flex-col items-center justify-center p-6 text-center">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Total Plateforme</p>
                     <p className="text-4xl font-black text-primary mb-2">
                       {((stats.completedOrders * 150) + (stats.totalRevenue * ((settings?.commissionPercentage || 10) / 100))).toLocaleString()}
@@ -2513,7 +2531,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             className="w-full"
           >
             <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-              <div className="p-8 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
               <h3 className="text-xl font-bold">Demandes de Retrait</h3>
               <p className="text-sm text-slate-500 mt-1">Gérez les demandes de retrait des pharmaciens et livreurs.</p>
@@ -2523,13 +2541,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-6 font-bold">Utilisateur</th>
-                  <th className="p-6 font-bold">Rôle</th>
-                  <th className="p-6 font-bold">Montant</th>
-                  <th className="p-6 font-bold">Méthode</th>
-                  <th className="p-6 font-bold">Date</th>
-                  <th className="p-6 font-bold">Statut</th>
-                  <th className="p-6 font-bold text-right">Actions</th>
+                  <th className="p-4 font-bold">Utilisateur</th>
+                  <th className="p-4 font-bold">Rôle</th>
+                  <th className="p-4 font-bold">Montant</th>
+                  <th className="p-4 font-bold">Méthode</th>
+                  <th className="p-4 font-bold">Date</th>
+                  <th className="p-4 font-bold">Statut</th>
+                  <th className="p-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2537,10 +2555,10 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   .sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime())
                   .map((withdrawal) => (
                   <tr key={withdrawal.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6 font-bold text-slate-900">{withdrawal.userName}</td>
-                    <td className="p-6 text-slate-500 text-sm capitalize">{withdrawal.userRole}</td>
-                    <td className="p-6 font-bold text-emerald-600">{withdrawal.amount.toLocaleString()} CFA</td>
-                    <td className="p-6 text-slate-500 text-sm">
+                    <td className="p-4 font-bold text-slate-900">{withdrawal.userName}</td>
+                    <td className="p-4 text-slate-500 text-sm capitalize">{withdrawal.userRole}</td>
+                    <td className="p-4 font-bold text-emerald-600">{withdrawal.amount.toLocaleString()} CFA</td>
+                    <td className="p-4 text-slate-500 text-sm">
                       {withdrawal.paymentMethod === 'mobile_money' ? 'Mobile Money' : 'Virement'}
                       <br/>
                       <span className="text-xs text-slate-400 font-bold">{withdrawal.paymentDetails}</span>
@@ -2564,8 +2582,8 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         </div>
                       )}
                     </td>
-                    <td className="p-6 text-slate-500 text-sm">{formatDate(withdrawal.createdAt, 'date')}</td>
-                    <td className="p-6">
+                    <td className="p-4 text-slate-500 text-sm">{formatDate(withdrawal.createdAt, 'date')}</td>
+                    <td className="p-4">
                       <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
                         withdrawal.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
                         withdrawal.status === 'rejected' ? 'bg-rose-100 text-rose-700' :
@@ -2574,7 +2592,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         {withdrawal.status === 'approved' ? 'Approuvé' : withdrawal.status === 'rejected' ? 'Rejeté' : 'En attente'}
                       </span>
                     </td>
-                    <td className="p-6 text-right">
+                    <td className="p-4 text-right">
                       {withdrawal.status === 'pending' && (
                         <div className="flex items-center justify-end gap-2">
                           <button 
@@ -2596,7 +2614,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 ))}
                 {withdrawals.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-500">Aucune demande de retrait.</td>
+                    <td colSpan={7} className="p-6 text-center text-slate-500 font-medium">Aucune demande de retrait.</td>
                   </tr>
                 )}
               </tbody>
@@ -2614,7 +2632,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             exit={{ opacity: 0, y: -20 }}
             className="w-full"
           >
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
               <div className="flex items-center gap-3 mb-8">
                 <div className="p-3 bg-violet-100 text-violet-600 rounded-2xl">
               <Lock size={24} />
@@ -2626,7 +2644,95 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           </div>
 
           <div className="space-y-6">
-            <div className="flex items-center justify-between p-4 bg-violet-50 rounded-2xl border border-violet-100">
+            <div className="space-y-4">
+              <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center justify-between">
+                <span>Statut du Système Backend</span>
+                <span className="text-xs font-normal text-slate-500">Variables d'Environnement</span>
+              </h4>
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                      <CreditCard size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-slate-900">API de Paiement (SAPPAY)</p>
+                      <p className="text-[10px] text-slate-500">Intégration Mobile Money</p>
+                    </div>
+                  </div>
+                  {systemStatus?.sappay?.configured ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
+                      <CheckCircle size={14} /> Connecté
+                    </span>
+                  ) : systemStatus?.sappay ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold">
+                      <AlertCircle size={14} /> Incomplet
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-[10px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse"></span>
+                      Chargement...
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-2 pt-2 border-t border-slate-200">
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    <strong>Note de sécurité :</strong> Les clés de paiement (SAPPAY_CLIENT_ID, SAPPAY_PASSWORD, etc.) ne peuvent pas être modifiées directement dans cette interface web car le serveur backend s'exécute de manière isolée pour des raisons de strictes de sécurité bancaire.
+                  </p>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Veuillez injecter ces 4 paramètres exactement dans le menu <strong>Secrets (Environnement)</strong> situé dans le panneau Paramètres (Settings ⚙️) de Google AI Studio puis relancez le backend :
+                  </p>
+                  <ul className="text-[10px] space-y-1 bg-white p-3 rounded-xl border border-slate-200 font-mono text-slate-700 mt-2">
+                    <li className="flex items-center gap-2">
+                       {systemStatus?.sappay?.clientIdSet ? <CheckCircle size={12} className="text-emerald-500" /> : <X size={12} className="text-rose-500" />}
+                       SAPPAY_CLIENT_ID
+                    </li>
+                    <li className="flex items-center gap-2">
+                       {systemStatus?.sappay?.clientSecretSet ? <CheckCircle size={12} className="text-emerald-500" /> : <X size={12} className="text-rose-500" />}
+                       SAPPAY_CLIENT_SECRET
+                    </li>
+                    <li className="flex items-center gap-2">
+                       {systemStatus?.sappay?.usernameSet ? <CheckCircle size={12} className="text-emerald-500" /> : <X size={12} className="text-rose-500" />}
+                       SAPPAY_USERNAME
+                    </li>
+                    <li className="flex items-center gap-2">
+                       {systemStatus?.sappay?.passwordSet ? <CheckCircle size={12} className="text-emerald-500" /> : <X size={12} className="text-rose-500" />}
+                       SAPPAY_PASSWORD
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 mt-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600">
+                      <MessageSquare size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-slate-900">API SMS (OTP)</p>
+                      <p className="text-[10px] text-slate-500">Envoi des codes de vérification</p>
+                    </div>
+                  </div>
+                  {systemStatus?.sms?.configured ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
+                      <CheckCircle size={14} /> Connecté
+                    </span>
+                  ) : systemStatus?.sms ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold">
+                      <AlertCircle size={14} /> Incomplet
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-[10px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse"></span>
+                      Chargement...
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-violet-50 rounded-2xl border border-violet-100 mt-8">
               <div>
                 <p className="font-bold text-sm text-violet-900">Connexion Google (OAuth)</p>
                 <p className="text-xs text-violet-700">Autoriser les utilisateurs à utiliser Google</p>
@@ -2725,7 +2831,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
           exit={{ opacity: 0, y: -20 }}
           className="w-full"
         >
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
           <div className="flex items-center gap-3 mb-8">
             <div className="p-3 bg-indigo-100 text-indigo-600 rounded-2xl">
               <CreditCard size={24} />
@@ -2955,8 +3061,8 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
 
       {activeTab === 'transactions' && (
         <>
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-8">
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
+          <div className="flex items-center justify-between mb-4">
             <h3 className="text-2xl font-bold text-slate-900">Mouvements Financiers</h3>
             <div className="flex gap-4">
               <button 
@@ -2982,13 +3088,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500 text-sm">
-                  <th className="p-4 font-medium">Date</th>
-                  <th className="p-4 font-medium">Utilisateur</th>
-                  <th className="p-4 font-medium">Rôle</th>
-                  <th className="p-4 font-medium">Type</th>
-                  <th className="p-4 font-medium">Montant</th>
-                  <th className="p-4 font-medium">Description</th>
-                  <th className="p-4 font-medium">Détails</th>
+                  <th className="p-3 font-medium">Date</th>
+                  <th className="p-3 font-medium">Utilisateur</th>
+                  <th className="p-3 font-medium">Rôle</th>
+                  <th className="p-3 font-medium">Type</th>
+                  <th className="p-3 font-medium">Montant</th>
+                  <th className="p-3 font-medium">Description</th>
+                  <th className="p-3 font-medium">Détails</th>
                 </tr>
               </thead>
               <tbody>
@@ -2996,11 +3102,11 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                   .sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime())
                   .map((t) => (
                   <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                    <td className="p-4 text-sm text-slate-500">
+                    <td className="p-3 text-sm text-slate-500">
                       {formatDate(t.createdAt)}
                     </td>
-                    <td className="p-4 font-bold text-slate-900">{t.userName}</td>
-                    <td className="p-4">
+                    <td className="p-3 font-bold text-slate-900">{t.userName}</td>
+                    <td className="p-3">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                         t.userRole === 'patient' ? 'bg-blue-100 text-blue-600' :
                         t.userRole === 'pharmacist' ? 'bg-emerald-100 text-emerald-600' :
@@ -3010,18 +3116,18 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                         {t.userRole}
                       </span>
                     </td>
-                    <td className="p-4">
+                    <td className="p-3">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                         t.type === 'credit' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
                       }`}>
                         {t.type === 'credit' ? 'Crédit' : 'Débit'}
                       </span>
                     </td>
-                    <td className={`p-4 font-black ${t.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    <td className={`p-3 font-black ${t.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {t.type === 'credit' ? '+' : '-'}{t.amount.toLocaleString()} FCFA
                     </td>
-                    <td className="p-4 text-sm text-slate-600">{t.description}</td>
-                    <td className="p-4">
+                    <td className="p-3 text-sm text-slate-600">{t.description}</td>
+                    <td className="p-3">
                       {t.metadata ? (
                         <div className="flex flex-wrap gap-1">
                           {Object.entries(t.metadata).map(([key, value]) => (
@@ -3038,7 +3144,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 ))}
                 {transactions.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">Aucune transaction enregistrée.</td>
+                    <td colSpan={6} className="p-6 text-center text-slate-400 font-medium">Aucune transaction enregistrée.</td>
                   </tr>
                 )}
               </tbody>
@@ -3050,9 +3156,9 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
 
       {activeTab === 'reports' && (
         <>
-          <div className="space-y-8">
-          <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-10">
+          <div className="space-y-4">
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+            <div className="flex items-center gap-4 mb-4">
               <div className="w-16 h-16 bg-emerald-50 rounded-[2rem] flex items-center justify-center text-emerald-600">
                 <FileText size={32} />
               </div>
@@ -3062,13 +3168,13 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 hover:border-emerald-200 hover:bg-white hover:shadow-xl transition-all duration-500 group">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-emerald-200 hover:bg-white hover:shadow-xl transition-all duration-500 group">
                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-600 mb-6 shadow-sm group-hover:scale-110 transition-transform">
                   <Users size={24} />
                 </div>
                 <h4 className="text-lg font-bold text-slate-900 mb-2">Utilisateurs</h4>
-                <p className="text-sm text-slate-500 mb-8">Liste complète des patients, pharmaciens et livreurs.</p>
+                <p className="text-sm text-slate-500 mb-4">Liste complète des patients, pharmaciens et livreurs.</p>
                 <button 
                   onClick={() => {
                     const csvContent = "data:text/csv;charset=utf-8," 
@@ -3088,7 +3194,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 </button>
               </div>
 
-              <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 hover:border-amber-200 hover:bg-white hover:shadow-xl transition-all duration-500 group">
+              <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-amber-200 hover:bg-white hover:shadow-xl transition-all duration-500 group">
                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-amber-600 mb-6 shadow-sm group-hover:scale-110 transition-transform">
                   <Package size={24} />
                 </div>
@@ -3249,7 +3355,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center">
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
                 <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
                   <MessageSquare size={40} />
                 </div>
@@ -3265,7 +3371,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
       {activeTab === 'scripts' && (
         <>
           <div className="space-y-8">
-          <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-xl relative overflow-hidden">
+          <div className="bg-slate-900 text-white p-6 rounded-[3rem] shadow-xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
             <div className="relative z-10">
               <div className="flex items-center gap-4 mb-6">
@@ -4101,7 +4207,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-white rounded-[2.5rem] p-8 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-[2.5rem] p-6 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto"
       >
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-2xl font-bold">Permissions: {selectedRoleForPerms}</h3>
@@ -4173,7 +4279,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl"
+        className="bg-white rounded-[2.5rem] p-6 max-w-md w-full shadow-2xl"
       >
         <div className="flex items-center justify-between mb-8">
           <h3 className="text-2xl font-black text-slate-900">
@@ -4251,7 +4357,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl"
+        className="bg-white rounded-[2.5rem] p-6 max-w-md w-full shadow-2xl"
       >
         <div className="flex items-center justify-between mb-8">
           <h3 className="text-2xl font-black text-slate-900">
@@ -4329,7 +4435,7 @@ export function AdminDashboard({ profile, settings }: { profile: UserProfile, se
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-[2.5rem] p-8 max-w-2xl w-full shadow-2xl overflow-y-auto max-h-[90vh]"
+        className="bg-white rounded-[2.5rem] p-6 max-w-2xl w-full shadow-2xl overflow-y-auto max-h-[90vh]"
       >
         <div className="flex items-center justify-between mb-8">
           <h3 className="text-2xl font-black text-slate-900">

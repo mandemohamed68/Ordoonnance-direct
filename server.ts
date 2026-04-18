@@ -75,13 +75,100 @@ async function startServer() {
     coris: "11702302492453862"
   };
 
+  const getSappayToken = async () => {
+    const response = await fetch("https://api.prod.sappay.net/api/public/authentication/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        grant_type: "password",
+        client_id: process.env.SAPPAY_CLIENT_ID,
+        client_secret: process.env.SAPPAY_CLIENT_SECRET,
+        username: process.env.SAPPAY_USERNAME,
+        password: process.env.SAPPAY_PASSWORD
+      })
+    });
+    const data = await response.json();
+    if (!data.access_token) throw new Error("Failed to authenticate with Sappay");
+    return data.access_token;
+  };
+
+  // API Status Check for Admin Dashboard
+  app.get("/api/admin/system-status", (req, res) => {
+    res.json({
+      success: true,
+      services: {
+        sappay: {
+          configured: !!(process.env.SAPPAY_CLIENT_ID && process.env.SAPPAY_CLIENT_SECRET && process.env.SAPPAY_USERNAME && process.env.SAPPAY_PASSWORD),
+          clientIdSet: !!process.env.SAPPAY_CLIENT_ID,
+          clientSecretSet: !!process.env.SAPPAY_CLIENT_SECRET,
+          usernameSet: !!process.env.SAPPAY_USERNAME,
+          passwordSet: !!process.env.SAPPAY_PASSWORD
+        },
+        sms: {
+          configured: !!(process.env.SMS_API_USER && process.env.SMS_API_HASH),
+          userSet: !!process.env.SMS_API_USER,
+          hashSet: !!process.env.SMS_API_HASH
+        }
+      }
+    });
+  });
+
   app.post("/api/payment/init", async (req, res) => {
     const { amount, phone, email, method } = req.body;
     try {
-      // Mock initialization for now, returning a dummy invoiceId
-      const invoiceId = `INV-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      if (!process.env.SAPPAY_CLIENT_ID || !process.env.SAPPAY_USERNAME) {
+         console.warn("Sappay credentials missing. Simulating payment initialization.");
+         const invoiceId = `SIM-INV-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+         return res.json({ success: true, invoiceId, simulated: true });
+      }
+
+      const token = await getSappayToken();
+
+      // 1. Create invoice
+      const invoiceResponse = await fetch("https://api.prod.sappay.net/api/public/invoice/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          type: "SIMPLE",
+          customer: {
+            email: email || "client@ordonnancedirect.app",
+            country: 1 // Burkina Faso default
+          },
+          amount: String(amount),
+          note: "Ordonnance Direct - Paiement"
+        })
+      });
+      const invoiceData = await invoiceResponse.json();
+      if (!invoiceData.invoice_id) throw new Error("Failed to create Sappay invoice.");
+      
+      const invoiceId = invoiceData.invoice_id;
+      const processorId = SAPPAY_PROCESSORS[method as keyof typeof SAPPAY_PROCESSORS] || SAPPAY_PROCESSORS.orange;
+
+      // 2. If method is moov, we must call get-otp
+      if (method === "moov") {
+         await fetch("https://api.prod.sappay.net/api/checkout/get-otp/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              customer_msisdn: phone,
+              invoice_id: invoiceId,
+              payment_processor_id: processorId
+            })
+         });
+      }
+
       res.json({ success: true, invoiceId });
     } catch (error) {
+      console.error("Payment init error:", error);
       res.status(500).json({ success: false, error: "Initialization failed" });
     }
   });
@@ -89,79 +176,39 @@ async function startServer() {
   app.post("/api/payment/perform", async (req, res) => {
     const { invoiceId, phone, otp, method } = req.body;
     try {
-      // Mock performance, always success if OTP is provided
-      if (!otp) throw new Error("OTP is required");
-      res.json({ success: true, transactionId: `TX-${Date.now()}` });
-    } catch (error) {
-      res.status(500).json({ success: false, error: error instanceof Error ? error.message : "Payment failed" });
-    }
-  });
-
-  app.post("/api/payments/sappay/initiate", async (req, res) => {
-    const { amount, phone, provider, orderId } = req.body;
-    
-    try {
-      const username = process.env.SAPPAY_USERNAME;
-      const password = process.env.SAPPAY_PASSWORD;
-      const clientId = process.env.SAPPAY_CLIENT_ID;
-      const clientSecret = process.env.SAPPAY_CLIENT_SECRET;
-
-      if (!username || !password || !clientId || !clientSecret) {
-        console.warn("Sappay credentials missing in environment variables. Simulating payment initiation.");
-        return res.json({ 
-          success: true, 
-          data: { 
-            message: "SIMULATED_SAPPAY_INITIATION_SUCCESS", 
-            transaction_id: `SIM-TX-${Date.now()}` 
-          }, 
-          simulated: true 
-        });
+      if (!process.env.SAPPAY_CLIENT_ID || !process.env.SAPPAY_USERNAME) {
+         console.warn("Sappay credentials missing. Simulating payment performance.");
+         if (!otp) throw new Error("OTP is required");
+         return res.json({ success: true, transactionId: `SIM-TX-${Date.now()}` });
       }
 
-      // 1. Get Access Token
-      const authResponse = await fetch("https://api.sappay.net/api/v1/oauth/token", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grant_type: 'password',
-          client_id: clientId,
-          client_secret: clientSecret,
-          username,
-          password,
-          scope: '*'
-        })
-      });
+      const token = await getSappayToken();
+      const processorId = SAPPAY_PROCESSORS[method as keyof typeof SAPPAY_PROCESSORS] || SAPPAY_PROCESSORS.orange;
 
-      const authData = await authResponse.json();
-      if (!authData.access_token) {
-        throw new Error("Failed to get Sappay access token: " + JSON.stringify(authData));
-      }
-
-      // 2. Initiate Payment
-      const processorId = SAPPAY_PROCESSORS[provider as keyof typeof SAPPAY_PROCESSORS] || SAPPAY_PROCESSORS.orange;
-      
-      const paymentResponse = await fetch("https://api.sappay.net/api/v1/payments/collect", {
-        method: 'POST',
+      const performResponse = await fetch("https://api.prod.sappay.net/api/checkout/perform/", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authData.access_token}`
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
-          amount: parseFloat(amount),
-          currency: 'XOF',
-          phone_number: phone,
-          merchant_reference: `ORD-${orderId}-${Date.now()}`,
-          processor_id: processorId,
-          callback_url: 'https://webhook.site/dummy-callback' // For production, use a real callback URL
+          invoice_id: invoiceId,
+          payment_processor_id: processorId,
+          customer_msisdn: phone,
+          otp: otp
         })
       });
+      
+      const performData = await performResponse.json();
+      
+      if (performData.status === "FAILED" || (performData.message && performData.message.toLowerCase().includes("failed"))) {
+         throw new Error(performData.message || "Payment perform failed");
+      }
 
-      const paymentData = await paymentResponse.json();
-      res.json({ success: true, data: paymentData });
-
+      res.json({ success: true, data: performData });
     } catch (error) {
-      console.error("Sappay error:", error);
-      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+      console.error("Payment perform error:", error);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : "Payment failed" });
     }
   });
 

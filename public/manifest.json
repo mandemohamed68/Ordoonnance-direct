@@ -1,6 +1,6 @@
 {
-  "name": "PharmaLiv",
-  "short_name": "PharmaLiv",
+  "name": "Ordonnance Direct",
+  "short_name": "Ordonnance Direct",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

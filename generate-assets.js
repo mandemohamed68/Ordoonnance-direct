@@ -1,67 +1,85 @@
-// Script to generate a basic logo using canvas
-import { createCanvas, loadImage } from 'canvas';
+import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
-
-const width = 1024;
-const height = 1024;
-const canvas = createCanvas(width, height);
-const ctx = canvas.getContext('2d');
 
 const assetsDir = path.join(process.cwd(), 'assets');
 if (!fs.existsSync(assetsDir)) {
   fs.mkdirSync(assetsDir);
 }
 
-const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+const logoPath = path.join(process.cwd(), 'public', 'logo192.png');
 
 async function generateAssets() {
   if (fs.existsSync(logoPath)) {
-    // Try to load the user's provided logo
-    console.log('Utilisation du logo public/logo.png pour générer les assets Android...');
+    console.log(`Utilisation du logo ${logoPath} pour générer les assets Android...`);
     try {
-      const img = await loadImage(logoPath);
-      // Background (White)
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, width, height);
-      // Draw image in the center
-      ctx.drawImage(img, 0, 0, width, height);
+      // Icon: Resize to 1024x1024 with white background padding if needed
+      await sharp(logoPath, { failOnError: false })
+        .resize(1024, 1024, {
+          fit: 'contain',
+          background: { r: 255, g: 255, b: 255, alpha: 1 }
+        })
+        .toFile(path.join(assetsDir, 'icon.png'));
 
-      const buffer = canvas.toBuffer('image/png');
-      fs.writeFileSync(path.join(assetsDir, 'icon.png'), buffer);
-      fs.writeFileSync(path.join(assetsDir, 'splash.png'), buffer);
-      fs.writeFileSync(path.join(assetsDir, 'icon-only.png'), buffer);
-      fs.writeFileSync(path.join(assetsDir, 'icon-foreground.png'), buffer);
-      fs.writeFileSync(path.join(assetsDir, 'icon-background.png'), buffer);
+      // Splash: Resize to square but Capacitor-assets will handle proportions, 
+      // typically we want a large source.
+      await sharp(logoPath)
+        .resize(2732, 2732, {
+          fit: 'contain',
+          background: { r: 255, g: 255, b: 255, alpha: 1 }
+        })
+        .toFile(path.join(assetsDir, 'splash.png'));
+
+      // Copy for foreground/background needs
+      const iconBuffer = await sharp(logoPath)
+        .resize(1024, 1024, {
+          fit: 'contain',
+          background: { r: 255, g: 255, b: 255, alpha: 1 }
+        })
+        .toBuffer();
       
-      console.log('Assets générés avec succès depuis le vrai logo !');
+      fs.writeFileSync(path.join(assetsDir, 'icon-only.png'), iconBuffer);
+      fs.writeFileSync(path.join(assetsDir, 'icon-foreground.png'), iconBuffer);
+      
+      // Plain white for background
+      await sharp({
+        create: {
+          width: 1024,
+          height: 1024,
+          channels: 4,
+          background: { r: 255, g: 255, b: 255, alpha: 1 }
+        }
+      })
+      .png()
+      .toFile(path.join(assetsDir, 'icon-background.png'));
+      
+      console.log('Assets générés avec succès avec SHARP !');
       return;
     } catch(e) {
-      console.log("Erreur lors de la lecture du logo, fallback à la croix par défaut.");
+      console.error("Erreur lors de la génération avec SHARP :", e);
     }
   }
 
-  console.log('Logo public/logo.png manquant. Génération du logo de remplacement manuel...');
+  console.log('Logo source manquant ou erreur, génération de secours...');
   
-  // Background
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
+  // Fallback if logo512.png is missing or sharp fails
+  const svg = `
+    <svg width="1024" height="1024" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="20" fill="#10b981"/>
+      <rect x="40" y="20" width="20" height="60" fill="white"/>
+      <rect x="20" y="40" width="60" height="20" fill="white"/>
+    </svg>
+  `;
 
-  // Green Cross
-  ctx.fillStyle = '#10b981'; // emerald-500
-  // Vertical bar
-  ctx.fillRect(width / 2 - 100, height / 2 - 300, 200, 600);
-  // Horizontal bar
-  ctx.fillRect(width / 2 - 300, height / 2 - 100, 600, 200);
+  await sharp(Buffer.from(svg))
+    .png()
+    .toFile(path.join(assetsDir, 'icon.png'));
+    
+  await sharp(Buffer.from(svg))
+    .png()
+    .toFile(path.join(assetsDir, 'splash.png'));
 
-  const buffer = canvas.toBuffer('image/png');
-  fs.writeFileSync(path.join(assetsDir, 'icon.png'), buffer);
-  fs.writeFileSync(path.join(assetsDir, 'splash.png'), buffer);
-  fs.writeFileSync(path.join(assetsDir, 'icon-only.png'), buffer);
-  fs.writeFileSync(path.join(assetsDir, 'icon-foreground.png'), buffer);
-  fs.writeFileSync(path.join(assetsDir, 'icon-background.png'), buffer);
-
-  console.log('Assets de base générés avec succès!');
+  console.log('Assets de secours générés avec succès !');
 }
 
 generateAssets();

@@ -18,12 +18,7 @@
 
 @layer base {
   body {
-    @apply bg-[#F8FAFC] text-slate-900 antialiased selection:bg-primary/20 selection:text-primary;
-    /* Respect Safe Areas (Notches) */
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    padding-left: env(safe-area-inset-left, 0px);
-    padding-right: env(safe-area-inset-right, 0px);
+    @apply bg-slate-50 text-slate-900 antialiased selection:bg-primary/20 selection:text-primary;
     min-height: 100vh;
     min-height: -webkit-fill-available;
   }
@@ -79,6 +74,22 @@
 
   .medical-card {
     @apply bg-white rounded-[2.5rem] border border-emerald-100 shadow-sm hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-500;
+  }
+
+  .scroller-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scroller-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
+  .safe-area-pt {
+    padding-top: 0.5rem;
+  }
+  
+  .safe-area-pb {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
 }
 
