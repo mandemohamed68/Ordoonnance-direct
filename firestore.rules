@@ -285,7 +285,7 @@ service cloud.firestore {
       );
       allow update: if isAuthenticated() && (
         isAdmin() ||
-        (resource.data.patientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryMethod', 'deliveryFee', 'serviceFee', 'totalAmount', 'updatedAt', 'history', 'paymentMethod', 'paymentPhone', 'paymentStatus', 'medicationTotal', 'pharmacyAmount', 'deliveryAmount', 'platformFee', 'unreadCounts'])) ||
+        (resource.data.patientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryMethod', 'deliveryFee', 'serviceFee', 'totalAmount', 'updatedAt', 'history', 'paymentMethod', 'paymentPhone', 'paymentStatus', 'medicationTotal', 'pharmacyAmount', 'deliveryAmount', 'platformFee', 'unreadCounts', 'sappayInvoiceId', 'deliveryCode'])) ||
         (hasRole('pharmacist') && (
           resource.data.pharmacistId == request.auth.uid || !('pharmacistId' in resource.data)
         ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'items', 'totalAmount', 'updatedAt', 'pharmacistId', 'pharmacistName', 'pharmacyName', 'pharmacyLocation', 'isHandedOver', 'history', 'unreadCounts'])) ||

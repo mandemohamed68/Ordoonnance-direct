@@ -3309,15 +3309,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
         </div>
 
         <div className="flex-1 min-w-0">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-              className="space-y-6"
-            >
+          <div key={activeTab} className="space-y-6">
               {activeTab === 'prescriptions' && (
                 <>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
@@ -4045,8 +4037,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
             </div>
                 </>
               )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
         </div>
       </div>
 
@@ -5294,13 +5285,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
         </div>
 
         <div className="flex-1 min-w-0">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
+          <div key={activeTab}>
               {activeTab === 'pending' && (
                 <>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -6042,8 +6027,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                   </div>
                 </>
               )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
         </div>
       </div>
 
@@ -6553,13 +6537,7 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
         </div>
 
         <div className="flex-1 min-w-0">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
+          <div key={activeTab}>
               {activeTab === 'available' && (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -6954,8 +6932,7 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
           </div>
         </>
       )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
         </div>
       </div>
 
