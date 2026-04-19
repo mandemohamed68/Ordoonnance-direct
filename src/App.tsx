@@ -49,6 +49,7 @@ import {
   CheckCircle, 
   Clock, 
   MapPin, 
+  Hospital,
   Phone,
   FileText,
   ChevronRight,
@@ -650,6 +651,31 @@ function NotificationBell({ userId }: { userId: string }) {
     </div>
   );
 }
+
+const BURKINA_HOSPITALS = [
+  "CHU Yalgado Ouédraogo",
+  "CHU Bogodogo",
+  "CHU Blaise Compaoré",
+  "CHU Sanou Souro",
+  "Clinique Suka",
+  "Clinique El Fateh-Suka",
+  "Polyclinique Internationale de Ouagadougou",
+  "CMA de Paul VI",
+  "Hôpital de Schiphra",
+  "Clinique Notre Dame de la Paix",
+  "Hôpital de District de Bogodogo",
+  "Clinique Farah",
+  "CMA de Pissy",
+  "CMA de Kossodo",
+  "Hôpital Saint Camille",
+  "Clinique des Genêts",
+  "Clinique Médicale Le Printemps",
+  "Clinique de l'Espérance",
+  "CMU de Ouagadougou",
+  "CHR de Kaya",
+  "CHR de Fada",
+  "CHR de Tenkodogo"
+].sort();
 
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -2386,6 +2412,8 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<'prescriptions' | 'orders' | 'pharmacies' | 'history'>('prescriptions');
   const [hospitalLocation, setHospitalLocation] = useState('');
+  const [hospitalSuggestions, setHospitalSuggestions] = useState<string[]>([]);
+  const [showHospitalSuggestions, setShowHospitalSuggestions] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPartialSelect, setShowPartialSelect] = useState<Prescription | null>(null);
   const [selectedMeds, setSelectedMeds] = useState<string[]>([]);
@@ -2661,14 +2689,25 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
         try {
           const data = await analyzeWithGemini({
             text: manualEntryText,
-            prompt: "Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient. Extrait les noms des médicaments, les dosages et les posologies. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
+            prompt: "Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient. Extrait les noms des médicaments, les dosages et les posologies. Tente aussi d'identifier si un hôpital ou un médecin est mentionné. Réponds en français au format JSON structuré : { \"articles\": [ { \"nom_article\": \"...\", \"dosage\": \"...\", \"posologie\": \"...\" } ], \"etablissement\": \"nom de l'hôpital ou du médecin si trouvé, sinon vide\" }. Sois très rapide et précis."
           });
 
           if (!data.success) throw new Error(data.error);
 
+          let parsed;
+          try {
+            parsed = JSON.parse(data.text || '{}');
+          } catch(e) {
+            parsed = { articles: [], etablissement: "" };
+          }
+
+          if (parsed.etablissement && !hospitalLocation) {
+            setHospitalLocation(parsed.etablissement);
+          }
+
           await updateDoc(docRef, {
-            extractedData: data.text,
-            // Keep status as draft so user can choose total/partial quote
+            extractedData: JSON.stringify(parsed.articles || []),
+            hospitalLocation: parsed.etablissement || hospitalLocation || "Non spécifié"
           });
           toast.success("Analyse terminée ! Choisissez votre type de devis.");
         } catch (error: any) {
@@ -2824,15 +2863,26 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
         try {
           const data = await analyzeWithGemini({
             image: base64.split(',')[1],
-            prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Réponds en français au format JSON structuré avec une liste d'objets contenant 'nom_article', 'dosage', 'posologie'. Sois très rapide et précis."
+            prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Identifie également l'établissement de santé ou le médecin figurant sur l'en-tête. Réponds en français au format JSON structuré : { \"articles\": [ { \"nom_article\": \"...\", \"dosage\": \"...\", \"posologie\": \"...\" } ], \"etablissement\": \"nom de l'hôpital ou du médecin si trouvé, sinon vide\" }. Sois très rapide et précis."
           });
 
           if (!data.success) throw new Error(data.error);
           
           if (data.text) {
+            let parsed;
+            try {
+              parsed = JSON.parse(data.text || '{}');
+            } catch(e) {
+              parsed = { articles: [], etablissement: "" };
+            }
+
+            if (parsed.etablissement && !hospitalLocation) {
+              setHospitalLocation(parsed.etablissement);
+            }
+
             await updateDoc(doc(db, 'prescriptions', docRef.id), {
-              extractedData: data.text,
-              // Keep status as draft so user can choose total/partial quote
+              extractedData: JSON.stringify(parsed.articles || []),
+              hospitalLocation: parsed.etablissement || hospitalLocation || "Non spécifié"
             });
             toast.success("Analyse de l'ordonnance terminée ! Choisissez votre type de devis.");
           } else {
@@ -2933,7 +2983,9 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       }
       
       if (order.deliveryMethod === 'delivery') {
-        await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une commande est prête pour livraison à ${order.hospitalLocation}.`, order.id);
+        const cityName = cities.find(c => c.id === order.cityId)?.name || "";
+        const deliveryDest = cityName ? `vers ${cityName}` : "pour livraison";
+        await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une livraison est prête de ${order.pharmacyName} ${deliveryDest}. (Prescription: ${order.hospitalLocation})`, order.id);
       }
 
       setShowPaymentModal(null);
@@ -3072,7 +3124,9 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       }
       
       if (order.deliveryMethod === 'delivery') {
-        await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une commande est prête pour livraison à ${order.hospitalLocation}.`, order.id);
+        const cityName = cities.find(c => c.id === order.cityId)?.name || "";
+        const deliveryDest = cityName ? `vers ${cityName}` : "pour livraison";
+        await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une livraison est prête de ${order.pharmacyName} ${deliveryDest}. (Prescription: ${order.hospitalLocation})`, order.id);
       }
 
       setPaymentStep('success');
@@ -3328,15 +3382,47 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                     {isLocating ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div> : <Navigation size={16} />}
                   </button>
                 </div>
-                <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-colors">
-                  <MapPin size={20} className="text-slate-400" />
+                <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-all relative">
+                  <Hospital size={20} className="text-primary shrink-0" />
                   <input 
                     type="text" 
-                    placeholder="Hôpital / Clinique (Optionnel)" 
+                    placeholder="Établissement ou Médecin (Optionnel)" 
                     value={hospitalLocation}
-                    onChange={(e) => setHospitalLocation(e.target.value)}
-                    className="bg-transparent outline-none text-sm w-full sm:w-48 font-medium"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setHospitalLocation(val);
+                      if (val.length > 1) {
+                        const filtered = BURKINA_HOSPITALS.filter(h => h.toLowerCase().includes(val.toLowerCase()));
+                        setHospitalSuggestions(filtered);
+                        setShowHospitalSuggestions(filtered.length > 0);
+                      } else {
+                        setShowHospitalSuggestions(false);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (hospitalLocation.length > 1) {
+                        setShowHospitalSuggestions(hospitalSuggestions.length > 0);
+                      }
+                    }}
+                    className="bg-transparent outline-none text-sm w-full sm:w-64 font-bold text-slate-700 placeholder:text-slate-400 placeholder:font-normal"
                   />
+                  
+                  {showHospitalSuggestions && (
+                    <div className="absolute top-full left-0 w-full bg-white mt-2 rounded-2xl shadow-xl border border-slate-100 z-[100] max-h-48 overflow-y-auto overflow-x-hidden py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                      {hospitalSuggestions.map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          className="w-full text-left px-4 py-2 hover:bg-primary/5 text-sm font-bold text-slate-700 transition-colors"
+                          onClick={() => {
+                            setHospitalLocation(suggestion);
+                            setShowHospitalSuggestions(false);
+                          }}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button 
@@ -5359,7 +5445,10 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                           <h4 className="text-sm font-black text-slate-900 truncate pr-2">{p.patientName || "Anonyme"}</h4>
                           <span className="text-[9px] bg-primary/5 text-primary px-2 py-0.5 rounded-lg font-black uppercase shrink-0">#{p.id.slice(-4).toUpperCase()}</span>
                         </div>
-                        <p className="text-[10px] text-slate-400 font-bold truncate">{p.hospitalLocation || "Lieu non spécifié"}</p>
+                        <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold">
+                          <Hospital size={10} className="shrink-0" />
+                          <p className="truncate">{p.hospitalLocation || "Lieu non spécifié"}</p>
+                        </div>
                       </div>
                       
                       <div className="flex items-center gap-2 mt-auto">
@@ -5896,7 +5985,10 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                       )}
                       <div className="min-w-0">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
-                        <p className="text-[10px] text-slate-500 truncate mb-1">{o.hospitalLocation}</p>
+                        <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1">
+                          <Hospital size={10} className="shrink-0" />
+                          <p className="truncate">{o.hospitalLocation}</p>
+                        </div>
                         <p className="text-xs text-slate-700 font-medium truncate">{o.items?.length || 0} article(s)</p>
                       </div>
                     </div>
@@ -6287,6 +6379,7 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
   const [deliverySignature, setDeliverySignature] = useState<string | null>(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
+  const [cities, setCities] = useState<City[]>([]);
 
   const isFirstRunDeliveryMissions = useRef(true);
   useEffect(() => {
@@ -6448,6 +6541,14 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
   }, [profile.uid]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'cities'), where('status', '==', 'active'));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'cities'));
+    return () => unsubscribe();
+  }, []);
 
   const totalWithdrawn = withdrawals
     .filter(w => w.status !== 'rejected')
@@ -6735,15 +6836,15 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                          <MapPin size={10} /> Livraison
+                          <Hospital size={10} /> Origine
                         </p>
                         <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{m.hospitalLocation}</p>
                       </div>
                       <div>
                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                          <Phone size={10} /> Contact
+                          <MapPin size={10} /> Ville
                         </p>
-                        <p className="text-[11px] font-bold text-slate-700 leading-tight">+226 70.. ..</p>
+                        <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{cities.find(c => c.id === m.cityId)?.name || "Non précisée"}</p>
                       </div>
                     </div>
 
