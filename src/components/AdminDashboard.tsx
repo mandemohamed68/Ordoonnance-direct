@@ -174,6 +174,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
   const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   const [showCityModal, setShowCityModal] = useState(false);
   const [editingCity, setEditingCity] = useState<City | null>(null);
+  const [showPharmacyModal, setShowPharmacyModal] = useState(false);
+  const [editingPharmacy, setEditingPharmacy] = useState<Pharmacy | null>(null);
   const [newCity, setNewCity] = useState<Partial<City>>({ name: '', onCallStartTime: '19:00', onCallEndTime: '08:00', status: 'active' });
   const [showRotationModal, setShowRotationModal] = useState(false);
   const [editRotation, setEditRotation] = useState<Partial<OnCallRotation>>({ startDate: '', endDate: '', currentGroup: 1 });
@@ -598,7 +600,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     }
   };
 
-  const handleAddPharmacy = async (e: React.FormEvent) => {
+  const handleSavePharmacy = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPharmacy.name || !newPharmacy.address || !newPharmacy.cityId || !newPharmacy.groupId) {
       toast.error("Veuillez remplir tous les champs obligatoires.");
@@ -606,7 +608,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     }
     setAddingPharmacy(true);
     try {
-      const id = newPharmacy.name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substr(2, 4);
+      const id = editingPharmacy?.id || newPharmacy.name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substr(2, 4);
       
       const pharmacyData: any = {
         id,
@@ -617,10 +619,14 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         cityId: newPharmacy.cityId,
         groupId: newPharmacy.groupId,
         licenseNumber: newPharmacy.licenseNumber || '',
-        status: 'active',
-        isOnDuty: false,
-        createdAt: serverTimestamp()
+        status: editingPharmacy?.status || 'active',
+        isOnDuty: editingPharmacy?.isOnDuty || false,
+        updatedAt: serverTimestamp()
       };
+
+      if (!editingPharmacy) {
+        pharmacyData.createdAt = serverTimestamp();
+      }
 
       if (newPharmacy.lat && newPharmacy.lng) {
         pharmacyData.location = {
@@ -629,16 +635,34 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         };
       }
 
-      await setDoc(doc(db, 'pharmacies', id), pharmacyData);
+      await setDoc(doc(db, 'pharmacies', id), pharmacyData, { merge: true });
       setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
-      toast.success("Pharmacie ajoutée !");
-      await addSystemLog('CREATE_PHARMACY', `Création d'une pharmacie: ${newPharmacy.name}`);
+      setEditingPharmacy(null);
+      setShowPharmacyModal(false);
+      toast.success(editingPharmacy ? "Pharmacie mise à jour !" : "Pharmacie ajoutée !");
+      await addSystemLog(editingPharmacy ? 'UPDATE_PHARMACY' : 'CREATE_PHARMACY', `${editingPharmacy ? 'Mise à jour' : 'Création'} de la pharmacie: ${newPharmacy.name}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'pharmacies');
-      toast.error("Erreur lors de l'ajout.");
+      handleFirestoreError(error, OperationType.WRITE, 'pharmacies');
+      toast.error("Erreur lors de l'enregistrement.");
     } finally {
       setAddingPharmacy(false);
     }
+  };
+
+  const handleEditPharmacy = (pharmacy: Pharmacy) => {
+    setEditingPharmacy(pharmacy);
+    setNewPharmacy({
+      name: pharmacy.name,
+      address: pharmacy.address,
+      phone: pharmacy.phone || '',
+      locality: pharmacy.locality || '',
+      cityId: pharmacy.cityId || '',
+      groupId: pharmacy.groupId || '',
+      licenseNumber: pharmacy.licenseNumber || '',
+      lat: pharmacy.location?.lat.toString() || '',
+      lng: pharmacy.location?.lng.toString() || ''
+    });
+    setShowPharmacyModal(true);
   };
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -1900,18 +1924,30 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                   <div>
-                <h3 className="text-xl font-bold">Pharmacies Partenaires</h3>
-                <p className="text-sm text-slate-500 mt-1">Liste des pharmacies enregistrées sur la plateforme.</p>
-              </div>
-              <button 
-                onClick={handleSeedPharmacies}
-                disabled={seeding}
-                className="px-6 py-3 bg-primary/10 text-primary rounded-2xl font-bold hover:bg-primary/20 transition-all flex items-center gap-2 disabled:opacity-50"
-              >
-                {seeding ? "Importation..." : "Importer Pharmacies Ouaga"}
-              </button>
-            </div>
-            <div className="overflow-x-auto">
+                    <h3 className="text-xl font-bold">Pharmacies Partenaires</h3>
+                    <p className="text-sm text-slate-500 mt-1">Liste des pharmacies enregistrées sur la plateforme.</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={handleSeedPharmacies}
+                      disabled={seeding}
+                      className="px-6 py-3 bg-primary/10 text-primary rounded-2xl font-bold hover:bg-primary/20 transition-all flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {seeding ? "Importation..." : "Importer Pharmacies Ouaga"}
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setEditingPharmacy(null);
+                        setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
+                        setShowPharmacyModal(true);
+                      }}
+                      className="bg-emerald-100 text-emerald-700 px-6 py-3 rounded-2xl font-bold hover:bg-emerald-200 transition-colors flex items-center gap-2"
+                    >
+                      <Plus size={20} /> Ajouter une Pharmacie
+                    </button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
@@ -1964,6 +2000,13 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                       </td>
                       <td className="p-6 text-right">
                         <button 
+                          onClick={() => handleEditPharmacy(pharmacy)}
+                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors mr-2"
+                          title="Modifier"
+                        >
+                          <SettingsIcon size={16} />
+                        </button>
+                        <button 
                           onClick={() => handleDeletePharmacy(pharmacy.id)}
                           className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                           title="Supprimer"
@@ -1983,122 +2026,130 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 max-w-2xl">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
-                <Package size={24} />
-              </div>
-              <h3 className="text-xl font-bold">Ajouter une Pharmacie</h3>
-            </div>
-            <form onSubmit={handleAddPharmacy} className="space-y-6">
-              <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100 space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de la pharmacie</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={newPharmacy.name}
-                    onChange={(e) => setNewPharmacy({...newPharmacy, name: e.target.value})}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                    placeholder="Ex: Pharmacie du Progrès"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse / Quartier</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={newPharmacy.address}
-                    onChange={(e) => setNewPharmacy({...newPharmacy, address: e.target.value})}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                    placeholder="Ex: Secteur 15, Ouagadougou"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Téléphone</label>
-                    <input 
-                      type="tel" 
-                      value={newPharmacy.phone}
-                      onChange={(e) => setNewPharmacy({...newPharmacy, phone: e.target.value})}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                      placeholder="Ex: +226 25 30 00 00"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Numéro de Licence</label>
-                    <input 
-                      type="text" 
-                      value={newPharmacy.licenseNumber}
-                      onChange={(e) => setNewPharmacy({...newPharmacy, licenseNumber: e.target.value})}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                      placeholder="Ex: LIC-789"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville</label>
-                    <select 
-                      required
-                      value={newPharmacy.cityId || ''}
-                      onChange={(e) => setNewPharmacy({...newPharmacy, cityId: e.target.value})}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+              {/* Pharmacy Modal */}
+              <AnimatePresence>
+                {showPharmacyModal && (
+                  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <motion.div 
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.95, opacity: 0 }}
+                      className="bg-white rounded-[3rem] w-full max-w-2xl shadow-2xl overflow-hidden"
                     >
-                      <option value="">Sélectionner</option>
-                      {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe</label>
-                    <select 
-                      required
-                      value={newPharmacy.groupId || ''}
-                      onChange={(e) => setNewPharmacy({...newPharmacy, groupId: e.target.value})}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                    >
-                      <option value="">Sélectionner</option>
-                      {[1, 2, 3, 4].map(g => <option key={g} value={g.toString()}>Groupe {g}</option>)}
-                    </select>
-                  </div>
-                </div>
+                      <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-emerald-50/50">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-600 shadow-sm border border-emerald-100">
+                            <Package size={24} />
+                          </div>
+                          <div>
+                            <h3 className="text-xl font-black text-slate-900">{editingPharmacy ? 'Modifier' : 'Ajouter'} une Pharmacie</h3>
+                            <p className="text-sm text-slate-500">Configuration de l'officine et son groupe de garde</p>
+                          </div>
+                        </div>
+                        <button onClick={() => setShowPharmacyModal(false)} className="w-10 h-10 bg-white hover:bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center transition-all border border-slate-100 shadow-sm">
+                          <X size={20} />
+                        </button>
+                      </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Latitude</label>
-                    <input 
-                      type="text" 
-                      value={newPharmacy.lat}
-                      onChange={(e) => setNewPharmacy({...newPharmacy, lat: e.target.value})}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                      placeholder="12.37"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Longitude</label>
-                    <input 
-                      type="text" 
-                      value={newPharmacy.lng}
-                      onChange={(e) => setNewPharmacy({...newPharmacy, lng: e.target.value})}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
-                      placeholder="-1.51"
-                    />
-                  </div>
-                </div>
-              </div>
+                      <form onSubmit={handleSavePharmacy} className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
+                        <div className="space-y-6">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de la pharmacie</label>
+                            <input 
+                              type="text" 
+                              required
+                              value={newPharmacy.name}
+                              onChange={(e) => setNewPharmacy({...newPharmacy, name: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                              placeholder="Ex: Pharmacie du Progrès"
+                            />
+                          </div>
 
-              <button 
-                type="submit"
-                disabled={addingPharmacy}
-                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
-              >
-                {addingPharmacy ? "Ajout en cours..." : "Ajouter la Pharmacie"}
-              </button>
-            </form>
-          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Adresse / Quartier</label>
+                            <input 
+                              type="text" 
+                              required
+                              value={newPharmacy.address}
+                              onChange={(e) => setNewPharmacy({...newPharmacy, address: e.target.value})}
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                              placeholder="Ex: Secteur 15, Ouagadougou"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Téléphone</label>
+                              <input 
+                                type="tel" 
+                                value={newPharmacy.phone}
+                                onChange={(e) => setNewPharmacy({...newPharmacy, phone: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                                placeholder="Ex: +226 25 30 00 00"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Numéro de Licence</label>
+                              <input 
+                                type="text" 
+                                value={newPharmacy.licenseNumber}
+                                onChange={(e) => setNewPharmacy({...newPharmacy, licenseNumber: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                                placeholder="Ex: LIC-789"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ville (Pour la garde)</label>
+                              <select 
+                                required
+                                value={newPharmacy.cityId || ''}
+                                onChange={(e) => setNewPharmacy({...newPharmacy, cityId: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none appearance-none"
+                              >
+                                <option value="">Sélectionner</option>
+                                {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Groupe de Rotation</label>
+                              <select 
+                                required
+                                value={newPharmacy.groupId || ''}
+                                onChange={(e) => setNewPharmacy({...newPharmacy, groupId: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none appearance-none"
+                              >
+                                <option value="">Choisir (1 à 4)</option>
+                                {[1, 2, 3, 4].map(g => <option key={g} value={g.toString()}>Groupe {g}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-4 pt-4">
+                          <button 
+                            type="button"
+                            onClick={() => setShowPharmacyModal(false)}
+                            className="flex-1 py-4 border-2 border-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 transition-all"
+                          >
+                            Annuler
+                          </button>
+                          <button 
+                            type="submit"
+                            disabled={addingPharmacy}
+                            className="flex-[2] bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                          >
+                            {addingPharmacy ? "Enregistrement..." : (editingPharmacy ? "Mettre à jour" : "Ajouter")}
+                          </button>
+                        </div>
+                      </form>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
+
         </div>
       </motion.div>
     )}

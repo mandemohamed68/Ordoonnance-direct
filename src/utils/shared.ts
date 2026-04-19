@@ -197,29 +197,37 @@ export const getCurrentOnCallGroup = (rotation: any): number => {
 };
 
 /**
- * Determines if the current time falls within the on-call hours for a given city.
+ * Determines if the current time falls within the on-call hours for a given city,
+ * strictly following Burkina Faso's regulation:
+ * - Night: 19:00 to 08:00
+ * - Friday: 08:00 to 19:00
+ * - Sunday: All day
  */
 export const isCityOnCallNow = (startTime: string, endTime: string): boolean => {
-  if (!startTime || !endTime) return false;
-
   const now = new Date();
+  const day = now.getDay(); // 0: Sunday, 1: Mon, ..., 5: Friday, 6: Sat
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
   const currentTimeInMinutes = currentHour * 60 + currentMinute;
 
-  const [startHour, startMinute] = startTime.split(':').map(Number);
+  // 1. Sunday is always on-call
+  if (day === 0) return true;
+
+  // 2. Night: Default 19:00 to 08:00 (or custom city settings)
+  const [startHour, startMinute] = (startTime || "19:00").split(':').map(Number);
   const startTimeInMinutes = startHour * 60 + startMinute;
 
-  const [endHour, endMinute] = endTime.split(':').map(Number);
+  const [endHour, endMinute] = (endTime || "08:00").split(':').map(Number);
   const endTimeInMinutes = endHour * 60 + endMinute;
 
-  if (startTimeInMinutes < endTimeInMinutes) {
-    // Normal case: e.g., 08:00 to 19:00
-    return currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes;
-  } else {
-    // Overnight case: e.g., 19:00 to 08:00
-    return currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes <= endTimeInMinutes;
-  }
+  // Overnight case check (e.g. 19:00 to 08:00)
+  const isNight = currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes < endTimeInMinutes;
+  if (isNight) return true;
+
+  // 3. Friday special (08:00 to 19:00)
+  if (day === 5 && currentHour >= 8 && currentHour < 19) return true;
+
+  return false;
 };
 
 /**

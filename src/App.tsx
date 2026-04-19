@@ -1153,120 +1153,27 @@ export default function App() {
 
   if (!isAuthReady || (user && loading)) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
-        {/* Cinematic Background with flowing colors */}
-        <div className="absolute inset-0 z-0 overflow-hidden">
-          <motion.div 
-            animate={{ 
-              scale: [1, 1.5, 1],
-              rotate: [0, 90, 0],
-              opacity: [0.05, 0.1, 0.05],
-            }}
-            transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-            className="absolute top-[-20%] left-[-20%] w-[80%] h-[80%] bg-emerald-500 rounded-full blur-[140px]"
-          />
-          <motion.div 
-            animate={{ 
-              scale: [1.5, 1, 1.5],
-              rotate: [0, -90, 0],
-              opacity: [0.08, 0.05, 0.08],
-            }}
-            transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-            className="absolute bottom-[-20%] right-[-20%] w-[80%] h-[80%] bg-sky-500 rounded-full blur-[140px]"
-          />
-        </div>
-
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
         <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1 }}
-          className="relative z-10 flex flex-col items-center gap-16 w-full max-w-sm"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5 }}
+          className="flex flex-col items-center justify-center relative z-10"
         >
-          <div className="relative">
-            {/* Elegant Outer Rings */}
-            <motion.div 
-              animate={{ rotate: 360 }}
-              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-              className="absolute -inset-16 border border-emerald-500/10 rounded-full"
-            />
-            <motion.div 
-              animate={{ rotate: -360 }}
-              transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-              className="absolute -inset-24 border border-sky-500/5 rounded-full"
-            />
-            
-            {/* Floating Logo with Shadow Elevation */}
-            <motion.div 
-              animate={{ 
-                y: [0, -15, 0],
-                rotateY: [0, 10, 0]
-              }}
-              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-              className="w-28 h-28 bg-white rounded-[2.5rem] shadow-[0_30px_70px_rgba(16,185,129,0.3)] flex items-center justify-center relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-white via-white to-slate-50 opacity-90"></div>
-              <LogoIcon size={64} className="relative z-10 text-emerald-600" />
-              
-              {/* Shine effect over logo */}
-              <motion.div 
-                animate={{ left: ['100%', '-100%'] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", repeatDelay: 1 }}
-                className="absolute top-0 bottom-0 w-8 bg-white/40 -skew-x-12 z-20"
-              />
-            </motion.div>
-          </div>
-
-          <div className="text-center space-y-6">
-            <h1 className="text-3xl font-black text-white tracking-[0.2em] uppercase">
-              Ordonnance Direct
-            </h1>
-            <div className="flex flex-col items-center gap-4">
-              <p className="text-emerald-400 font-bold tracking-[0.4em] uppercase text-[11px] animate-pulse">
-                Accès Sécurisé
-              </p>
-              <div className="h-[2px] w-16 bg-gradient-to-r from-transparent via-emerald-500 to-transparent"></div>
-            </div>
-          </div>
-
-          <div className="w-full space-y-8">
-            <div className="bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
-               {/* Internal Scanning Sweep */}
-               <motion.div 
-                animate={{ top: ['-100%', '200%'] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-                className="absolute left-0 right-0 h-40 bg-gradient-to-b from-transparent via-emerald-500/10 to-transparent pointer-events-none"
-              />
-
-              <div className="space-y-6 relative z-10">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Authentification</span>
-                  <span className={isAuthReady ? "text-emerald-400 text-xs font-black" : "text-amber-400 text-xs font-black animate-pulse"}>
-                    {isAuthReady ? "OK" : "EN COURS..."}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Configuration</span>
-                  <span className={settings ? "text-emerald-400 text-xs font-black" : "text-amber-400 text-xs font-black animate-pulse"}>
-                    {settings ? "OK" : "CHARGEMENT..."}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-8 pt-8 border-t border-white/10">
-                <div className="h-[2px] bg-white/5 rounded-full overflow-hidden">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(isAuthReady ? 40 : 0) + (settings ? 60 : 0)}%` }}
-                    className="h-full bg-gradient-to-r from-emerald-500 to-sky-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <p className="text-center text-slate-500 text-[10px] font-bold tracking-widest uppercase opacity-60">
-              Système de Santé Certifié • Burkina Faso
-            </p>
-          </div>
+          <motion.div 
+            animate={{ 
+              scale: [1, 1.05, 1],
+              boxShadow: [
+                "0 0 0 0 rgba(16, 185, 129, 0)",
+                "0 0 0 30px rgba(16, 185, 129, 0.03)",
+                "0 0 0 0 rgba(16, 185, 129, 0)"
+              ]
+            }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+            className="w-28 h-28 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center text-emerald-600 mb-4"
+          >
+            <LogoIcon size={64} />
+          </motion.div>
         </motion.div>
       </div>
     );
@@ -1390,7 +1297,7 @@ export default function App() {
         />
       </div>
 
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50">
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
         <div className="max-w-7xl mx-auto px-4 h-14 md:h-16 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setViewMode(profile?.role || null); setIsMobileMenuOpen(false); }}>
             <motion.div 
@@ -1602,11 +1509,11 @@ export default function App() {
         <>
           <button 
             onClick={() => setShowSupportChat(true)}
-            className="fixed md:bottom-6 bottom-24 right-6 w-16 h-16 bg-primary text-white rounded-full shadow-2xl shadow-primary/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-[150]"
+            className="fixed md:bottom-6 bottom-28 right-4 md:right-6 w-14 h-14 md:w-16 md:h-16 bg-primary text-white rounded-full shadow-2xl shadow-primary/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all z-[150]"
           >
-            <MessageCircle size={28} />
+            <MessageCircle size={24} className="md:w-7 md:h-7" />
             {supportChatMeta?.unreadUserCount > 0 && (
-              <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white animate-bounce">
+              <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] md:text-xs font-bold w-5 h-5 md:w-6 md:h-6 rounded-full flex items-center justify-center border-2 border-white animate-bounce">
                 {supportChatMeta.unreadUserCount}
               </span>
             )}
@@ -1618,9 +1525,9 @@ export default function App() {
                 initial={{ opacity: 0, y: 20, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 20, scale: 0.9 }}
-                className="fixed md:bottom-28 bottom-44 right-6 w-80 h-[450px] bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 border border-slate-100 z-[200] overflow-hidden flex flex-col"
+                className="fixed md:bottom-28 bottom-[130px] right-4 md:right-6 w-[calc(100vw-32px)] md:w-80 h-[450px] max-h-[60vh] bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 border border-slate-100 z-[200] overflow-hidden flex flex-col"
               >
-                <div className="bg-primary p-6 text-white relative">
+                <div className="bg-primary p-5 md:p-6 text-white relative">
                   <button 
                     onClick={() => setShowSupportChat(false)}
                     className="absolute top-4 right-4 w-8 h-8 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-all"
@@ -2500,6 +2407,63 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
   const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
+  const [patientCityId, setPatientCityId] = useState(profile.cityId || '');
+  const [isLocating, setIsLocating] = useState(false);
+
+  const autoDetectCity = () => {
+    if (!navigator.geolocation) {
+      toast.error("La géolocalisation n'est pas supportée par votre appareil.");
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude: lat, longitude: lon } = position.coords;
+          const mapResponse = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+          if (!mapResponse.ok) throw new Error("Erreur cartographique");
+          const data = await mapResponse.json();
+          
+          if (data && data.address) {
+            const detectedName = data.address.city || data.address.town || data.address.village || data.address.county || data.address.state || "";
+            if (!detectedName) {
+              toast.error("Ville introuvable aux coordonnées actuelles.");
+              return;
+            }
+            
+            // Allow somewhat loose matching (e.g. Ouagadougou matches Ouagadougou)
+            const matchedCity = cities.find(c =>
+              c.name.toLowerCase().includes(detectedName.toLowerCase()) ||
+              detectedName.toLowerCase().includes(c.name.toLowerCase())
+            );
+
+            if (matchedCity) {
+              setPatientCityId(matchedCity.id);
+              if (matchedCity.id !== profile.cityId) {
+                 await updateDoc(doc(db, 'users', profile.uid), { cityId: matchedCity.id }).catch(console.error);
+              }
+              toast.success(`Position confirmée : ${matchedCity.name}`);
+            } else {
+              toast.error(`Ville détectée (${detectedName}) non couverte.`);
+            }
+          } else {
+            toast.error("Impossible de déterminer la ville.");
+          }
+        } catch (error) {
+          console.error(error);
+          toast.error("Erreur d'analyse de la position.");
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (error) => {
+        console.error(error);
+        setIsLocating(false);
+        toast.error("L'accès à la position géographique a été refusé.");
+      },
+      { timeout: 10000, enableHighAccuracy: false }
+    );
+  };
 
   useEffect(() => {
     const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
@@ -2582,11 +2546,16 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
 
       if (prescriptionId) {
         try {
-          await updateDoc(doc(db, 'prescriptions', prescriptionId), {
-            status: 'submitted',
-            lockedBy: null,
-            lockedAt: null
-          });
+            const pSnap = await getDoc(doc(db, 'prescriptions', prescriptionId));
+            if (pSnap.exists()) {
+              const currentCount = pSnap.data().quoteCount || 1;
+              await updateDoc(doc(db, 'prescriptions', prescriptionId), {
+                status: 'submitted',
+                quoteCount: Math.max(0, currentCount - 1),
+                lockedBy: null,
+                lockedAt: null
+              });
+            }
         } catch (e) {
           console.warn("Could not update associated prescription (might be deleted)", e);
         }
@@ -2658,18 +2627,27 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       toast.error("Veuillez entrer les médicaments.");
       return;
     }
+    if (!patientCityId) {
+      toast.error("Veuillez sélectionner votre ville avant d'envoyer.");
+      return;
+    }
 
     setUploading(true);
     try {
+      if (patientCityId !== profile.cityId) {
+        await updateDoc(doc(db, 'users', profile.uid), { cityId: patientCityId }).catch(console.error);
+      }
       const docRef = await addDoc(collection(db, 'prescriptions'), {
         patientId: profile.uid,
         patientName: profile.name,
+        cityId: patientCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location,
         extractedData: "",
         status: 'draft',
         createdAt: serverTimestamp(),
-        distance: Math.floor(Math.random() * 5) + 1
+        distance: Math.floor(Math.random() * 5) + 1,
+        quoteCount: 0
       });
 
       setHospitalLocation('');
@@ -2808,8 +2786,17 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!patientCityId) {
+      toast.error("Veuillez sélectionner votre ville avant d'envoyer.");
+      return;
+    }
+
     setUploading(true);
     try {
+      if (patientCityId !== profile.cityId) {
+        await updateDoc(doc(db, 'users', profile.uid), { cityId: patientCityId }).catch(console.error);
+      }
+
       // Use a slightly smaller image for faster processing and to stay well within Firestore limits
       const base64 = await compressImage(file, 800, 800, 0.6);
       
@@ -2817,13 +2804,15 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       const docRef = await addDoc(collection(db, 'prescriptions'), {
         patientId: profile.uid,
         patientName: profile.name,
+        cityId: patientCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location, // Real-time location of the patient
         imageUrl: base64,
         extractedData: "", // Will be updated asynchronously
         status: 'draft',
         createdAt: serverTimestamp(),
-        distance: Math.floor(Math.random() * 5) + 1 // Simulating distance in km
+        distance: Math.floor(Math.random() * 5) + 1, // Simulating distance in km
+        quoteCount: 0
       });
 
       setHospitalLocation('');
@@ -3274,7 +3263,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
         </div>
 
         {/* Mobile Bottom Navigation (Android Native Feel) */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-[200] px-4 pb-6 pt-2 bg-white/80 backdrop-blur-xl border-t border-slate-100 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-[200] px-4 pt-2 bg-white/80 backdrop-blur-xl border-t border-slate-100 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.5rem)' }}>
           <div className="flex items-center justify-around">
             {[
               { id: 'prescriptions', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500', iconColor: 'text-emerald-500' },
@@ -3308,7 +3297,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
           </div>
         </div>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pb-32 md:pb-0">
           <div key={activeTab} className="space-y-6">
               {activeTab === 'prescriptions' && (
                 <>
@@ -3317,7 +3306,28 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                 <h3 className="text-2xl font-bold text-slate-900">Mes Ordonnances</h3>
                 <p className="text-slate-500 text-sm">Envoyez vos ordonnances pour recevoir des devis.</p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
+                <div className="flex items-center gap-3 bg-white px-4 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-colors min-w-[200px] relative">
+                  <MapPin size={20} className="text-primary shrink-0" />
+                  <select
+                    value={patientCityId}
+                    onChange={(e) => setPatientCityId(e.target.value)}
+                    className="bg-transparent outline-none text-sm w-full font-bold text-slate-700 cursor-pointer appearance-none pr-10"
+                  >
+                    <option value="">📍 Choisissez votre ville...</option>
+                    {cities.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button 
+                    onClick={autoDetectCity}
+                    disabled={isLocating}
+                    title="Détecter ma position"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-primary/5 text-primary rounded-xl hover:bg-primary/20 transition-all disabled:opacity-50"
+                  >
+                    {isLocating ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div> : <Navigation size={16} />}
+                  </button>
+                </div>
                 <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-colors">
                   <MapPin size={20} className="text-slate-400" />
                   <input 
@@ -4830,11 +4840,11 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
   const [quoteItems, setQuoteItems] = useState<{ 
     id: string;
     name: string; 
-    price: number; 
-    quantity: number; 
+    price: number | ''; 
+    quantity: number | ''; 
     equivalent?: string;
-    equivalentPrice?: number;
-    equivalentQuantity?: number;
+    equivalentPrice?: number | '';
+    equivalentQuantity?: number | '';
     isUnavailable?: boolean;
   }[]>([]);
   const [showHandoverVerify, setShowHandoverVerify] = useState<Order | null>(null);
@@ -4885,7 +4895,8 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
     // Get prescriptions with status submitted, sort in JS to avoid index requirement
     const q = query(collection(db, 'prescriptions'), where('status', '==', 'submitted'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const allPrescriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
+      const allPrescriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription))
+        .filter(p => !p.cityId || !myPharmacy?.cityId || p.cityId === myPharmacy.cityId);
       
       // Sort client side
       allPrescriptions.sort((a, b) => {
@@ -4905,14 +4916,36 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
       // 1. Not rejected by this pharmacy
       // 2. Not locked by another pharmacy (or lock expired > 5 mins)
       // 3. Rejection count < 5
+      // 4. Quote count < 2 (Max quotes per prescription)
+      // 5. Circle of proximity logic: > 3km hidden if prescription is < 10 mins old
+      // 6. Strict Garde Logic: Only active group sees requests during garde time
+      const currentLocality = cities.find(c => c.id === profile.cityId);
+      const isGardeTimeNow = currentLocality ? isCityOnCallNow(currentLocality.onCallStartTime, currentLocality.onCallEndTime) : isCityOnCallNow("19:00", "08:00");
+      let activeGroup = 1;
+      if (rotation) {
+        activeGroup = getCurrentOnCallGroup(rotation);
+      }
+
       let filtered = allPrescriptions.filter(p => {
         const isRejectedByMe = p.rejectedBy?.includes(profile.uid);
         const isLockedByOther = p.lockedBy && p.lockedBy !== profile.uid;
         const lockExpired = p.lockedAt && (new Date().getTime() - (p.lockedAt.toDate ? p.lockedAt.toDate().getTime() : new Date(p.lockedAt).getTime()) > 5 * 60 * 1000);
         const isTooManyRejections = (p.rejectionCount || 0) >= 5;
+        const hasMaxQuotes = (p.quoteCount || 0) >= 2;
 
-        if (isRejectedByMe || isTooManyRejections) return false;
+        if (isRejectedByMe || isTooManyRejections || hasMaxQuotes) return false;
         if (isLockedByOther && !lockExpired) return false;
+
+        // Garde Enforcement
+        if (isGardeTimeNow && myPharmacy) {
+          if (parseInt(myPharmacy.groupId) !== activeGroup) return false;
+        }
+
+        // Proximity Logic (Only applies if pharmacy has coordinates and order has distance/location)
+        const prescriptionAgeMins = (new Date().getTime() - (p.createdAt?.toDate ? p.createdAt.toDate().getTime() : new Date(p.createdAt || 0).getTime())) / (1000 * 60);
+        if (prescriptionAgeMins < 10 && (p.distance || 0) > 3) {
+           return false; // Hide if > 3km and younger than 10 mins
+        }
         
         return true;
       });
@@ -5017,7 +5050,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
           items = filteredMeds.map((m: any) => ({
             id: Math.random().toString(36).substr(2, 9),
             name: typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || "Médicament inconnu"),
-            price: 0,
+            price: '',
             quantity: 1,
             equivalent: ''
           }));
@@ -5025,7 +5058,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
       } catch (e) {
         console.error("Failed to parse extracted data", e);
       }
-      setQuoteItems(items.length > 0 ? items : [{ id: Math.random().toString(36).substr(2, 9), name: "", price: 0, quantity: 1, equivalent: '' }]);
+      setQuoteItems(items.length > 0 ? items : [{ id: Math.random().toString(36).substr(2, 9), name: "", price: '', quantity: 1, equivalent: '' }]);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `prescriptions/${p.id}`);
       toast.error("Impossible de prendre en charge cette ordonnance.");
@@ -5037,8 +5070,13 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
 
     const totalAmount = quoteItems.reduce((sum, item) => {
       if (item.isUnavailable) return sum;
-      const price = item.equivalent ? (item.equivalentPrice || 0) : item.price;
-      const quantity = item.equivalent ? (item.equivalentQuantity || 1) : item.quantity;
+      const p = item.price === '' ? 0 : Number(item.price);
+      const q = item.quantity === '' ? 0 : Number(item.quantity);
+      const ep = (item.equivalentPrice === undefined || item.equivalentPrice === '') ? 0 : Number(item.equivalentPrice);
+      const eq = (item.equivalentQuantity === undefined || item.equivalentQuantity === '') ? 1 : Number(item.equivalentQuantity);
+      
+      const price = item.equivalent ? ep : p;
+      const quantity = item.equivalent ? eq : q;
       return sum + (price * quantity);
     }, 0);
 
@@ -5051,6 +5089,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
         prescriptionImageUrl: selectedPrescription.imageUrl,
         patientId: selectedPrescription.patientId,
         patientName: selectedPrescription.patientName || "Anonyme",
+        cityId: selectedPrescription.cityId || profile.cityId || null,
         hospitalLocation: selectedPrescription.hospitalLocation || "Non spécifié",
         patientLocation: selectedPrescription.patientLocation || null,
         pharmacistId: profile.uid,
@@ -5074,8 +5113,10 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
       });
 
       // Update Prescription Status
+      const newQuoteCount = (selectedPrescription.quoteCount || 0) + 1;
       await updateDoc(doc(db, 'prescriptions', selectedPrescription.id), {
-        status: 'validated',
+        quoteCount: newQuoteCount,
+        status: newQuoteCount >= 2 ? 'validated' : selectedPrescription.status,
         lockedBy: null,
         lockedAt: null
       });
@@ -5256,7 +5297,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
         </div>
 
         {/* Mobile Bottom Navigation (Android Native Feel) */}
-        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pb-5 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2">
+        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.25rem)' }}>
           <div className="flex items-center justify-around">
             {[
               { id: 'pending', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500' },
@@ -5645,7 +5686,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                   <div key={item.id} className="bg-slate-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 space-y-4">
                     <div className="flex flex-col md:flex-row gap-4 md:items-end">
                       {/* Name input - full width on mobile, partial on desktop */}
-                      <div className="w-full md:flex-1 space-y-1">
+                      <div className="w-full md:flex-[2] space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Désignation</label>
                         <input 
                           type="text" 
@@ -5659,28 +5700,30 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                       </div>
                       
                       {/* Container for Price, Qty and Buttons, side-by-side on mobile */}
-                      <div className="flex gap-2 items-end w-full md:w-auto">
-                        <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex gap-2 items-end w-full md:flex-1">
+                        <div className="w-24 md:w-32 shrink-0 space-y-1">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Prix (FCFA)</label>
                           <input 
                             type="number" 
                             value={item.price}
                             disabled={item.isUnavailable}
                             onChange={(e) => {
-                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, price: Number(e.target.value) } : qi);
+                              const val = e.target.value === '' ? '' as const : Number(e.target.value);
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, price: val } : qi);
                               setQuoteItems(newItems);
                             }}
                             className="w-full bg-white border border-slate-200 rounded-xl px-2 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
                           />
                         </div>
-                        <div className="w-16 md:w-20 shrink-0 space-y-1">
+                        <div className="flex-1 min-w-0 md:w-20 shrink-0 space-y-1">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Qté</label>
                           <input 
                             type="number" 
                             value={item.quantity}
                             disabled={item.isUnavailable}
                             onChange={(e) => {
-                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, quantity: Number(e.target.value) } : qi);
+                              const val = e.target.value === '' ? '' as const : Number(e.target.value);
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, quantity: val } : qi);
                               setQuoteItems(newItems);
                             }}
                             className="w-full bg-white border border-slate-200 rounded-xl px-2 py-2 text-sm outline-none focus:border-primary text-center disabled:opacity-50"
@@ -5689,7 +5732,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                         <div className="flex gap-1 shrink-0">
                           <button 
                             onClick={() => {
-                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, isUnavailable: !qi.isUnavailable, price: 0, equivalent: '' } : qi);
+                              const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, isUnavailable: !qi.isUnavailable, price: '' as const, equivalent: '' } : qi);
                               setQuoteItems(newItems);
                             }}
                             className={`w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center transition-all ${item.isUnavailable ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500'}`}
@@ -5728,9 +5771,10 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                             <label className="text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Prix Équivalent (FCFA)</label>
                             <input 
                               type="number" 
-                              value={item.equivalentPrice || 0}
+                              value={item.equivalentPrice ?? ''}
                               onChange={(e) => {
-                                const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentPrice: Number(e.target.value) } : qi);
+                                const val = e.target.value === '' ? '' as const : Number(e.target.value);
+                                const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentPrice: val } : qi);
                                 setQuoteItems(newItems);
                               }}
                               className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary font-bold"
@@ -5740,9 +5784,10 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                             <label className="text-[10px] font-bold text-primary uppercase tracking-widest ml-1">Qté Équivalent</label>
                             <input 
                               type="number" 
-                              value={item.equivalentQuantity || 1}
+                              value={item.equivalentQuantity ?? 1}
                               onChange={(e) => {
-                                const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentQuantity: Number(e.target.value) } : qi);
+                                const val = e.target.value === '' ? '' as const : Number(e.target.value);
+                                const newItems = quoteItems.map(qi => qi.id === item.id ? { ...qi, equivalentQuantity: val } : qi);
                                 setQuoteItems(newItems);
                               }}
                               className="w-full bg-primary/5 border border-primary/20 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary font-bold"
@@ -5761,7 +5806,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                 ))}
                 
                 <button 
-                  onClick={() => setQuoteItems([...quoteItems, { id: Math.random().toString(36).substr(2, 9), name: "", price: 0, quantity: 1, equivalent: '' }])}
+                  onClick={() => setQuoteItems([...quoteItems, { id: Math.random().toString(36).substr(2, 9), name: "", price: '', quantity: 1, equivalent: '' }])}
                   className="w-full py-3 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold hover:border-primary hover:text-primary transition-all flex items-center justify-center gap-2"
                 >
                   <Plus size={18} />
@@ -5775,8 +5820,13 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Total Patient</p>
                     <p className="text-xl font-bold text-slate-900">
                       {quoteItems.reduce((sum, item) => {
-                        const price = item.equivalent ? (item.equivalentPrice || 0) : item.price;
-                        const quantity = item.equivalent ? (item.equivalentQuantity || 1) : item.quantity;
+                        const p = item.price === '' ? 0 : Number(item.price);
+                        const q = item.quantity === '' ? 0 : Number(item.quantity);
+                        const ep = (item.equivalentPrice === undefined || item.equivalentPrice === '') ? 0 : Number(item.equivalentPrice);
+                        const eq = (item.equivalentQuantity === undefined || item.equivalentQuantity === '') ? 1 : Number(item.equivalentQuantity);
+                        
+                        const price = item.equivalent ? ep : p;
+                        const quantity = item.equivalent ? eq : q;
                         return sum + (price * quantity);
                       }, 0).toLocaleString()} FCFA
                     </p>
@@ -5785,8 +5835,13 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
                     <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest mb-1">Votre Gain Net</p>
                     <p className="text-2xl font-black text-emerald-600">
                       {Math.floor(quoteItems.reduce((sum, item) => {
-                        const price = item.equivalent ? (item.equivalentPrice || 0) : item.price;
-                        const quantity = item.equivalent ? (item.equivalentQuantity || 1) : item.quantity;
+                        const p = item.price === '' ? 0 : Number(item.price);
+                        const q = item.quantity === '' ? 0 : Number(item.quantity);
+                        const ep = (item.equivalentPrice === undefined || item.equivalentPrice === '') ? 0 : Number(item.equivalentPrice);
+                        const eq = (item.equivalentQuantity === undefined || item.equivalentQuantity === '') ? 1 : Number(item.equivalentQuantity);
+                        
+                        const price = item.equivalent ? ep : p;
+                        const quantity = item.equivalent ? eq : q;
                         return sum + (price * quantity);
                       }, 0) * (1 - (settings?.commissionPercentage || 10) / 100)).toLocaleString()} FCFA
                     </p>
@@ -6241,7 +6296,8 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       // Filter and sort in JS to avoid composite index requirement
-      const allMissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const allMissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order))
+        .filter(m => !m.cityId || m.cityId === profile.cityId);
       
       // Play sound for new missions (excluding initial load)
       const hasNew = snapshot.docChanges().some(change => change.type === 'added');
@@ -6502,7 +6558,7 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
         </div>
 
         {/* Mobile Bottom Navigation (Android Native Feel) */}
-        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pb-5 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2">
+        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.25rem)' }}>
           <div className="flex items-center justify-around">
             {[
               { id: 'available', label: 'Mission', icon: MapPin, activeColor: 'bg-emerald-500' },

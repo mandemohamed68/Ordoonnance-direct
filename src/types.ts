@@ -57,7 +57,9 @@ export interface Prescription {
   lockedAt?: any;
   rejectedBy?: string[];
   rejectionCount?: number;
+  quoteCount?: number; // Tracks number of submitted quotes
   patientLocation?: { lat: number; lng: number };
+  cityId?: string;
 }
 
 export interface OrderItem {
@@ -78,6 +80,7 @@ export interface Order {
   patientName?: string;
   patientPhone?: string;
   hospitalLocation?: string;
+  cityId?: string;
   pharmacistId?: string;
   pharmacyName?: string;
   pharmacyLocation?: string;
