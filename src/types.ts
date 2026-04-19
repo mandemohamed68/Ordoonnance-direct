@@ -60,6 +60,8 @@ export interface Prescription {
   quoteCount?: number; // Tracks number of submitted quotes
   patientLocation?: { lat: number; lng: number };
   cityId?: string;
+  landmark?: string;
+  facadePhoto?: string;
 }
 
 export interface OrderItem {
@@ -130,6 +132,8 @@ export interface Order {
     delivery: number;
     admin: number;
   };
+  landmark?: string;
+  facadePhoto?: string;
 }
 
 export interface Settings {
@@ -257,6 +261,21 @@ export interface ChatMessage {
   orderId: string;
   senderId: string;
   senderName: string;
-  text: string;
+  senderRole?: string;
+  text?: string;
+  voiceNoteUrl?: string;
+  type: 'text' | 'voice';
   createdAt: any;
+}
+
+export interface OfflinePrescription {
+  tempId: string;
+  patientId: string;
+  patientName: string;
+  imageUrl: string;
+  facadePhoto?: string;
+  landmark?: string;
+  patientLocation?: { lat: number; lng: number };
+  cityId?: string;
+  createdAt: number;
 }

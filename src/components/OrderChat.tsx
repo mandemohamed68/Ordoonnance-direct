@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageCircle, X, ChevronRight } from 'lucide-react';
+import { MessageCircle, X, ChevronRight, Mic, Square } from 'lucide-react';
 import { doc, collection, query, where, onSnapshot, addDoc, updateDoc, serverTimestamp, increment } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { formatDate } from '../utils/shared';
+import { toast } from 'sonner';
 
 interface OrderChatProps {
   orderId: string;
@@ -17,6 +18,9 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [order, setOrder] = useState<any>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
 
   useEffect(() => {
     const orderRef = doc(db, 'orders', orderId);
@@ -56,8 +60,8 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
     });
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!newMessage.trim()) return;
+  const sendMessage = async (voiceUrl?: string) => {
+    if (!newMessage.trim() && !voiceUrl) return;
     try {
       await addDoc(collection(db, 'chat_messages'), {
         orderId,
@@ -65,6 +69,8 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
         senderName: userName,
         senderRole: userRole,
         text: newMessage,
+        voiceNoteUrl: voiceUrl || null,
+        type: voiceUrl ? 'voice' : 'text',
         createdAt: serverTimestamp()
       });
 
@@ -82,6 +88,47 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
       setNewMessage('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'chat_messages');
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Audio = reader.result as string;
+          // In a real app we would upload to Firebase Storage
+          // For now, we store as base64 in Firestore (compacting it)
+          await sendMessage(base64Audio);
+          stream.getTracks().forEach(track => track.stop());
+        };
+      };
+
+      setMediaRecorder(recorder);
+      recorder.start();
+      setIsRecording(true);
+      toast.info("Enregistrement commencé...");
+    } catch (err) {
+      console.error("Recording error:", err);
+      toast.error("Impossible d'accéder au microphone.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      toast.success("Note vocale envoyée !");
     }
   };
 
@@ -132,7 +179,16 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
                     <span className="font-bold text-[10px]">{m.senderName}</span>
                     <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 uppercase tracking-wider">{m.senderRole || 'User'}</span>
                   </div>
-                  <p>{m.text}</p>
+                  {m.type === 'voice' ? (
+                    <div className="flex items-center gap-3 py-1">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${m.senderId === userId ? 'bg-white/20' : 'bg-primary/10 text-primary'}`}>
+                        <Mic size={16} />
+                      </div>
+                      <audio src={m.voiceNoteUrl} controls className="h-8 w-40 filter brightness-90 contrast-125" />
+                    </div>
+                  ) : (
+                    <p>{m.text}</p>
+                  )}
                 </div>
                 <p className="text-[9px] text-slate-400 mt-1">{m.createdAt ? formatDate(m.createdAt, 'time') : 'Envoi...'}</p>
               </motion.div>
@@ -140,18 +196,28 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
           </AnimatePresence>
         </div>
 
-        <div className="p-4 bg-white border-t border-slate-100 flex gap-2">
+        <div className="p-4 bg-white border-t border-slate-100 flex gap-2 items-center">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+              isRecording ? 'bg-rose-500 animate-pulse text-white' : 'bg-slate-100 text-slate-400 hover:text-primary hover:bg-primary/10'
+            }`}
+          >
+            {isRecording ? <Square size={20} /> : <Mic size={20} />}
+          </button>
           <input 
             type="text" 
             value={newMessage}
+            disabled={isRecording}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="Écrivez votre message..."
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500"
+            placeholder={isRecording ? "Enregistrement..." : "Écrivez votre message..."}
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 disabled:opacity-50"
           />
           <button 
-            onClick={sendMessage}
-            className={`w-12 h-12 text-white rounded-xl flex items-center justify-center transition-all ${getRoleColor(userRole)} hover:opacity-90`}
+            onClick={() => sendMessage()}
+            disabled={isRecording || !newMessage.trim()}
+            className={`w-12 h-12 text-white rounded-xl flex items-center justify-center transition-all ${getRoleColor(userRole)} hover:opacity-90 disabled:opacity-50`}
           >
             <ChevronRight size={24} />
           </button>

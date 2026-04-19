@@ -2908,6 +2908,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const [showManualEntryModal, setShowManualEntryModal] = useState(false);
   const [manualEntryText, setManualEntryText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [landmark, setLandmark] = useState('');
+  const [facadePhoto, setFacadePhoto] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
   const [patientCityId, setPatientCityId] = useState(profile.cityId || '');
@@ -3128,6 +3131,52 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      toast.success("Vous êtes de nouveau en ligne. Synchronisation possible.");
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast.warning("Vous êtes hors ligne. Vos ordonnances seront enregistrées localement.");
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Sync offline prescriptions when coming online
+  useEffect(() => {
+    if (isOnline) {
+      const offline = localStorage.getItem('offline_prescriptions');
+      if (offline) {
+        const list = JSON.parse(offline);
+        if (list.length > 0) {
+          toast.info(`Synchronisation de ${list.length} ordonnance(s) hors-ligne...`);
+          const syncAll = async () => {
+            const batch = writeBatch(db);
+            list.forEach((p: any) => {
+              const newDocRef = doc(collection(db, 'prescriptions'));
+              const { id, ...data } = p;
+              batch.set(newDocRef, {
+                ...data,
+                createdAt: serverTimestamp(),
+                syncedAt: serverTimestamp()
+              });
+            });
+            await batch.commit();
+            localStorage.removeItem('offline_prescriptions');
+            toast.success("Synchronisation terminée !");
+          };
+          syncAll().catch(console.error);
+        }
+      }
+    }
+  }, [isOnline]);
+
   const handleManualEntrySubmit = async () => {
     if (!manualEntryText.trim()) {
       toast.error("Veuillez entrer les médicaments.");
@@ -3150,20 +3199,42 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       if (finalCityId !== profile.cityId) {
         await updateDoc(doc(db, 'users', profile.uid), { cityId: finalCityId }).catch(console.error);
       }
-      const docRef = await addDoc(collection(db, 'prescriptions'), {
+
+      const prescriptionData = {
         patientId: profile.uid,
         patientName: profile.name,
         cityId: finalCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location,
+        landmark: landmark || "",
+        facadePhoto: facadePhoto || null,
         extractedData: "",
         status: 'draft',
         createdAt: serverTimestamp(),
         distance: Math.floor(Math.random() * 5) + 1,
         quoteCount: 0
-      });
+      };
+
+      if (!isOnline) {
+        const offline = localStorage.getItem('offline_prescriptions');
+        const list = offline ? JSON.parse(offline) : [];
+        list.push({ ...prescriptionData, id: 'temp_' + Date.now(), createdAt: new Date().toISOString() });
+        localStorage.setItem('offline_prescriptions', JSON.stringify(list));
+        setHospitalLocation('');
+        setLandmark('');
+        setFacadePhoto(null);
+        setShowManualEntryModal(false);
+        setManualEntryText('');
+        setUploading(false);
+        toast.success("Ordonnance enregistrée localement (Hors-ligne). Elle sera envoyée dès que vous aurez internet.");
+        return;
+      }
+
+      const docRef = await addDoc(collection(db, 'prescriptions'), prescriptionData);
 
       setHospitalLocation('');
+      setLandmark('');
+      setFacadePhoto(null);
       setShowManualEntryModal(false);
       setManualEntryText('');
       setUploading(false);
@@ -3330,22 +3401,41 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       // Use a slightly smaller image for faster processing and to stay well within Firestore limits
       const base64 = await compressImage(file, 800, 800, 0.6);
       
-      // Add the document immediately to Firestore to show it in the UI
-      const docRef = await addDoc(collection(db, 'prescriptions'), {
+      const prescriptionData = {
         patientId: profile.uid,
         patientName: profile.name,
         cityId: finalCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location, // Real-time location of the patient
+        landmark: landmark || "",
+        facadePhoto: facadePhoto || null,
         imageUrl: base64,
         extractedData: "", // Will be updated asynchronously
         status: 'draft',
         createdAt: serverTimestamp(),
         distance: Math.floor(Math.random() * 5) + 1, // Simulating distance in km
         quoteCount: 0
-      });
+      };
+
+      if (!isOnline) {
+        const offline = localStorage.getItem('offline_prescriptions');
+        const list = offline ? JSON.parse(offline) : [];
+        list.push({ ...prescriptionData, id: 'temp_' + Date.now(), createdAt: new Date().toISOString() });
+        localStorage.setItem('offline_prescriptions', JSON.stringify(list));
+        setHospitalLocation('');
+        setLandmark('');
+        setFacadePhoto(null);
+        setUploading(false);
+        toast.success("Ordonnance enregistrée localement (Hors-ligne).");
+        return;
+      }
+
+      // Add the document immediately to Firestore to show it in the UI
+      const docRef = await addDoc(collection(db, 'prescriptions'), prescriptionData);
 
       setHospitalLocation('');
+      setLandmark('');
+      setFacadePhoto(null);
       setUploading(false);
       toast.success("Ordonnance ajoutée ! Analyse des médicaments en cours...");
 
@@ -3915,6 +4005,49 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                     </div>
                   )}
                 </div>
+
+                {/* Proposition 1: Landmarks & Facade Photo */}
+                <div className="flex flex-col sm:flex-row gap-4 w-full">
+                  <div className="flex-1 flex items-center gap-3 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-all">
+                    <MapPin size={20} className="text-primary shrink-0" />
+                    <input 
+                      type="text" 
+                      placeholder="Point de repère (ex: prês de l'école)" 
+                      value={landmark}
+                      onChange={(e) => setLandmark(e.target.value)}
+                      className="bg-transparent outline-none text-sm w-full font-bold text-slate-700 placeholder:text-slate-400 placeholder:font-normal"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.capture = 'environment';
+                        input.onchange = async (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (file) {
+                             const base64 = await compressImage(file, 600, 600, 0.6);
+                             setFacadePhoto(base64);
+                             toast.success("Photo de façade enregistrée !");
+                          }
+                        };
+                        input.click();
+                      }}
+                      className={`h-12 px-4 rounded-2xl flex items-center gap-2 font-bold text-sm transition-all ${facadePhoto ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-100 border'}`}
+                    >
+                      <Camera size={18} />
+                      {facadePhoto ? "Photo Façade OK" : "Photo Façade (Optionnel)"}
+                    </button>
+                    {facadePhoto && (
+                      <button onClick={() => setFacadePhoto(null)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button 
                     onClick={() => fileInputRef.current?.click()}
@@ -4998,6 +5131,12 @@ const PharmacistPrescriptionCard = React.memo(({
               </span>
             )}
           </div>
+          {p.landmark && (
+            <div className="mt-1 flex items-start gap-1 text-[9px] text-amber-700 bg-amber-50 px-2 py-1 rounded-lg font-medium border border-amber-100/50">
+              <MapPin size={10} className="shrink-0 mt-0.5" />
+              <span className="truncate italic">Repère: {p.landmark}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -5529,6 +5668,8 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
         cityId: selectedPrescription.cityId || profile.cityId || null,
         hospitalLocation: selectedPrescription.hospitalLocation || "Non spécifié",
         patientLocation: selectedPrescription.patientLocation || null,
+        landmark: selectedPrescription.landmark || "",
+        facadePhoto: selectedPrescription.facadePhoto || null,
         pharmacistId: profile.uid,
         pharmacyName: profile.pharmacyName || profile.name,
         pharmacyLocation: profile.pharmacyLocation || "Non spécifiée",
@@ -6073,12 +6214,29 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
                           <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
                         </div>
                       )}
+                      {o.facadePhoto && (
+                        <div 
+                          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-emerald-200 shrink-0 cursor-pointer relative"
+                          onClick={() => setViewImage(o.facadePhoto!)}
+                        >
+                          <img src={o.facadePhoto} className="w-full h-full object-cover" />
+                          <div className="absolute top-0 right-0 bg-emerald-500 text-white p-0.5 rounded-bl-lg">
+                            <Home size={8} />
+                          </div>
+                        </div>
+                      )}
                       <div className="min-w-0">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
                         <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1">
                           <Hospital size={10} className="shrink-0" />
                           <p className="truncate">{o.hospitalLocation}</p>
                         </div>
+                        {o.landmark && (
+                          <div className="flex items-center gap-1 text-[9px] text-amber-600 mb-1 font-medium italic truncate">
+                             <MapPin size={10} className="shrink-0" />
+                             {o.landmark}
+                          </div>
+                        )}
                         <p className="text-xs text-slate-700 font-medium truncate">{o.items?.length || 0} article(s)</p>
                       </div>
                     </div>
