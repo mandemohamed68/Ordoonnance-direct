@@ -98,6 +98,11 @@ export interface Order {
   deliveryPhoto?: string;
   deliverySignature?: string;
   status: 'pending_quote' | 'pending_payment' | 'paid' | 'preparing' | 'ready' | 'delivering' | 'completed' | 'quote_rejected';
+  patientReview?: {
+    rating: number;
+    comment: string;
+    createdAt: any;
+  };
   deliveryMethod?: 'delivery' | 'pickup';
   quoteType?: 'full' | 'partial';
   items?: OrderItem[];
@@ -231,6 +236,7 @@ export interface Notification {
 export interface City {
   id: string;
   name: string;
+  location?: { lat: number; lng: number };
   onCallStartTime: string; // HH:mm
   onCallEndTime: string;   // HH:mm
   status: 'active' | 'suspended';

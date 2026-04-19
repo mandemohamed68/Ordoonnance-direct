@@ -250,3 +250,46 @@ const deg2rad = (deg: number): number => {
   return deg * (Math.PI / 180);
 };
 
+export const BURKINA_CITIES_COORDS: Record<string, { lat: number, lng: number }> = {
+  "Ouagadougou": { lat: 12.3714, lng: -1.5197 },
+  "Bobo-Dioulasso": { lat: 11.1771, lng: -4.2974 },
+  "Koudougou": { lat: 12.25, lng: -2.3667 },
+  "Ouahigouya": { lat: 13.5833, lng: -2.4167 },
+  "Kaya": { lat: 13.0917, lng: -1.0844 },
+  "Banfora": { lat: 10.6333, lng: -4.7667 },
+  "Dédougou": { lat: 12.4667, lng: -3.4667 },
+  "Fada N'Gourma": { lat: 12.0667, lng: 0.3667 },
+  "Tenkodogo": { lat: 11.7833, lng: -0.3667 },
+  "Gaoua": { lat: 10.3333, lng: -3.25 }
+};
+
+/**
+ * Finds the nearest city from a list based on user coordinates.
+ */
+export const findNearestCity = (userLat: number, userLng: number, cities: any[]): any | null => {
+  if (!cities || cities.length === 0) return null;
+  
+  let nearestCity = null;
+  let minDistance = Infinity;
+
+  cities.forEach(city => {
+    let loc = city.location;
+    
+    // Fallback to hardcoded coords if not in city object
+    if (!loc && BURKINA_CITIES_COORDS[city.name]) {
+      loc = BURKINA_CITIES_COORDS[city.name];
+    }
+
+    if (loc) {
+      const dist = calculateDistance(userLat, userLng, loc.lat, loc.lng);
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearestCity = city;
+      }
+    }
+  });
+
+  // Threshold of 100km for auto-match in Burkina
+  return minDistance < 100 ? nearestCity : null;
+};
+

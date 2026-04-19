@@ -219,31 +219,10 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      // 1. Owner can always read their own profile
-      allow read: if isOwner(userId) || isAdmin();
-      
-      // 2. Pharmacists and delivery persons can read profiles for order fulfillment
-      allow read: if isAuthenticated() && (hasRole('pharmacist') || hasRole('delivery'));
-      
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                    request.resource.data.uid == request.auth.uid && 
-                    (
-                      request.resource.data.status == 'pending' || 
-                      (request.resource.data.status == 'active' && (request.resource.data.role == 'patient' || isAdmin()))
-                    ) && 
-                    (request.resource.data.role != 'admin' || isAdmin()) && 
-                    (request.resource.data.role != 'super-admin' || isPrimaryAdmin());
-      
-      allow update: if (isAdmin() && (request.resource.data.role == resource.data.role || isPrimaryAdmin()) && isValidUser(request.resource.data)) || 
-                    (isOwner(userId) && isValidUser(request.resource.data) && 
-                     request.resource.data.uid == resource.data.uid && 
-                     request.resource.data.role == resource.data.role && 
-                     (
-                       request.resource.data.status == resource.data.status || 
-                       (resource.data.role == 'patient' && resource.data.status == 'pending' && request.resource.data.status == 'active')
-                     )
-                    );
-      allow delete: if isPrimaryAdmin() || (isAdmin() && resource.data.role != 'super-admin' && resource.data.email != "mandemohamed68@gmail.com");
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if (isAdmin() || isOwner(userId)) && isValidUser(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /pharmacies/{pharmacyId} {
@@ -291,7 +270,7 @@ service cloud.firestore {
         ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'items', 'totalAmount', 'updatedAt', 'pharmacistId', 'pharmacistName', 'pharmacyName', 'pharmacyLocation', 'isHandedOver', 'history', 'unreadCounts'])) ||
         (hasRole('delivery') && (
           resource.data.deliveryId == request.auth.uid || !('deliveryId' in resource.data)
-        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'deliveryId', 'deliveryPersonName', 'deliveryPersonPhone', 'deliveryPersonPhoto', 'pickupCode', 'deliveryCode', 'isHandedOver', 'history', 'rejectedBy', 'deliveryLocation', 'unreadCounts']))
+        ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'deliveryId', 'deliveryPersonName', 'deliveryPersonPhone', 'deliveryPersonPhoto', 'pickupCode', 'deliveryCode', 'isHandedOver', 'history', 'rejectedBy', 'deliveryLocation', 'driverLocation', 'unreadCounts']))
       );
       allow delete: if isAdmin();
     }

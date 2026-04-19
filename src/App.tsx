@@ -94,7 +94,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance } from './utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance, findNearestCity } from './utils/shared';
 import { Capacitor } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import jsPDF from 'jspdf';
@@ -367,6 +367,16 @@ function MapComponent({ center, markers, zoom = 13 }: { center: [number, number]
   const [route, setRoute] = useState<[number, number][]>([]);
   const [eta, setEta] = useState<number | null>(null);
 
+  // Memoize icons to prevent memory leaks and redundant object creation
+  const markerIcon = useRef(L.icon({
+    iconUrl: icon,
+    shadowUrl: iconShadow,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  }));
+
   useEffect(() => {
     // If we have exactly 2 markers (e.g., delivery and patient/pharmacy), calculate route
     if (markers.length === 2 || markers.length === 3) {
@@ -418,16 +428,9 @@ function MapComponent({ center, markers, zoom = 13 }: { center: [number, number]
         {route.length > 0 && <Polyline positions={route} color="#10b981" weight={4} dashArray="10, 10" />}
         {markers.map((marker, idx) => (
           <Marker 
-            key={idx} 
+            key={`${marker.pos[0]}-${marker.pos[1]}-${idx}`} 
             position={marker.pos}
-            icon={L.icon({
-              iconUrl: icon,
-              shadowUrl: iconShadow,
-              iconSize: [25, 41],
-              iconAnchor: [12, 41],
-              popupAnchor: [1, -34],
-              shadowSize: [41, 41]
-            })}
+            icon={markerIcon.current}
           >
             <Popup>
               <div className="font-bold">{marker.label}</div>
@@ -457,7 +460,7 @@ const calculateDeliveryFee = (settings: Settings | null) => {
   return isNight ? settings.nightDeliveryFee : settings.dayDeliveryFee;
 };
 
-function StatusTrace({ history, defaultExpanded = false }: { history?: Order['history'], defaultExpanded?: boolean }) {
+const StatusTrace = React.memo(({ history, defaultExpanded = false }: { history?: Order['history'], defaultExpanded?: boolean }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   
   if (!history || history.length === 0) return null;
@@ -513,9 +516,9 @@ function StatusTrace({ history, defaultExpanded = false }: { history?: Order['hi
       </AnimatePresence>
     </div>
   );
-}
+});
 
-const LogoIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
+const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
     <img 
       src="/logo192.png" 
@@ -524,11 +527,14 @@ const LogoIcon = ({ size = 24, className = "" }: { size?: number, className?: st
       onError={(e) => {
         // Fallback to old cross icon if image is missing
         e.currentTarget.style.display = 'none';
-        e.currentTarget.parentElement!.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="${className}"><rect width="100" height="100" rx="24" fill="#10b981" /><path d="M35 25C35 22.2386 37.2386 20 40 20H60C62.7614 20 65 22.2386 65 25V75C65 77.7614 62.7614 80 60 80H40C37.2386 80 35 77.7614 35 75V25Z" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M42 20V25H58V20" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M30 50H70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M50 30V70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M35 75V85H65L75 75" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M65 85L75 75L65 65" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/></svg>`;
+        const svg = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="${className}"><rect width="100" height="100" rx="24" fill="#10b981" /><path d="M35 25C35 22.2386 37.2386 20 40 20H60C62.7614 20 65 22.2386 65 25V75C65 77.7614 62.7614 80 60 80H40C37.2386 80 35 77.7614 35 75V25Z" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M42 20V25H58V20" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M30 50H70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M50 30V70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M35 75V85H65L75 75" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M65 85L75 75L65 65" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/></svg>`;
+        if (e.currentTarget.parentElement) {
+          e.currentTarget.parentElement.innerHTML = svg;
+        }
       }}
     />
   </div>
-);
+));
 
 function NotificationBell({ userId }: { userId: string }) {
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -699,6 +705,8 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [cities, setCities] = useState<City[]>([]);
+  const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   
   // Failsafe timeout to prevent infinite loading screen
   useEffect(() => {
@@ -724,7 +732,8 @@ export default function App() {
     if (!user) return;
     const q = query(
       collection(db, 'support_messages'),
-      where('chatId', '==', user.uid)
+      where('chatId', '==', user.uid),
+      limit(100)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -894,15 +903,14 @@ export default function App() {
           if (activeRole === 'delivery') {
             const q = query(
               collection(db, 'orders'), 
-              where('deliveryId', '==', profile.uid)
+              where('deliveryId', '==', profile.uid),
+              where('status', '==', 'delivering')
             );
             const activeOrdersSnap = await getDocs(q);
             activeOrdersSnap.forEach(async (orderDoc) => {
-              if (orderDoc.data().status === 'delivering') {
-                await updateDoc(doc(db, 'orders', orderDoc.id), {
-                  deliveryLocation: newLoc
-                });
-              }
+              await updateDoc(doc(db, 'orders', orderDoc.id), {
+                driverLocation: newLoc
+              });
             });
           }
         } catch (err) {
@@ -1076,6 +1084,22 @@ export default function App() {
     });
     return () => unsubscribe();
   }, [isAuthReady, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
+      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+    });
+    const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
+      if (docSnap.exists()) {
+        setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
+      }
+    });
+    return () => {
+      unsubCities();
+      unsubRotation();
+    };
+  }, [user]);
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
@@ -1490,17 +1514,17 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 py-0 relative z-10">
         {(activeRole === 'patient') && (
           <ErrorBoundary>
-            <PatientDashboard profile={effectiveProfile!} settings={settings} location={location} />
+            <PatientDashboard profile={effectiveProfile!} settings={settings} location={location} cities={cities} rotation={rotation} />
           </ErrorBoundary>
         )}
         {(activeRole === 'pharmacist') && (
           <ErrorBoundary>
-            <PharmacistDashboard profile={effectiveProfile!} settings={settings} />
+            <PharmacistDashboard profile={effectiveProfile!} settings={settings} cities={cities} rotation={rotation} />
           </ErrorBoundary>
         )}
         {(activeRole === 'delivery') && (
           <ErrorBoundary>
-            <DeliveryDashboard profile={effectiveProfile!} settings={settings} />
+            <DeliveryDashboard profile={effectiveProfile!} settings={settings} cities={cities} />
           </ErrorBoundary>
         )}
         {(activeRole === 'admin' || activeRole === 'super-admin') && (
@@ -1821,6 +1845,18 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
   const [password, setPassword] = useState('');
   const [isSignup, setIsSignup] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+
+  // Load saved credentials on mount
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('remembered_email');
+    const savedPassword = localStorage.getItem('remembered_password');
+    if (savedEmail && savedPassword) {
+      setEmail(savedEmail);
+      setPassword(savedPassword);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1837,6 +1873,16 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
         toast.success("Compte créé avec succès !");
       } else {
         await signInWithEmailAndPassword(auth, email, password);
+        
+        // Handle Remember Me
+        if (rememberMe) {
+          localStorage.setItem('remembered_email', email);
+          localStorage.setItem('remembered_password', password);
+        } else {
+          localStorage.removeItem('remembered_email');
+          localStorage.removeItem('remembered_password');
+        }
+        
         toast.success("Connexion réussie !");
       }
     } catch (error: any) {
@@ -1938,7 +1984,19 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
               required
             />
             {!isSignup && (
-              <div className="flex justify-end mt-2">
+              <div className="flex items-center justify-between mt-2">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${rememberMe ? 'bg-emerald-500 border-emerald-500' : 'border-white/20 hover:border-white/40'}`}>
+                    <input 
+                      type="checkbox" 
+                      className="hidden" 
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                    />
+                    {rememberMe && <CheckCircle size={14} className="text-white" />}
+                  </div>
+                  <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors">Se souvenir de moi</span>
+                </label>
                 <button 
                   type="button" 
                   onClick={handleResetPassword}
@@ -2403,9 +2461,428 @@ const analyzeWithGemini = async (options: { image?: string, text?: string, promp
   }
 };
 
+const PatientPrescriptionCard = React.memo(({ 
+  p, 
+  orders, 
+  onViewImage, 
+  onRequestQuote, 
+  onShowPartialSelect 
+}: { 
+  p: Prescription, 
+  orders: Order[], 
+  onViewImage: (url: string) => void, 
+  onRequestQuote: (p: Prescription, type: 'all' | 'partial') => void, 
+  onShowPartialSelect: (p: Prescription) => void 
+}) => {
+  const isCompleted = orders.some(o => o.prescriptionId === p.id && o.status === 'completed');
+  if (isCompleted) return null;
+
+  return (
+    <motion.div 
+      layout
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group"
+    >
+      <div className="flex gap-3 sm:gap-4">
+        <div 
+          className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
+          onClick={() => onViewImage(p.imageUrl)}
+        >
+          {p.imageUrl ? (
+            <>
+              <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500" loading="lazy" />
+              <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
+                <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                  <Search className="text-white" size={16} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100/50 text-slate-400">
+              <Camera size={24} />
+              <span className="text-[10px] font-bold mt-1 uppercase">Saisie</span>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex-1 min-w-0 py-0.5 flex flex-col justify-between">
+          <div className="space-y-1">
+            <div className="flex justify-between items-start">
+              <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-black uppercase tracking-tighter">#{p.id.slice(-4).toUpperCase()}</span>
+              <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}</span>
+            </div>
+            <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate pr-2 mt-1">{p.hospitalLocation || "Ordonnance externe"}</h4>
+          </div>
+          
+          <div className="mt-2">
+            {(() => {
+              const displayStatus = p.status as string;
+              return (
+                <span className={`text-[9px] px-2 py-0.5 rounded-lg font-black uppercase tracking-widest ${
+                  displayStatus === 'draft' ? 'bg-indigo-50 text-indigo-500' :
+                  displayStatus === 'submitted' ? 'bg-amber-50 text-amber-600' :
+                  displayStatus === 'validated' ? 'bg-emerald-50 text-emerald-600' :
+                  displayStatus === 'preparing' ? 'bg-indigo-500 text-white shadow-sm shadow-indigo-200' :
+                  displayStatus === 'ready' ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-200' :
+                  displayStatus === 'delivering' ? 'bg-sky-500 text-white shadow-sm shadow-sky-200' :
+                  displayStatus === 'completed' ? 'bg-slate-500 text-white shadow-sm shadow-slate-200' :
+                  'bg-rose-50 text-rose-500'
+                }`}>
+                  {displayStatus === 'draft' ? 'Analyse reçue' :
+                   displayStatus === 'submitted' ? 'En recherche' :
+                   displayStatus === 'validated' ? 'Prête' :
+                   displayStatus === 'preparing' ? 'Préparation' :
+                   displayStatus === 'ready' ? 'Prête' :
+                   displayStatus === 'delivering' ? 'En livraison' :
+                   displayStatus === 'completed' ? 'Livrée' :
+                   displayStatus === 'rejected_by_limit' ? 'Rejetée (Limite)' : 'Refusée'}
+                </span>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {!p.extractedData && p.status === 'draft' && (
+        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
+          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse en cours...</p>
+        </div>
+      )}
+
+      {p.extractedData && (
+        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
+            Médicaments
+            {p.requestType === 'partial' && <span className="text-primary italic flex items-center gap-1"><Plus size={10} /> Partiel</span>}
+          </p>
+          <div className="space-y-1.5 overflow-hidden">
+            {(() => {
+              try {
+                const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
+                if (!jsonStr) return null;
+                const parsed = JSON.parse(jsonStr);
+                const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+                const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
+
+                return displayMeds.slice(0, 3).map((m: any, i: number) => {
+                  const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-[10px] sm:text-xs">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0"></div>
+                      <span className="font-bold text-slate-700 truncate">{name}</span>
+                    </div>
+                  );
+                });
+              } catch (e) { return null; }
+            })()}
+          </div>
+        </div>
+      )}
+
+      {p.status === 'draft' && p.extractedData && (
+        <div className="flex gap-3 mt-1">
+          <button 
+            onClick={() => onRequestQuote(p, 'all')} 
+            className="flex-1 bg-primary text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-primary/90 transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+          >
+            <CheckCircle size={14} />
+            Complet
+          </button>
+          <button 
+            onClick={() => onShowPartialSelect(p)} 
+            className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2"
+          >
+            <Plus size={14} />
+            Partiel
+          </button>
+        </div>
+      )}
+    </motion.div>
+  );
+});
+
+const PatientOrderCard = React.memo(({ 
+  o, 
+  settings, 
+  profile, 
+  onChat, 
+  onViewImage, 
+  onApproveQuote, 
+  onSelectDeliveryMethod, 
+  onShowMap 
+}: { 
+  o: Order, 
+  settings: Settings | null, 
+  profile: UserProfile, 
+  onChat: (id: string) => void, 
+  onViewImage: (url: string) => void, 
+  onApproveQuote: (o: Order) => void, 
+  onSelectDeliveryMethod: (id: string, method: 'pickup' | 'delivery') => void, 
+  onShowMap: (o: Order) => void 
+}) => {
+  return (
+    <motion.div 
+      layout
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all duration-300 group"
+    >
+      <div className="flex flex-col md:flex-row h-full">
+        {/* Left Summary Pane */}
+        <div className="md:w-64 bg-slate-50/50 p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
+                <Package size={18} className="text-primary" />
+              </div>
+              <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
+                o.status === 'ready' || o.status === 'delivering' ? 'bg-emerald-500 text-white shadow-sm' : 
+                o.status === 'pending_payment' ? 'bg-rose-500 text-white shadow-sm' : 
+                'bg-slate-900 text-white'
+              }`}>
+                {o.status === 'pending_quote' ? 'En attente' : 
+                 o.status === 'pending_payment' ? 'A Payer' : 
+                 o.status === 'paid' ? 'Payé' :
+                 o.status === 'preparing' ? 'Prépa' :
+                 o.status === 'ready' ? 'Prêt' :
+                 o.status === 'delivering' ? 'En livraison' : o.status}
+              </span>
+            </div>
+            <h4 className="text-base font-black text-slate-900 leading-tight">#{o.id.slice(-6).toUpperCase()}</h4>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Créée le {formatDate(o.createdAt, 'dateTime')}</p>
+            
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-2 text-xs text-slate-600 font-bold">
+                <Building2 size={14} className="text-slate-400" />
+                <span className="truncate">{o.pharmacyName || 'Pharmacie en attente'}</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-100">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
+                <span className="text-sm font-black text-primary">{(o.totalAmount || 0).toLocaleString()} F</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 md:mt-2 flex gap-2">
+            <button 
+              onClick={() => onChat(o.id)}
+              className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
+            >
+              <MessageCircle size={14} /> Chat
+            </button>
+            {o.prescriptionImageUrl && (
+              <button 
+                onClick={() => onViewImage(o.prescriptionImageUrl!)}
+                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform"
+              >
+                <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" loading="lazy" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Right Tracking Pane */}
+        <div className="flex-1 p-5 flex flex-col justify-center">
+          {/* Horizontal Minimal Stepper */}
+          <div className="relative mb-6 px-2">
+            <div className="absolute top-[14px] left-0 w-full h-[2px] bg-slate-100 rounded-full"></div>
+            <div 
+              className="absolute top-[14px] left-0 h-[2px] bg-primary rounded-full transition-all duration-1000"
+              style={{ 
+                width: (() => {
+                  const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+                  const idx = stepsArr.indexOf(o.status);
+                  if (idx < 4) return '0%';
+                  if (idx === 4) return '25%';
+                  if (idx === 5) return '50%';
+                  if (idx === 6) return '75%';
+                  return '100%';
+                })()
+              }}
+            ></div>
+            <div className="flex justify-between relative z-10">
+              {[
+                { label: 'Payé', status: 'paid', icon: CreditCard },
+                { label: 'Prépa', status: 'preparing', icon: FlaskConical },
+                { label: 'Prêt', status: 'ready', icon: CheckCircle2 },
+                { label: 'Livré', status: 'completed', icon: Home },
+              ].map((s, idx) => {
+                const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+                const currentStepIdx = stepsArr.indexOf(o.status);
+                const targetStepIdx = stepsArr.indexOf(s.status);
+                const isDone = currentStepIdx >= targetStepIdx && targetStepIdx !== -1;
+                const isActive = o.status === s.status;
+                
+                return (
+                  <div key={s.label} className="flex flex-col items-center gap-2">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-500 scale-100 ${
+                      isDone ? 'bg-primary text-white shadow-sm' : 'bg-white border text-slate-200'
+                    } ${isActive ? 'ring-2 ring-primary/20 scale-110' : ''}`}>
+                      <s.icon size={12} />
+                    </div>
+                    <span className={`text-[9px] font-black uppercase tracking-tight ${isDone ? 'text-slate-900' : 'text-slate-300'}`}>
+                      {s.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {o.status === 'completed' && (
+              <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-black text-slate-900">Commande terminée</p>
+                    <p className="text-xs text-slate-500 font-medium">Votre santé est notre priorité.</p>
+                  </div>
+                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+                    <CheckCircle size={20} />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => generateInvoice(o, profile)}
+                    className="flex-1 bg-slate-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                  >
+                    <FileText size={14} /> Facture PDF
+                  </button>
+                  {o.deliveryPhoto && (
+                    <button 
+                      onClick={() => onViewImage(o.deliveryPhoto!)}
+                      className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform shrink-0"
+                    >
+                      <img src={o.deliveryPhoto} className="w-full h-full object-cover" loading="lazy" />
+                    </button>
+                  )}
+                  {o.deliverySignature && (
+                    <button 
+                      onClick={() => onViewImage(o.deliverySignature!)}
+                      className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 hover:scale-105 transition-transform shrink-0"
+                    >
+                      <img src={o.deliverySignature} className="max-h-full object-contain" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {o.status === 'pending_payment' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-primary/5 border border-primary/10 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
+              >
+                <div className="text-center sm:text-left">
+                  <p className="text-sm font-black text-slate-900">Devis disponible !</p>
+                  <p className="text-xs text-slate-500">Validez et payez pour lancer la préparation.</p>
+                </div>
+                <button 
+                  onClick={() => onApproveQuote(o)}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-primary text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-sm hover:scale-105 transition-all"
+                >
+                  Payer {(o.totalAmount || 0).toLocaleString()} F
+                </button>
+              </motion.div>
+            )}
+
+            {o.status === 'pending_quote' && !o.deliveryMethod && (
+              <div className="bg-amber-50/50 border border-amber-100 p-5 rounded-2xl space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-amber-600 shadow-sm shrink-0 border border-amber-100/50">
+                    <Package size={24} />
+                  </div>
+                  <div>
+                    <h5 className="text-sm font-black text-slate-900 tracking-tight">Comment recevoir ?</h5>
+                    <p className="text-xs text-slate-500 font-medium leading-relaxed">Choisissez pour passer au paiement.</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => onSelectDeliveryMethod(o.id, 'pickup')}
+                    className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-primary hover:bg-primary/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
+                  >
+                    <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                      <Store size={16} />
+                    </div>
+                    <div>
+                      <p className="font-black text-xs text-slate-900 group-hover:text-primary transition-colors">Sur place</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Gratuit</p>
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={() => onSelectDeliveryMethod(o.id, 'delivery')}
+                    className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-orange-500 hover:bg-orange-500/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
+                  >
+                    <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-orange-500/10 group-hover:text-orange-500 transition-all">
+                      <Truck size={16} />
+                    </div>
+                    <div>
+                      <p className="font-black text-xs text-slate-900 group-hover:text-orange-500 transition-colors">Livraison</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{calculateDeliveryFee(settings)} F</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
+              <div className="bg-slate-900 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 backdrop-blur-md">
+                    <QrCode size={24} className="text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-0.5">Code de securité</p>
+                    <p className="text-2xl font-black tracking-widest">#{o.deliveryCode}</p>
+                  </div>
+                </div>
+                {o.status === 'delivering' && o.deliveryId && (
+                  <div className="flex items-center gap-3 bg-white/5 p-2 pr-3 rounded-xl border border-white/10">
+                    <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/20 shrink-0 bg-white/10 flex items-center justify-center">
+                      {o.deliveryPersonPhoto ? <img src={o.deliveryPersonPhoto} className="w-full h-full object-cover" /> : <User size={16} />}
+                    </div>
+                    <div className="hidden sm:block">
+                      <p className="text-[8px] font-black text-white/40 uppercase tracking-widest leading-none mb-0.5">Coursier</p>
+                      <p className="text-[10px] font-black truncate max-w-[80px]">{o.deliveryPersonName}</p>
+                    </div>
+                    <button onClick={() => onShowMap(o)} className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white hover:bg-primary/80 transition-all shrink-0">
+                      <MapPin size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-50">
+            <details className="group">
+              <summary className="list-none flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Historique du statut</span>
+                  <div className="h-[1px] w-8 bg-slate-100"></div>
+                </div>
+                <ChevronDown size={14} className="text-slate-400 group-open:rotate-180 transition-transform" />
+              </summary>
+              <div className="mt-4">
+                <StatusTrace history={o.history} />
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+
 // --- Patient Dashboard ---
 
-const PatientDashboard = React.memo(({ profile, settings, location }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null }) => {
+const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
@@ -2428,15 +2905,27 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
   const [paymentInvoiceId, setPaymentInvoiceId] = useState('');
   const [showMapForOrder, setShowMapForOrder] = useState<Order | null>(null);
   const [pharmacySearch, setPharmacySearch] = useState('');
-  const [cities, setCities] = useState<City[]>([]);
   const [showManualEntryModal, setShowManualEntryModal] = useState(false);
   const [manualEntryText, setManualEntryText] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
   const [patientCityId, setPatientCityId] = useState(profile.cityId || '');
   const [isLocating, setIsLocating] = useState(false);
+
+  // Auto-detect city from location prop if cityId is missing
+  useEffect(() => {
+    if (!patientCityId && location && cities.length > 0) {
+      const nearest = findNearestCity(location.lat, location.lng, cities);
+      if (nearest) {
+        setPatientCityId(nearest.id);
+        // Silently update profile if it's the first time
+        if (!profile.cityId) {
+          updateDoc(doc(db, 'users', profile.uid), { cityId: nearest.id }).catch(console.error);
+        }
+      }
+    }
+  }, [location, cities, patientCityId, profile.cityId, profile.uid]);
 
   const autoDetectCity = () => {
     if (!navigator.geolocation) {
@@ -2494,18 +2983,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
   };
 
   useEffect(() => {
-    const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
-      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
-    });
-    const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
-      if (docSnap.exists()) {
-        setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
-      }
-    });
-    return () => {
-      unsubCities();
-      unsubRotation();
-    };
+    // Shared Cities and Rotation are now provided as props from App level
   }, []);
 
   const handleDeletePrescription = async (id: string) => {
@@ -2643,7 +3121,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
   }, [profile.uid]);
 
   useEffect(() => {
-    const q = query(collection(db, 'pharmacies'));
+    const q = query(collection(db, 'pharmacies'), limit(100));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPharmacies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Pharmacy)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'pharmacies'));
@@ -2655,20 +3133,27 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       toast.error("Veuillez entrer les médicaments.");
       return;
     }
-    if (!patientCityId) {
+
+    let finalCityId = patientCityId;
+    if (!finalCityId && location && cities.length > 0) {
+      const nearest = findNearestCity(location.lat, location.lng, cities);
+      if (nearest) finalCityId = nearest.id;
+    }
+
+    if (!finalCityId) {
       toast.error("Veuillez sélectionner votre ville avant d'envoyer.");
       return;
     }
 
     setUploading(true);
     try {
-      if (patientCityId !== profile.cityId) {
-        await updateDoc(doc(db, 'users', profile.uid), { cityId: patientCityId }).catch(console.error);
+      if (finalCityId !== profile.cityId) {
+        await updateDoc(doc(db, 'users', profile.uid), { cityId: finalCityId }).catch(console.error);
       }
       const docRef = await addDoc(collection(db, 'prescriptions'), {
         patientId: profile.uid,
         patientName: profile.name,
-        cityId: patientCityId,
+        cityId: finalCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location,
         extractedData: "",
@@ -2825,15 +3310,21 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!patientCityId) {
+    let finalCityId = patientCityId;
+    if (!finalCityId && location && cities.length > 0) {
+      const nearest = findNearestCity(location.lat, location.lng, cities);
+      if (nearest) finalCityId = nearest.id;
+    }
+
+    if (!finalCityId) {
       toast.error("Veuillez sélectionner votre ville avant d'envoyer.");
       return;
     }
 
     setUploading(true);
     try {
-      if (patientCityId !== profile.cityId) {
-        await updateDoc(doc(db, 'users', profile.uid), { cityId: patientCityId }).catch(console.error);
+      if (finalCityId !== profile.cityId) {
+        await updateDoc(doc(db, 'users', profile.uid), { cityId: finalCityId }).catch(console.error);
       }
 
       // Use a slightly smaller image for faster processing and to stay well within Firestore limits
@@ -2843,7 +3334,7 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
       const docRef = await addDoc(collection(db, 'prescriptions'), {
         patientId: profile.uid,
         patientName: profile.name,
-        cityId: patientCityId,
+        cityId: finalCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location, // Real-time location of the patient
         imageUrl: base64,
@@ -3513,174 +4004,14 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
                 {prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed')).map(p => (
-                  <motion.div 
+                  <PatientPrescriptionCard 
                     key={p.id} 
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group"
-                  >
-                    <div className="flex gap-3 sm:gap-4">
-                      <div 
-                        className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
-                        onClick={() => setViewImage(p.imageUrl)}
-                      >
-                        {p.imageUrl ? (
-                          <>
-                            <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500" />
-                            <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
-                              <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
-                                <Search className="text-white" size={16} />
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100/50 text-slate-400">
-                            <FileText size={24} strokeWidth={1} className="mb-1 opacity-20" />
-                            <p className="text-[8px] font-black uppercase tracking-widest opacity-40 text-center leading-tight">Saisie<br/>Manuelle</p>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0 flex flex-col">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <span className="text-[10px] font-black text-primary bg-primary/5 px-2 py-1 rounded-lg">#{p.id.slice(-4).toUpperCase()}</span>
-                            <p className="text-[10px] text-slate-400 font-bold mt-1">{formatDate(p.createdAt, 'date')}</p>
-                          </div>
-                          
-                          {(() => {
-                            const associatedOrder = orders.find(o => o.prescriptionId === p.id);
-                            const isPaid = associatedOrder && ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(associatedOrder.status);
-                            if (!isPaid) {
-                              return (
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); handleDeletePrescription(p.id); }}
-                                  className="w-7 h-7 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shadow-sm"
-                                  title="Supprimer l'ordonnance"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-
-                        <div className="mt-auto">
-                          {(() => {
-                            const associatedOrder = orders.find(o => o.prescriptionId === p.id);
-                            const displayStatus = associatedOrder ? associatedOrder.status : p.status;
-                            return (
-                              <span className={`inline-block text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl ${
-                                displayStatus === 'draft' ? 'bg-slate-100 text-slate-600' : 
-                                displayStatus === 'submitted' ? 'bg-amber-100 text-amber-700' : 
-                                displayStatus === 'validated' || displayStatus === 'pending_quote' || displayStatus === 'pending_payment' ? 'bg-emerald-100 text-emerald-700' : 
-                                ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(displayStatus) ? 'bg-blue-100 text-blue-700' :
-                                'bg-rose-100 text-rose-700'
-                              }`}>
-                                {displayStatus === 'draft' ? 'Brouillon' : 
-                                 displayStatus === 'submitted' ? (p.requestType === 'partial' ? 'Analyse (Partiel)' : 'Analyse en cours') : 
-                                 displayStatus === 'validated' || displayStatus === 'pending_quote' ? 'Devis Établi' : 
-                                 displayStatus === 'pending_payment' ? 'Attente Paiement' :
-                                 displayStatus === 'paid' ? 'Payée' :
-                                 displayStatus === 'preparing' ? 'En préparation' :
-                                 displayStatus === 'ready' ? 'Prête' :
-                                 displayStatus === 'delivering' ? 'En livraison' :
-                                 displayStatus === 'completed' ? 'Livrée' :
-                                 displayStatus === 'rejected_by_limit' ? 'Rejetée (Limite)' : 'Refusée'}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    </div>
-
-                    {!p.extractedData && p.status === 'draft' && (
-                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
-                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse en cours...</p>
-                      </div>
-                    )}
-
-                    {p.extractedData && (
-                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
-                          Médicaments
-                          {p.requestType === 'partial' && <span className="text-primary italic flex items-center gap-1"><Plus size={10} /> Partiel</span>}
-                        </p>
-                        <div className="space-y-1.5">
-                          {(() => {
-                            try {
-                              const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                              if (!jsonStr) return null;
-                              let parsed;
-                              try {
-                                parsed = JSON.parse(jsonStr);
-                              } catch (e) {
-                                console.warn("AI medication parse error:", e);
-                                return null;
-                              }
-                              const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
-                              const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
-
-                              return displayMeds.map((m: any, i: number) => {
-                                const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
-                                const dosage = typeof m === 'object' ? m.dosage : '';
-                                const posology = typeof m === 'object' ? m.posologie : '';
-                                return (
-                                  <div key={i} className="flex items-center gap-2 text-xs">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0"></div>
-                                    <span className="font-bold text-slate-700 truncate">{name}</span>
-                                    {(dosage || posology) && <span className="text-slate-400 truncate text-[10px] ml-auto">{dosage}{dosage && posology ? ' • ' : ''}{posology}</span>}
-                                  </div>
-                                );
-                              });
-                            } catch (e) { return null; }
-                          })()}
-                        </div>
-                      </div>
-                    )}
-
-                    {p.status === 'draft' && p.extractedData && (
-                      <div className="flex gap-3 mt-1">
-                        <button 
-                          onClick={() => handleRequestQuote(p, 'all')} 
-                          className="flex-1 bg-primary text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-primary/90 transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
-                        >
-                          <CheckCircle size={14} />
-                          Complet
-                        </button>
-                        <button 
-                          onClick={() => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
-                          className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2"
-                        >
-                          <Plus size={14} />
-                          Partiel
-                        </button>
-                      </div>
-                    )}
-                    
-                    {p.status === 'rejected_by_limit' && (
-                      <div className="p-2.5 bg-rose-50 rounded-xl border border-rose-100 mt-1">
-                        <p className="text-[10px] text-rose-700 font-bold leading-relaxed text-center">Rejetée par 5 pharmacies. Contactez le support.</p>
-                      </div>
-                    )}
-                    
-                    {p.status === 'submitted' && (
-                      <div className="flex items-center gap-2 p-2.5 bg-amber-50 rounded-xl border border-amber-100 mt-1">
-                        <Clock size={14} className="text-amber-500 shrink-0" />
-                        <p className="text-[10px] text-amber-700 font-bold leading-tight">En attente d'un devis des pharmacies.</p>
-                      </div>
-                    )}
-                    
-                    {p.status === 'validated' && (
-                      <div className="flex items-center gap-2 p-2.5 bg-emerald-50 rounded-xl border border-emerald-100 mt-1">
-                        <CheckCircle size={14} className="text-emerald-500 shrink-0" />
-                        <p className="text-[10px] text-emerald-700 font-bold leading-tight">Prête pour commande.</p>
-                      </div>
-                    )}
-                  </motion.div>
+                    p={p} 
+                    orders={orders} 
+                    onViewImage={setViewImage} 
+                    onRequestQuote={handleRequestQuote} 
+                    onShowPartialSelect={(p) => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
+                  />
                 ))}
               </div>
             )}
@@ -3716,224 +4047,17 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                   ) : (
                     <div className="grid grid-cols-1 gap-6">
                       {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').map(o => (
-                        <motion.div 
-                          key={o.id}
-                          layout
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all duration-300 group"
-                        >
-                          <div className="flex flex-col md:flex-row h-full">
-                            {/* Left Summary Pane */}
-                            <div className="md:w-64 bg-slate-50/50 p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between">
-                              <div>
-                                <div className="flex items-center justify-between mb-3">
-                                  <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
-                                    <Package size={18} className="text-primary" />
-                                  </div>
-                                  <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
-                                    o.status === 'ready' || o.status === 'delivering' ? 'bg-emerald-500 text-white shadow-sm' : 
-                                    o.status === 'pending_payment' ? 'bg-rose-500 text-white shadow-sm' : 
-                                    'bg-slate-900 text-white'
-                                  }`}>
-                                    {o.status === 'pending_quote' ? 'En attente' : 
-                                     o.status === 'pending_payment' ? 'A Payer' : 
-                                     o.status === 'paid' ? 'Payé' :
-                                     o.status === 'preparing' ? 'Prépa' :
-                                     o.status === 'ready' ? 'Prêt' :
-                                     o.status === 'delivering' ? 'En livraison' : o.status}
-                                  </span>
-                                </div>
-                                <h4 className="text-base font-black text-slate-900 leading-tight">#{o.id.slice(-6).toUpperCase()}</h4>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Créée le {formatDate(o.createdAt, 'dateTime')}</p>
-                                
-                                <div className="mt-4 space-y-2">
-                                  <div className="flex items-center gap-2 text-xs text-slate-600 font-bold">
-                                    <Building2 size={14} className="text-slate-400" />
-                                    <span className="truncate">{o.pharmacyName || 'Pharmacie en attente'}</span>
-                                  </div>
-                                  <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-100">
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
-                                    <span className="text-sm font-black text-primary">{(o.totalAmount || 0).toLocaleString()} F</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="mt-4 md:mt-2 flex gap-2">
-                                <button 
-                                  onClick={() => setActiveChatOrderId(o.id)}
-                                  className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
-                                >
-                                  <MessageCircle size={14} /> Chat
-                                </button>
-                                {o.prescriptionImageUrl && (
-                                  <button 
-                                    onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                                    className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform"
-                                  >
-                                    <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Right Tracking Pane */}
-                            <div className="flex-1 p-5 flex flex-col justify-center">
-                              {/* Horizontal Minimal Stepper */}
-                              <div className="relative mb-6 px-2">
-                                <div className="absolute top-[14px] left-0 w-full h-[2px] bg-slate-100 rounded-full"></div>
-                                <div 
-                                  className="absolute top-[14px] left-0 h-[2px] bg-primary rounded-full transition-all duration-1000"
-                                  style={{ 
-                                    width: (() => {
-                                      const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
-                                      const idx = stepsArr.indexOf(o.status);
-                                      if (idx < 4) return '0%';
-                                      if (idx === 4) return '25%';
-                                      if (idx === 5) return '50%';
-                                      if (idx === 6) return '75%';
-                                      return '100%';
-                                    })()
-                                  }}
-                                ></div>
-                                <div className="flex justify-between relative z-10">
-                                  {[
-                                    { label: 'Payé', status: 'paid', icon: CreditCard },
-                                    { label: 'Prépa', status: 'preparing', icon: FlaskConical },
-                                    { label: 'Prêt', status: 'ready', icon: CheckCircle2 },
-                                    { label: 'Livré', status: 'completed', icon: Home },
-                                  ].map((s, idx) => {
-                                    const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
-                                    const currentStepIdx = stepsArr.indexOf(o.status);
-                                    const targetStepIdx = stepsArr.indexOf(s.status);
-                                    const isDone = currentStepIdx >= targetStepIdx && targetStepIdx !== -1;
-                                    const isActive = o.status === s.status;
-                                    
-                                    return (
-                                      <div key={s.label} className="flex flex-col items-center gap-2">
-                                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-500 scale-100 ${
-                                          isDone ? 'bg-primary text-white shadow-sm' : 'bg-white border text-slate-200'
-                                        } ${isActive ? 'ring-2 ring-primary/20 scale-110' : ''}`}>
-                                          <s.icon size={12} />
-                                        </div>
-                                        <span className={`text-[9px] font-black uppercase tracking-tight ${isDone ? 'text-slate-900' : 'text-slate-300'}`}>
-                                          {s.label}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              {/* Specialized Content Area */}
-                              <div className="space-y-4">
-                                {o.status === 'pending_payment' && (
-                                  <motion.div 
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="bg-primary/5 border border-primary/10 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
-                                  >
-                                    <div className="text-center sm:text-left">
-                                      <p className="text-sm font-black text-slate-900">Devis disponible !</p>
-                                      <p className="text-xs text-slate-500">Validez et payez pour lancer la préparation.</p>
-                                    </div>
-                                    <button 
-                                      onClick={() => handleApproveQuote(o)}
-                                      className="w-full sm:w-auto px-6 py-2.5 bg-primary text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-sm hover:scale-105 transition-all"
-                                    >
-                                      Payer {(o.totalAmount || 0).toLocaleString()} F
-                                    </button>
-                                  </motion.div>
-                                )}
-
-                                {o.status === 'pending_quote' && !o.deliveryMethod && (
-                                  <div className="bg-amber-50/50 border border-amber-100 p-5 rounded-2xl space-y-4">
-                                    <div className="flex items-center gap-4">
-                                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-amber-600 shadow-sm shrink-0 border border-amber-100/50">
-                                        <Package size={24} />
-                                      </div>
-                                      <div>
-                                        <h5 className="text-sm font-black text-slate-900 tracking-tight">Comment recevoir ?</h5>
-                                        <p className="text-xs text-slate-500 font-medium leading-relaxed">Choisissez pour passer au paiement.</p>
-                                      </div>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                      <button 
-                                        onClick={() => handleSelectDeliveryMethod(o.id, 'pickup')}
-                                        className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-primary hover:bg-primary/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
-                                      >
-                                        <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                                          <Store size={16} />
-                                        </div>
-                                        <div>
-                                          <p className="font-black text-xs text-slate-900 group-hover:text-primary transition-colors">Sur place</p>
-                                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Gratuit</p>
-                                        </div>
-                                      </button>
-
-                                      <button 
-                                        onClick={() => handleSelectDeliveryMethod(o.id, 'delivery')}
-                                        className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-orange-500 hover:bg-orange-500/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
-                                      >
-                                        <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-orange-500/10 group-hover:text-orange-500 transition-all">
-                                          <Truck size={16} />
-                                        </div>
-                                        <div>
-                                          <p className="font-black text-xs text-slate-900 group-hover:text-orange-500 transition-colors">Livraison</p>
-                                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{calculateDeliveryFee(settings)} F</p>
-                                        </div>
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
-                                  <div className="bg-slate-900 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
-                                    <div className="flex items-center gap-4">
-                                      <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 backdrop-blur-md">
-                                        <QrCode size={24} className="text-primary" />
-                                      </div>
-                                      <div>
-                                        <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-0.5">Code de securité</p>
-                                        <p className="text-2xl font-black tracking-widest">#{o.deliveryCode}</p>
-                                      </div>
-                                    </div>
-                                    {o.status === 'delivering' && o.deliveryId && (
-                                      <div className="flex items-center gap-3 bg-white/5 p-2 pr-3 rounded-xl border border-white/10">
-                                        <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/20 shrink-0 bg-white/10 flex items-center justify-center">
-                                          {o.deliveryPersonPhoto ? <img src={o.deliveryPersonPhoto} className="w-full h-full object-cover" /> : <User size={16} />}
-                                        </div>
-                                        <div className="hidden sm:block">
-                                          <p className="text-[8px] font-black text-white/40 uppercase tracking-widest leading-none mb-0.5">Coursier</p>
-                                          <p className="text-[10px] font-black truncate max-w-[80px]">{o.deliveryPersonName}</p>
-                                        </div>
-                                        <button onClick={() => setShowMapForOrder(o)} className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white hover:bg-primary/80 transition-all shrink-0">
-                                          <MapPin size={14} />
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="mt-4 pt-4 border-t border-slate-50">
-                                <details className="group">
-                                  <summary className="list-none flex items-center justify-between cursor-pointer">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Historique du statut</span>
-                                      <div className="h-[1px] w-8 bg-slate-100"></div>
-                                    </div>
-                                    <ChevronDown size={14} className="text-slate-400 group-open:rotate-180 transition-transform" />
-                                  </summary>
-                                  <div className="mt-4">
-                                    <StatusTrace history={o.history} />
-                                  </div>
-                                </details>
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
+                         <PatientOrderCard 
+                            key={o.id} 
+                            o={o} 
+                            settings={settings} 
+                            profile={profile} 
+                            onChat={setActiveChatOrderId} 
+                            onViewImage={setViewImage} 
+                            onApproveQuote={handleApproveQuote} 
+                            onSelectDeliveryMethod={handleSelectDeliveryMethod} 
+                            onShowMap={setShowMapForOrder} 
+                         />
                       ))}
                     </div>
                   )}
@@ -3955,60 +4079,17 @@ const PatientDashboard = React.memo(({ profile, settings, location }: { profile:
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').map(o => (
-                        <div key={o.id} className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:opacity-100 opacity-90 transition-all flex flex-col">
-                          <div className={`px-5 py-3 border-b border-slate-50 flex items-center justify-between ${o.status === 'completed' ? 'bg-emerald-50/30' : 'bg-rose-50/30'}`}>
-                            <div className="flex items-center gap-2">
-                               <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                                  {o.status === 'completed' ? <CheckCircle size={14} /> : <X size={14} />}
-                                </div>
-                                <span className="text-[10px] font-black text-slate-900 leading-none tracking-tight">#{o.id.slice(-6).toUpperCase()}</span>
-                            </div>
-                            <span className="text-[10px] text-slate-400 font-bold">{formatDate(o.createdAt, 'date')}</span>
-                          </div>
-
-                          <div className="p-5 flex-1 flex flex-col gap-3">
-                            <div className="flex items-center gap-2">
-                              <Building2 size={12} className="text-slate-400" />
-                              <span className="font-bold text-xs text-slate-600 truncate">{o.pharmacyName || "Pharmacie"}</span>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-auto">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
-                              <span className="text-sm font-black text-primary">{(o.totalAmount || 0).toLocaleString()} F</span>
-                            </div>
-
-                            {o.status === 'completed' && (
-                              <div className="mt-2 flex gap-2">
-                                <button
-                                  onClick={() => generateInvoice(o, profile)}
-                                  className="flex-1 bg-slate-900 text-white py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
-                                >
-                                  <FileText size={12} /> Facture
-                                </button>
-                                {(o.deliveryPhoto || o.deliverySignature) && (
-                                  <div className="flex gap-1.5">
-                                      {o.deliveryPhoto && (
-                                        <button 
-                                          onClick={() => setViewImage(o.deliveryPhoto!)}
-                                          className="w-9 h-9 aspect-square rounded-xl overflow-hidden border border-slate-200 relative group flex-shrink-0"
-                                        >
-                                          <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
-                                        </button>
-                                      )}
-                                      {o.deliverySignature && (
-                                        <button 
-                                          onClick={() => setViewImage(o.deliverySignature!)}
-                                          className="w-9 h-9 aspect-square rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 group relative flex-shrink-0"
-                                        >
-                                          <img src={o.deliverySignature} className="max-h-full object-contain" />
-                                        </button>
-                                      )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                         <PatientOrderCard 
+                            key={o.id} 
+                            o={o} 
+                            settings={settings} 
+                            profile={profile} 
+                            onChat={setActiveChatOrderId} 
+                            onViewImage={setViewImage} 
+                            onApproveQuote={handleApproveQuote} 
+                            onSelectDeliveryMethod={handleSelectDeliveryMethod} 
+                            onShowMap={setShowMapForOrder} 
+                         />
                       ))}
                     </div>
                   )}
@@ -4876,9 +4957,292 @@ function WithdrawalModal({
   );
 }
 
+const PharmacistPrescriptionCard = React.memo(({ 
+  p, 
+  onStartQuote, 
+  onReject 
+}: { 
+  p: Prescription, 
+  onStartQuote: (p: Prescription) => void, 
+  onReject: (id: string, status: string) => void 
+}) => {
+  return (
+    <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all p-5 flex flex-col gap-4">
+      <div className="flex gap-4">
+        <div 
+          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
+        >
+          <img src={p.imageUrl} alt="Ordo" className="w-full h-full object-cover" loading="lazy" />
+        </div>
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs font-black text-slate-900 leading-none truncate">#{p.id.slice(-6).toUpperCase()}</p>
+            <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400">
+              <Clock size={10} />
+              {p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 mt-auto">
+            <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase">
+              <MapPin size={10} />
+              {p.distance || 2} km
+            </div>
+            {p.requestType === 'partial' ? (
+              <span className="text-[9px] bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
+                <Package size={10} /> Partiel
+              </span>
+            ) : (
+              <span className="text-[9px] bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
+                <CheckCircle size={10} /> Complet
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100/50 max-h-24 overflow-hidden relative">
+        <div className="text-[10px] text-slate-600">
+          {p.extractedData ? (
+            <div className="space-y-1">
+              {(() => {
+                try {
+                  const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
+                  if (!jsonStr) return <p className="italic text-slate-400">Non structuré</p>;
+                  const parsed = JSON.parse(jsonStr);
+                  const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+                  
+                  const displayMeds = p.requestType === 'partial' && p.selectedMedications
+                    ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament)))
+                    : meds;
+
+                  return displayMeds.map((m: any, i: number) => {
+                    const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
+                    return (
+                      <div key={`${name}-${i}`} className="flex items-center gap-1.5 truncate">
+                        <div className="w-1 h-1 rounded-full bg-slate-300 shrink-0"></div>
+                        <span className="font-bold text-slate-700">{name}</span>
+                      </div>
+                    );
+                  });
+                } catch (e) {
+                  return <p className="truncate">{p.extractedData}</p>;
+                }
+              })()}
+            </div>
+          ) : (
+            <span className="flex items-center gap-2"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse...</span>
+          )}
+        </div>
+        <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
+      </div>
+
+      <div className="flex gap-2">
+        <button 
+          onClick={() => onStartQuote(p)}
+          className="flex-1 bg-primary text-white py-3 text-[11px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-95"
+        >
+          Devis
+        </button>
+        <button 
+          onClick={() => onReject(p.id, 'rejected')}
+          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm"
+          title="Rejeter"
+        >
+          <X size={16} />
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const PharmacistOrderCard = React.memo(({ 
+  o, 
+  profile, 
+  onChat, 
+  onViewImage, 
+  onHandover, 
+  onUpdateStatus 
+}: { 
+  o: Order, 
+  profile: any, 
+  onChat: (id: string) => void, 
+  onViewImage: (url: string) => void, 
+  onHandover: (o: Order) => void, 
+  onUpdateStatus: (o: Order) => void 
+}) => {
+  return (
+    <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
+      <div className="px-5 py-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-white shadow-sm flex items-center justify-center text-slate-400 font-black text-[10px]">
+            {o.id.slice(-2).toUpperCase()}
+          </div>
+          <div>
+            <p className="text-xs font-black text-slate-900 leading-none mb-1">#{o.id.slice(-6).toUpperCase()}</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {o.quoteType === 'partial' ? (
+                <span className="text-[8px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">Devis Partiel</span>
+              ) : (
+                <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">Devis Complet</span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
+            o.status === 'paid' ? 'bg-emerald-500 text-white' : 
+            o.status === 'preparing' ? 'bg-indigo-500 text-white' :
+            o.status === 'ready' ? 'bg-emerald-600 text-white' :
+            o.status === 'delivering' ? 'bg-sky-500 text-white' :
+            'bg-slate-200 text-slate-600'
+          }`}>
+            {o.status === 'paid' ? 'À Préparer' :
+             o.status === 'preparing' ? 'En cours' :
+             o.status === 'ready' ? 'Prêt' :
+             o.status === 'delivering' ? 'En cours de livr.' :
+             o.status}
+          </span>
+          <button 
+            onClick={() => onChat(o.id)}
+            className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
+          >
+            <MessageCircle size={14} />
+            {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+                {o.unreadCounts[profile?.role || 'pharmacist']}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="p-5 space-y-4">
+        <div className="flex gap-4">
+          {o.prescriptionImageUrl && (
+            <div 
+              className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
+              onClick={() => onViewImage(o.prescriptionImageUrl!)}
+            >
+              <img src={o.prescriptionImageUrl} alt="Ordo" className="w-full h-full object-cover" loading="lazy" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold text-slate-400 leading-tight mb-2 uppercase tracking-tight">Articles & Traitement</p>
+            <div className="space-y-1">
+              {o.items?.slice(0, 2).map((item, i) => (
+                <p key={i} className="text-xs text-slate-600 truncate flex items-center gap-2">
+                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                  {item.name} x{item.quantity}
+                </p>
+              ))}
+              {o.items && o.items.length > 2 && (
+                <p className="text-[10px] text-slate-400 italic">+{o.items.length - 2} autres articles</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-3 border-t border-slate-50 flex flex-col gap-1">
+          <div className="flex justify-between text-[8px] font-bold text-emerald-600 uppercase tracking-widest">
+            <span>Gain Net Estimé</span>
+            <span>{o.pharmacyAmount?.toLocaleString()} FCFA</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {o.deliveryId && !o.isHandedOver && o.deliveryMethod === 'delivery' && (
+            <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 mb-2">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 overflow-hidden border border-amber-200">
+                  {o.deliveryPersonPhoto ? (
+                    <img src={o.deliveryPersonPhoto} alt={o.deliveryPersonName} className="w-full h-full object-cover" />
+                  ) : (
+                    <Truck size={24} />
+                  )}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest">Livreur assigné</p>
+                  <p className="font-bold text-slate-900">{o.deliveryPersonName}</p>
+                  <p className="text-xs text-slate-500">{o.deliveryPersonPhone}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => onHandover(o)}
+                className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+              >
+                <ShieldCheck size={18} />
+                Vérifier l'identité et remettre
+              </button>
+            </div>
+          )}
+
+          {o.status === 'ready' && o.deliveryMethod === 'pickup' && (
+            <button 
+              onClick={() => onHandover(o)}
+              className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+            >
+              <CheckCircle size={18} />
+              Confirmer le retrait physique
+            </button>
+          )}
+
+          {o.status === 'delivering' && o.isHandedOver && (
+            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 flex items-center gap-3 mb-2">
+              <CheckCircle className="text-emerald-500" size={20} />
+              <p className="text-sm font-medium text-emerald-700">Remis au livreur</p>
+            </div>
+          )}
+
+          {o.status === 'pending_quote' ? (
+            <div className="text-center p-4 bg-slate-50 rounded-2xl">
+              <p className="text-xs text-slate-400 font-medium">En attente de validation par le client</p>
+            </div>
+          ) : o.status === 'pending_payment' ? (
+            <div className="text-center p-4 bg-slate-50 rounded-2xl">
+              <p className="text-xs text-slate-400 font-medium">En attente de paiement par le client</p>
+            </div>
+          ) : o.status === 'ready' && !o.deliveryMethod ? (
+            <div className="text-center p-4 bg-amber-50 rounded-2xl border border-amber-100">
+              <p className="text-xs text-amber-700 font-bold">En attente du choix de livraison du client</p>
+            </div>
+          ) : (o.status === 'paid' || o.status === 'preparing') ? (
+            <button 
+              onClick={() => onUpdateStatus(o)}
+              className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+            >
+              {o.status === 'paid' ? 'Commencer la préparation' : 'Marquer comme prêt'}
+              <ChevronRight size={18} />
+            </button>
+          ) : null}
+
+          {o.status === 'completed' && (o.deliveryPhoto || o.deliverySignature) && (
+            <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
+              <div className="flex gap-4">
+                {o.deliveryPhoto && (
+                  <button onClick={() => onViewImage(o.deliveryPhoto!)} className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group">
+                    <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
+                  </button>
+                )}
+                {o.deliverySignature && (
+                  <button onClick={() => onViewImage(o.deliverySignature!)} className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative">
+                    <img src={o.deliverySignature} className="max-h-full object-contain" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 // --- Pharmacist Dashboard ---
 
-const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
+const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }: { profile: UserProfile, settings: Settings | null, cities: City[], rotation: OnCallRotation | null }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'history' | 'wallet' | 'reports' | 'profile'>('pending');
@@ -4939,22 +5303,9 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
   const [myPharmacy, setMyPharmacy] = useState<Pharmacy | null>(null);
   const [allPharmacies, setAllPharmacies] = useState<Pharmacy[]>([]);
-  const [cities, setCities] = useState<City[]>([]);
-  const [rotation, setRotation] = useState<OnCallRotation | null>(null);
 
   useEffect(() => {
-    const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
-      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
-    });
-    const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
-      if (docSnap.exists()) {
-        setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
-      }
-    });
-    return () => {
-      unsubCities();
-      unsubRotation();
-    };
+    // Shared Cities and Rotation are now provided as props
   }, []);
 
   useEffect(() => {
@@ -4979,7 +5330,7 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
   const isFirstRunPharmacistPrescriptions = useRef(true);
   useEffect(() => {
     // Get prescriptions with status submitted, sort in JS to avoid index requirement
-    const q = query(collection(db, 'prescriptions'), where('status', '==', 'submitted'));
+    const q = query(collection(db, 'prescriptions'), where('status', '==', 'submitted'), limit(50));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allPrescriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription))
         .filter(p => !p.cityId || !myPharmacy?.cityId || p.cityId === myPharmacy.cityId);
@@ -5427,100 +5778,12 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
               </div>
             ) : (
               prescriptions.map(p => (
-                <div key={p.id} className="bg-white p-4 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-3 hover:shadow-md transition-all">
-                  <div className="flex gap-4">
-                    <div 
-                      className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 cursor-pointer relative group shrink-0"
-                      onClick={() => setViewImage(p.imageUrl)}
-                    >
-                      <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <Search className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md transition-opacity" size={14} />
-                      </div>
-                    </div>
-                    
-                    <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
-                      <div className="space-y-1">
-                        <div className="flex justify-between items-start">
-                          <h4 className="text-sm font-black text-slate-900 truncate pr-2">{p.patientName || "Anonyme"}</h4>
-                          <span className="text-[9px] bg-primary/5 text-primary px-2 py-0.5 rounded-lg font-black uppercase shrink-0">#{p.id.slice(-4).toUpperCase()}</span>
-                        </div>
-                        <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold">
-                          <Hospital size={10} className="shrink-0" />
-                          <p className="truncate">{p.hospitalLocation || "Lieu non spécifié"}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2 mt-auto">
-                        <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase">
-                          <MapPin size={10} />
-                          {p.distance || 2} km
-                        </div>
-                        {p.requestType === 'partial' ? (
-                          <span className="text-[9px] bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
-                            <Package size={10} /> Partiel
-                          </span>
-                        ) : (
-                          <span className="text-[9px] bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
-                            <CheckCircle size={10} /> Complet
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100/50 max-h-24 overflow-hidden relative">
-                    <div className="text-[10px] text-slate-600">
-                      {p.extractedData ? (
-                        <div className="space-y-1">
-                          {(() => {
-                            try {
-                              const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                              if (!jsonStr) return <p className="italic text-slate-400">Non structuré</p>;
-                              const parsed = JSON.parse(jsonStr);
-                              const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
-                              
-                              const displayMeds = p.requestType === 'partial' && p.selectedMedications
-                                ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament)))
-                                : meds;
-
-                              return displayMeds.map((m: any, i: number) => {
-                                const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
-                                return (
-                                  <div key={`${name}-${i}`} className="flex items-center gap-1.5 truncate">
-                                    <div className="w-1 h-1 rounded-full bg-slate-300 shrink-0"></div>
-                                    <span className="font-bold text-slate-700">{name}</span>
-                                  </div>
-                                );
-                              });
-                            } catch (e) {
-                              return <p className="truncate">{p.extractedData}</p>;
-                            }
-                          })()}
-                        </div>
-                      ) : (
-                        <span className="flex items-center gap-2"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse...</span>
-                      )}
-                    </div>
-                    <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => handleStartQuote(p)}
-                      className="flex-1 bg-primary text-white py-3 text-[11px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-95"
-                    >
-                      Devis
-                    </button>
-                    <button 
-                      onClick={() => handleValidatePrescription(p.id, 'rejected')}
-                      className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm"
-                      title="Rejeter"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                </div>
+                <PharmacistPrescriptionCard 
+                  key={p.id} 
+                  p={p} 
+                  onStartQuote={handleStartQuote} 
+                  onReject={handleValidatePrescription} 
+                />
               ))
             )}
                   </div>
@@ -5541,212 +5804,39 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
               </div>
             ) : (
               orders.map(o => (
-                <div key={o.id} className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
-                  {/* Compact Header */}
-                  <div className="px-5 py-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-white shadow-sm flex items-center justify-center text-slate-400 font-black text-[10px]">
-                        {o.id.slice(-2).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-xs font-black text-slate-900 leading-none mb-1">#{o.id.slice(-6).toUpperCase()}</p>
-                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          {o.quoteType === 'partial' ? (
-                            <span className="text-[8px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">
-                              Devis Partiel
-                            </span>
-                          ) : (
-                            <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">
-                              Devis Complet
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                       <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
-                        o.status === 'paid' ? 'bg-emerald-500 text-white' : 
-                        o.status === 'preparing' ? 'bg-indigo-500 text-white' :
-                        o.status === 'ready' ? 'bg-emerald-600 text-white' :
-                        o.status === 'delivering' ? 'bg-sky-500 text-white' :
-                        'bg-slate-200 text-slate-600'
-                      }`}>
-                        {o.status === 'paid' ? 'À Préparer' :
-                         o.status === 'preparing' ? 'En cours' :
-                         o.status === 'ready' ? 'Prêt' :
-                         o.status === 'delivering' ? 'En cours de livr.' :
-                         o.status}
-                      </span>
-                      <button 
-                        onClick={() => setActiveChatOrderId(o.id)}
-                        className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
-                      >
-                        <MessageCircle size={14} />
-                        {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
-                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
-                            {o.unreadCounts[profile?.role || 'pharmacist']}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                <PharmacistOrderCard 
+                  key={o.id} 
+                  o={o} 
+                  profile={profile} 
+                  onChat={setActiveChatOrderId} 
+                  onViewImage={setViewImage} 
+                  onHandover={setShowHandoverVerify} 
+                  onUpdateStatus={async (order) => {
+                    try {
+                      const nextStatus = order.status === 'paid' ? 'preparing' : 'ready';
+                      await updateDoc(doc(db, 'orders', order.id), { 
+                        status: nextStatus, 
+                        updatedAt: serverTimestamp(),
+                        history: arrayUnion({
+                          status: nextStatus,
+                          timestamp: new Date().toISOString(),
+                          label: nextStatus === 'preparing' ? 'Préparation commencée' : 'Commande prête'
+                        })
+                      });
 
-                  <div className="p-5 space-y-4">
-                    <div className="flex gap-4">
-                      {o.prescriptionImageUrl && (
-                        <div 
-                          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
-                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                        >
-                          <img src={o.prescriptionImageUrl} alt="Ordo" className="w-full h-full object-cover" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-bold text-slate-400 leading-tight mb-2 uppercase tracking-tight">Articles & Traitement</p>
-                        <div className="space-y-1">
-                          {o.items?.slice(0, 2).map((item, i) => (
-                            <p key={i} className="text-xs text-slate-600 truncate flex items-center gap-2">
-                              <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                              {item.name} x{item.quantity}
-                            </p>
-                          ))}
-                          {o.items && o.items.length > 2 && (
-                            <p className="text-[10px] text-slate-400 italic">+{o.items.length - 2} autres articles</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-3 border-t border-slate-50 flex flex-col gap-1">
-                      <div className="flex justify-between text-[8px] font-bold text-emerald-600 uppercase tracking-widest">
-                        <span>Gain Net Estimé</span>
-                        <span>{o.pharmacyAmount?.toLocaleString()} FCFA</span>
-                      </div>
-                    </div>
-
-                  <div className="flex flex-col gap-2">
-                    {o.deliveryId && !o.isHandedOver && o.deliveryMethod === 'delivery' && (
-                      <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 mb-2">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 overflow-hidden border border-amber-200">
-                            {o.deliveryPersonPhoto ? (
-                              <img src={o.deliveryPersonPhoto} alt={o.deliveryPersonName} className="w-full h-full object-cover" />
-                            ) : (
-                              <Truck size={24} />
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest">Livreur assigné</p>
-                            <p className="font-bold text-slate-900">{o.deliveryPersonName}</p>
-                            <p className="text-xs text-slate-500">{o.deliveryPersonPhone}</p>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={() => setShowHandoverVerify(o)}
-                          className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
-                        >
-                          <ShieldCheck size={18} />
-                          Vérifier l'identité et remettre
-                        </button>
-                      </div>
-                    )}
-
-                    {o.status === 'ready' && o.deliveryMethod === 'pickup' && (
-                      <button 
-                        onClick={() => setShowHandoverVerify(o)}
-                        className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
-                      >
-                        <CheckCircle size={18} />
-                        Confirmer le retrait physique
-                      </button>
-                    )}
-
-                    {o.status === 'delivering' && o.isHandedOver && (
-                      <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 flex items-center gap-3 mb-2">
-                        <CheckCircle className="text-emerald-500" size={20} />
-                        <p className="text-sm font-medium text-emerald-700">Remis au livreur</p>
-                      </div>
-                    )}
-
-                    {o.status === 'pending_quote' ? (
-                      <div className="text-center p-4 bg-slate-50 rounded-2xl">
-                        <p className="text-xs text-slate-400 font-medium">En attente de validation par le client</p>
-                      </div>
-                    ) : o.status === 'pending_payment' ? (
-                      <div className="text-center p-4 bg-slate-50 rounded-2xl">
-                        <p className="text-xs text-slate-400 font-medium">En attente de paiement par le client</p>
-                      </div>
-                    ) : o.status === 'ready' && !o.deliveryMethod ? (
-                      <div className="text-center p-4 bg-amber-50 rounded-2xl border border-amber-100">
-                        <p className="text-xs text-amber-700 font-bold">En attente du choix de livraison du client</p>
-                      </div>
-                    ) : (o.status === 'paid' || o.status === 'preparing') ? (
-                      <button 
-                        onClick={async () => {
-                          try {
-                            const nextStatus = o.status === 'paid' ? 'preparing' : 'ready';
-                            await updateDoc(doc(db, 'orders', o.id), { 
-                              status: nextStatus, 
-                              updatedAt: serverTimestamp(),
-                              history: arrayUnion({
-                                status: nextStatus,
-                                timestamp: new Date().toISOString(),
-                                label: nextStatus === 'preparing' ? 'Préparation commencée' : 'Commande prête'
-                              })
-                            });
-
-                            if (nextStatus === 'ready' && o.deliveryMethod === 'delivery') {
-                              await notifyDeliveryDrivers(
-                                "Nouvelle mission de livraison",
-                                `Une commande est prête pour livraison à ${o.pharmacyName || 'la pharmacie'}.`,
-                                o.id
-                              );
-                            }
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.UPDATE, `orders/${o.id}`);
-                          }
-                        }}
-                        className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
-                      >
-                        {o.status === 'paid' ? 'Commencer la préparation' : 'Marquer comme prêt'}
-                        <ChevronRight size={18} />
-                      </button>
-                    ) : null}
-
-                    {o.status === 'completed' && (o.deliveryPhoto || o.deliverySignature) && (
-                      <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
-                        <div className="flex gap-4">
-                          {o.deliveryPhoto && (
-                            <button 
-                              onClick={() => setViewImage(o.deliveryPhoto!)}
-                              className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group"
-                            >
-                              <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
-                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                <Search className="text-white" size={20} />
-                              </div>
-                            </button>
-                          )}
-                          {o.deliverySignature && (
-                            <button 
-                              onClick={() => setViewImage(o.deliverySignature!)}
-                              className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative"
-                            >
-                              <img src={o.deliverySignature} className="max-h-full object-contain" />
-                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                                <Search className="text-white" size={20} />
-                              </div>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
+                      if (nextStatus === 'ready' && order.deliveryMethod === 'delivery') {
+                        await notifyDeliveryDrivers(
+                          "Nouvelle mission de livraison",
+                          `Une commande est prête pour livraison à ${order.pharmacyName || 'la pharmacie'}.`,
+                          order.id
+                        );
+                      }
+                    } catch (err) {
+                      handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`);
+                    }
+                  }} 
+                />
+              ))
             )}
                   </div>
                 </>
@@ -6361,9 +6451,184 @@ const PharmacistDashboard = React.memo(({ profile, settings }: { profile: UserPr
   );
 });
 
+const MissionCard = React.memo(({ 
+  m, 
+  onAccept, 
+  onReject 
+}: { 
+  m: Order, 
+  onAccept: (m: Order) => void, 
+  onReject: (id: string) => void 
+}) => {
+  return (
+    <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-md transition-all flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+          <MapPin size={20} />
+        </div>
+        <div className="text-right">
+          <span className="text-lg font-black text-emerald-600 block leading-none">+{m.deliveryFee || 1500} <span className="text-[10px]">CFA</span></span>
+        </div>
+      </div>
+      
+      <div className="space-y-3">
+        <div className="flex gap-3">
+          <div className="flex flex-col items-center gap-1 py-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+            <div className="w-0.5 flex-1 bg-slate-100"></div>
+            <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+          </div>
+          <div className="flex flex-col gap-3 min-w-0">
+            <div>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Pharmacie</p>
+              <p className="text-xs font-bold text-slate-800 truncate">{m.pharmacyName || "Pharmacie Partenaire"}</p>
+            </div>
+            <div>
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Patient</p>
+              <p className="text-xs font-bold text-slate-800 truncate">{m.hospitalLocation}</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3 pt-3 border-t border-slate-50">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+            <Package size={12} /> {m.items?.length || 0} art.
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg ml-auto">
+            {m.status === 'pending_payment' ? 'En attente paiement' : 'Prêt'}
+          </div>
+        </div>
+      </div>
+
+      <StatusTrace history={m.history} />
+
+      <div className="flex gap-2">
+        <button 
+          onClick={() => onAccept(m)}
+          className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-90 shadow-lg shadow-slate-900/10"
+        >
+          Accepter
+        </button>
+        <button 
+          onClick={() => onReject(m.id)}
+          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-90"
+        >
+          <X size={16} />
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const DeliveryActiveCard = React.memo(({ 
+  m, 
+  profile, 
+  cities, 
+  onChat, 
+  onShowPickupQR, 
+  onShowDeliveryVerify, 
+  onShowMap 
+}: { 
+  m: Order, 
+  profile: any, 
+  cities: City[], 
+  onChat: (id: string) => void, 
+  onShowPickupQR: (m: Order) => void, 
+  onShowDeliveryVerify: (m: Order) => void, 
+  onShowMap: (m: Order) => void 
+}) => {
+  return (
+    <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
+      <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 bg-white rounded-lg shadow-sm flex items-center justify-center text-blue-600">
+            <Truck size={14} />
+          </div>
+          <span className="text-xs font-black text-slate-900 leading-none tracking-tight">#{m.id.slice(-6).toUpperCase()}</span>
+        </div>
+        <div className="flex items-center gap-2">
+           <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
+            m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-500 text-white'
+          }`}>
+            {m.status === 'pending_payment' ? 'Att. Paiement' : 'En Livraison'}
+          </span>
+          <button 
+            onClick={() => onChat(m.id)}
+            className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
+          >
+            <MessageCircle size={14} />
+            {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+                {m.unreadCounts[profile?.role || 'delivery']}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+              <Hospital size={10} /> Origine
+            </p>
+            <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{m.hospitalLocation}</p>
+          </div>
+          <div>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+              <MapPin size={10} /> Ville
+            </p>
+            <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{cities.find(c => c.id === m.cityId)?.name || "Non précisée"}</p>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
+          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Package size={10} /> Colis</p>
+          <div className="space-y-1">
+            {m.items?.slice(0, 1).map((item, i) => (
+              <div key={i} className="flex justify-between text-[10px]">
+                <span className="text-slate-600 truncate mr-2">{item.name}</span>
+                <span className="font-bold shrink-0">x{item.quantity}</span>
+              </div>
+            ))}
+            {m.items && m.items.length > 1 && (
+              <p className="text-[9px] text-slate-400 italic">+{m.items.length - 1} autres</p>
+            )}
+          </div>
+        </div>
+
+      <div className="flex flex-col gap-2 mt-2">
+        {!m.isHandedOver ? (
+          <button 
+            onClick={() => onShowPickupQR(m)}
+            className="w-full py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-all shadow-sm flex items-center justify-center gap-2"
+          >
+            <QrCode size={14} />
+            Code Retrait
+          </button>
+        ) : (
+          <button 
+            onClick={() => onShowDeliveryVerify(m)}
+            className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-2"
+          >
+            <ShieldCheck size={14} />
+            Valider Livr.
+          </button>
+        )}
+        <button 
+          onClick={() => onShowMap(m)}
+          className="w-full py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+        >
+          <Search size={14} /> Carte
+        </button>
+      </div>
+    </div>
+  </div>
+  );
+});
+
 // --- Delivery Dashboard ---
 
-const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
+const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: UserProfile, settings: Settings | null, cities: City[] }) => {
   const [missions, setMissions] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'available' | 'active' | 'history' | 'wallet' | 'profile' | 'reports'>('available');
 
@@ -6379,13 +6644,13 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
   const [deliverySignature, setDeliverySignature] = useState<string | null>(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
-  const [cities, setCities] = useState<City[]>([]);
 
   const isFirstRunDeliveryMissions = useRef(true);
   useEffect(() => {
     const q = query(
       collection(db, 'orders'),
-      where('status', 'in', ['paid', 'preparing', 'ready', 'delivering'])
+      where('status', 'in', ['paid', 'preparing', 'ready', 'delivering']),
+      limit(50)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       // Filter and sort in JS to avoid composite index requirement
@@ -6541,14 +6806,6 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
   }, [profile.uid]);
-
-  useEffect(() => {
-    const q = query(collection(db, 'cities'), where('status', '==', 'active'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'cities'));
-    return () => unsubscribe();
-  }, []);
 
   const totalWithdrawn = withdrawals
     .filter(w => w.status !== 'rejected')
@@ -6709,80 +6966,31 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
               </div>
             ) : (
               availableMissions.map(m => (
-                <div key={m.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-md transition-all flex flex-col gap-4">
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-                      <MapPin size={20} />
-                    </div>
-                    <div className="text-right">
-                      <span className="text-lg font-black text-emerald-600 block leading-none">+{m.deliveryFee || 1500} <span className="text-[10px]">CFA</span></span>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex gap-3">
-                      <div className="flex flex-col items-center gap-1 py-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                        <div className="w-0.5 flex-1 bg-slate-100"></div>
-                        <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-                      </div>
-                      <div className="flex flex-col gap-3 min-w-0">
-                        <div>
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Pharmacie</p>
-                          <p className="text-xs font-bold text-slate-800 truncate">{m.pharmacyName || "Pharmacie Partenaire"}</p>
-                        </div>
-                        <div>
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Patient</p>
-                          <p className="text-xs font-bold text-slate-800 truncate">{m.hospitalLocation}</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-3 pt-3 border-t border-slate-50">
-                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-                        <Package size={12} /> {m.items?.length || 0} art.
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg ml-auto">
-                        {m.status === 'pending_payment' ? 'En attente paiement' : 'Prêt'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <StatusTrace history={m.history} />
-
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={async () => {
-                        try {
-                          await updateDoc(doc(db, 'orders', m.id), { 
-                            deliveryId: profile.uid,
-                            deliveryPersonName: profile.name,
-                            deliveryPersonPhone: profile.phone || "Non spécifié",
-                            deliveryPersonPhoto: profile.photoUrl || null,
-                            pickupCode: generateCode(),
-                            isHandedOver: false,
-                            updatedAt: serverTimestamp(),
-                            history: arrayUnion({
-                              status: m.status, // Keep current status
-                              timestamp: new Date().toISOString(),
-                              label: 'Mission acceptée par le livreur'
-                            })
-                          });
-                        } catch (err) {
-                          handleFirestoreError(err, OperationType.UPDATE, `orders/${m.id}`);
-                        }
-                      }}
-                      className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-900/10"
-                    >
-                      Accepter
-                    </button>
-                    <button 
-                      onClick={() => handleRejectMission(m.id)}
-                      className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                </div>
+                <MissionCard 
+                  key={m.id} 
+                  m={m} 
+                  onAccept={async (mission) => {
+                    try {
+                      await updateDoc(doc(db, 'orders', mission.id), { 
+                        deliveryId: profile.uid,
+                        deliveryPersonName: profile.name,
+                        deliveryPersonPhone: profile.phone || "Non spécifié",
+                        deliveryPersonPhoto: profile.photoUrl || null,
+                        pickupCode: Math.random().toString(36).substr(2, 6).toUpperCase(), // Use simple random code if generateCode not available
+                        isHandedOver: false,
+                        updatedAt: serverTimestamp(),
+                        history: arrayUnion({
+                          status: mission.status,
+                          timestamp: new Date().toISOString(),
+                          label: 'Mission acceptée par le livreur'
+                        })
+                      });
+                    } catch (err) {
+                      handleFirestoreError(err, OperationType.UPDATE, `orders/${mission.id}`);
+                    }
+                  }} 
+                  onReject={handleRejectMission} 
+                />
               ))
             )}
                   </div>
@@ -6803,94 +7011,17 @@ const DeliveryDashboard = React.memo(({ profile, settings }: { profile: UserProf
               </div>
             ) : (
               activeMissions.map(m => (
-                <div key={m.id} className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
-                  {/* Status Header */}
-                  <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-white rounded-lg shadow-sm flex items-center justify-center text-blue-600">
-                        <Truck size={14} />
-                      </div>
-                      <span className="text-xs font-black text-slate-900 leading-none tracking-tight">#{m.id.slice(-6).toUpperCase()}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                       <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
-                        m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-500 text-white'
-                      }`}>
-                        {m.status === 'pending_payment' ? 'Att. Paiement' : 'En Livraison'}
-                      </span>
-                      <button 
-                        onClick={() => setActiveChatOrderId(m.id)}
-                        className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
-                      >
-                        <MessageCircle size={14} />
-                        {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
-                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
-                            {m.unreadCounts[profile?.role || 'delivery']}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="p-5 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                          <Hospital size={10} /> Origine
-                        </p>
-                        <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{m.hospitalLocation}</p>
-                      </div>
-                      <div>
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                          <MapPin size={10} /> Ville
-                        </p>
-                        <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{cities.find(c => c.id === m.cityId)?.name || "Non précisée"}</p>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
-                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Package size={10} /> Colis</p>
-                      <div className="space-y-1">
-                        {m.items?.slice(0, 1).map((item, i) => (
-                          <div key={i} className="flex justify-between text-[10px]">
-                            <span className="text-slate-600 truncate mr-2">{item.name}</span>
-                            <span className="font-bold shrink-0">x{item.quantity}</span>
-                          </div>
-                        ))}
-                        {m.items && m.items.length > 1 && (
-                          <p className="text-[9px] text-slate-400 italic">+{m.items.length - 1} autres</p>
-                        )}
-                      </div>
-                    </div>
-
-                  <div className="flex flex-col gap-2 mt-2">
-                    {!m.isHandedOver ? (
-                      <button 
-                        onClick={() => setShowPickupQR(m)}
-                        className="w-full py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-all shadow-sm flex items-center justify-center gap-2"
-                      >
-                        <QrCode size={14} />
-                        Code Retrait
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={() => setShowDeliveryVerify(m)}
-                        className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-2"
-                      >
-                        <ShieldCheck size={14} />
-                        Valider Livr.
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => setShowMapForOrder(m)}
-                      className="w-full py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
-                    >
-                      <Search size={14} /> Carte
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
+                <DeliveryActiveCard 
+                  key={m.id} 
+                  m={m} 
+                  profile={profile} 
+                  cities={cities} 
+                  onChat={setActiveChatOrderId} 
+                  onShowPickupQR={setShowPickupQR} 
+                  onShowDeliveryVerify={setShowDeliveryVerify} 
+                  onShowMap={setShowMapForOrder} 
+                />
+              ))
             )}
                   </div>
                 </>
