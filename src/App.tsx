@@ -2471,9 +2471,10 @@ const PatientPrescriptionCard = React.memo(({
   p: Prescription, 
   orders: Order[], 
   onViewImage: (url: string) => void, 
-  onRequestQuote: (p: Prescription, type: 'all' | 'partial') => void, 
+  onRequestQuote: (p: Prescription, type: 'all' | 'partial') => Promise<void> | void, 
   onShowPartialSelect: (p: Prescription) => void 
 }) => {
+  const [isLoading, setIsLoading] = useState(false);
   const isCompleted = orders.some(o => o.prescriptionId === p.id && o.status === 'completed');
   if (isCompleted) return null;
 
@@ -2584,15 +2585,20 @@ const PatientPrescriptionCard = React.memo(({
       {p.status === 'draft' && p.extractedData && (
         <div className="flex gap-3 mt-1">
           <button 
-            onClick={() => onRequestQuote(p, 'all')} 
-            className="flex-1 bg-primary text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-primary/90 transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+            onClick={async () => {
+              setIsLoading(true);
+              try { await onRequestQuote(p, 'all'); } finally { setIsLoading(false); }
+            }} 
+            disabled={isLoading}
+            className="flex-1 bg-primary text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-primary/90 transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <CheckCircle size={14} />
+            {isLoading ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : <CheckCircle size={14} />}
             Complet
           </button>
           <button 
             onClick={() => onShowPartialSelect(p)} 
-            className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2"
+            disabled={isLoading}
+            className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Plus size={14} />
             Partiel
@@ -2668,9 +2674,14 @@ const PatientOrderCard = React.memo(({
           <div className="mt-4 md:mt-2 flex gap-2">
             <button 
               onClick={() => onChat(o.id)}
-              className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
+              className="relative flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
               <MessageCircle size={14} /> Chat
+              {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                  {o.unreadCounts[profile?.role || 'patient']}
+                </span>
+              )}
             </button>
             {o.prescriptionImageUrl && (
               <button 
@@ -2916,7 +2927,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const [patientCityId, setPatientCityId] = useState(profile.cityId || '');
   const [isLocating, setIsLocating] = useState(false);
 
-  // Auto-detect city from location prop if cityId is missing
+  // Auto-detect city and neighborhood from location prop 
   useEffect(() => {
     if (!patientCityId && location && cities.length > 0) {
       const nearest = findNearestCity(location.lat, location.lng, cities);
@@ -2927,6 +2938,21 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           updateDoc(doc(db, 'users', profile.uid), { cityId: nearest.id }).catch(console.error);
         }
       }
+    }
+
+    if (location && !landmark) {
+      // Background reverse geocoding to auto-fill neighborhood
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${location.lat}&lon=${location.lng}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.address) {
+            const neighborhood = data.address.neighbourhood || data.address.suburb || data.address.residential || data.address.village;
+            if (neighborhood) {
+              setLandmark(neighborhood);
+            }
+          }
+        })
+        .catch(console.error);
     }
   }, [location, cities, patientCityId, profile.cityId, profile.uid]);
 
@@ -3025,7 +3051,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     }
   };
 
+  const [isRequestingQuote, setIsRequestingQuote] = useState(false);
   const handleRequestQuote = async (p: Prescription, type: 'all' | 'partial', meds?: string[]) => {
+    setIsRequestingQuote(true);
     try {
       await updateDoc(doc(db, 'prescriptions', p.id), {
         requestType: type,
@@ -3038,6 +3066,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       toast.success("Demande de devis mise à jour !");
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `prescriptions/${p.id}`);
+      toast.error("Erreur lors de la mise à jour.");
+    } finally {
+      setIsRequestingQuote(false);
     }
   };
 
@@ -3206,7 +3237,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         cityId: finalCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location,
-        landmark: landmark || "",
+        landmark: landmark || "Renseigné via GPS Localisation",
         facadePhoto: facadePhoto || null,
         extractedData: "",
         status: 'draft',
@@ -3380,7 +3411,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
+    
     let finalCityId = patientCityId;
     if (!finalCityId && location && cities.length > 0) {
       const nearest = findNearestCity(location.lat, location.lng, cities);
@@ -3407,7 +3438,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         cityId: finalCityId,
         hospitalLocation: hospitalLocation || "Non spécifié",
         patientLocation: location, // Real-time location of the patient
-        landmark: landmark || "",
+        landmark: landmark || "Renseigné via GPS Localisation",
         facadePhoto: facadePhoto || null,
         imageUrl: base64,
         extractedData: "", // Will be updated asynchronously
@@ -4012,7 +4043,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                     <MapPin size={20} className="text-primary shrink-0" />
                     <input 
                       type="text" 
-                      placeholder="Point de repère (ex: prês de l'école)" 
+                      placeholder="Quartier / Repère / Instructions (ex: appeler à l'arrivée) *" 
                       value={landmark}
                       onChange={(e) => setLandmark(e.target.value)}
                       className="bg-transparent outline-none text-sm w-full font-bold text-slate-700 placeholder:text-slate-400 placeholder:font-normal"
@@ -5096,9 +5127,11 @@ const PharmacistPrescriptionCard = React.memo(({
   onReject 
 }: { 
   p: Prescription, 
-  onStartQuote: (p: Prescription) => void, 
-  onReject: (id: string, status: string) => void 
+  onStartQuote: (p: Prescription) => Promise<void> | void, 
+  onReject: (id: string, status: string) => Promise<void> | void 
 }) => {
+  const [isLoading, setIsLoading] = useState(false);
+  
   return (
     <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all p-5 flex flex-col gap-4">
       <div className="flex gap-4">
@@ -5178,14 +5211,22 @@ const PharmacistPrescriptionCard = React.memo(({
 
       <div className="flex gap-2">
         <button 
-          onClick={() => onStartQuote(p)}
-          className="flex-1 bg-primary text-white py-3 text-[11px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-95"
+          onClick={async () => {
+            setIsLoading(true);
+            try { await onStartQuote(p); } finally { setIsLoading(false); }
+          }}
+          disabled={isLoading}
+          className="flex-1 bg-primary text-white py-3 text-[11px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-95 disabled:opacity-50"
         >
-          Devis
+          {isLoading ? '...' : 'Devis'}
         </button>
         <button 
-          onClick={() => onReject(p.id, 'rejected')}
-          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm"
+          onClick={async () => {
+             setIsLoading(true);
+             try { await onReject(p.id, 'rejected'); } finally { setIsLoading(false); }
+          }}
+          disabled={isLoading}
+          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm disabled:opacity-50"
           title="Rejeter"
         >
           <X size={16} />
@@ -5641,8 +5682,10 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
     }
   };
 
+  const [isSubmittingQuote, setIsSubmittingQuote] = useState(false);
   const handleSubmitQuote = async () => {
     if (!selectedPrescription) return;
+    setIsSubmittingQuote(true);
 
     const totalAmount = quoteItems.reduce((sum, item) => {
       if (item.isUnavailable) return sum;
@@ -5705,6 +5748,8 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       setActiveTab('active');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'orders');
+    } finally {
+      setIsSubmittingQuote(false);
     }
   };
 
@@ -6615,9 +6660,10 @@ const MissionCard = React.memo(({
   onReject 
 }: { 
   m: Order, 
-  onAccept: (m: Order) => void, 
-  onReject: (id: string) => void 
+  onAccept: (m: Order) => Promise<void> | void, 
+  onReject: (id: string) => Promise<void> | void 
 }) => {
+  const [isLoading, setIsLoading] = useState(false);
   return (
     <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-md transition-all flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -6661,14 +6707,22 @@ const MissionCard = React.memo(({
 
       <div className="flex gap-2">
         <button 
-          onClick={() => onAccept(m)}
-          className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-90 shadow-lg shadow-slate-900/10"
+          onClick={async () => {
+             setIsLoading(true);
+             try { await onAccept(m); } finally { setIsLoading(false); }
+          }}
+          disabled={isLoading}
+          className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-90 shadow-lg shadow-slate-900/10 disabled:opacity-50"
         >
-          Accepter
+          {isLoading ? '...' : 'Accepter'}
         </button>
         <button 
-          onClick={() => onReject(m.id)}
-          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-90"
+          onClick={async () => {
+             setIsLoading(true);
+             try { await onReject(m.id); } finally { setIsLoading(false); }
+          }}
+          disabled={isLoading}
+          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-90 disabled:opacity-50"
         >
           <X size={16} />
         </button>
@@ -6737,6 +6791,38 @@ const DeliveryActiveCard = React.memo(({
             </p>
             <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{cities.find(c => c.id === m.cityId)?.name || "Non précisée"}</p>
           </div>
+          
+          <div className="col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-start gap-3">
+             {m.facadePhoto && (
+               <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 border border-slate-200">
+                 <img src={m.facadePhoto} className="w-full h-full object-cover" />
+               </div>
+             )}
+             <div className="min-w-0 flex-1">
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><User size={10} /> Client</p>
+               <p className="text-sm font-bold text-slate-900 truncate">{m.patientName || "Client"}</p>
+               <div className="flex flex-col sm:flex-row gap-1.5 mt-1">
+                 <a href={`tel:${m.patientPhone || ''}`} className="inline-flex items-center justify-center gap-1 text-xs text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded-md border border-blue-100 flex-1">
+                   <Phone size={10} />
+                   Appeler
+                 </a>
+                 <a href={`https://wa.me/${(m.patientPhone || '').replace(/\D/g, '')}?text=Bonjour%2C%20je%20suis%20votre%20livreur%2E%20Pouvez-vous%20m'envoyer%20votre%20position%20en%20direct%20%3F`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 flex-1 group" title="Demander position via WhatsApp">
+                   <MapPin size={10} className="group-hover:animate-bounce" />
+                   WhatsApp GPS
+                 </a>
+               </div>
+             </div>
+          </div>
+          
+          {m.landmark && (
+            <div className="col-span-2 bg-amber-50 p-2.5 rounded-xl border border-amber-100/50 flex items-start gap-2">
+              <MapPin size={14} className="text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[9px] font-black text-amber-600/70 uppercase tracking-widest">Secteur / Quartier / Repère</p>
+                <p className="text-xs font-bold text-amber-900 leading-tight">{m.landmark}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
