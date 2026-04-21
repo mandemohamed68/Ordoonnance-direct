@@ -45,6 +45,7 @@ import {
   Truck, 
   User, 
   LogOut, 
+  Activity,
   Plus, 
   CheckCircle, 
   Clock, 
@@ -3500,7 +3501,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       // Generate a 6-digit PIN for delivery verification
       const deliveryPin = generateCode();
 
-      await updateDoc(doc(db, 'orders', order.id), {
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, 'orders', order.id), {
         status: 'paid',
         paymentMethod: method,
         paymentStatus: 'completed',
@@ -3520,6 +3523,15 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         })
       });
 
+      // Update pharmacy load
+      if (order.pharmacyId) {
+        batch.update(doc(db, 'pharmacies', order.pharmacyId), {
+          currentActiveOrders: increment(1)
+        });
+      }
+
+      await batch.commit();
+      
       if (order.prescriptionId) {
         try {
           await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
@@ -5588,6 +5600,10 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
   }, [profile.uid]);
 
   const handleStartQuote = async (p: Prescription) => {
+    if ((myPharmacy?.currentActiveOrders || 0) >= (myPharmacy?.maxConcurrentOrders || 10)) {
+      toast.error("Capacité maximale atteinte. Terminez vos commandes en cours avant d'en accepter de nouvelles.");
+      return;
+    }
     try {
       // Lock the prescription for 5 minutes
       await updateDoc(doc(db, 'prescriptions', p.id), {
@@ -5841,6 +5857,27 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
             </div>
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-secondary/10 rounded-xl flex items-center justify-center text-secondary">
               <Package size={18} />
+            </div>
+          </div>
+          <div className={`p-4 sm:p-6 rounded-[2rem] shadow-sm border flex items-center justify-between group transition-all ${
+            (myPharmacy?.currentActiveOrders || 0) >= (myPharmacy?.maxConcurrentOrders || 10) 
+              ? 'bg-rose-50 border-rose-100' : 'bg-white border-slate-100'
+          }`}>
+            <div>
+              <p className={`text-[8px] font-black uppercase tracking-widest mb-1 ${
+                (myPharmacy?.currentActiveOrders || 0) >= (myPharmacy?.maxConcurrentOrders || 10) ? 'text-rose-400' : 'text-slate-400'
+              }`}>Charge de travail</p>
+              <h3 className={`text-sm sm:text-lg font-bold ${
+                (myPharmacy?.currentActiveOrders || 0) >= (myPharmacy?.maxConcurrentOrders || 10) ? 'text-rose-600' : 'text-slate-900'
+              }`}>
+                {myPharmacy?.currentActiveOrders || 0} / {myPharmacy?.maxConcurrentOrders || 10}
+              </h3>
+            </div>
+            <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center ${
+               (myPharmacy?.currentActiveOrders || 0) >= (myPharmacy?.maxConcurrentOrders || 10) 
+                 ? 'bg-rose-100 text-rose-600' : 'bg-primary/10 text-primary'
+            }`}>
+              <Activity size={18} />
             </div>
           </div>
         </div>
@@ -7618,6 +7655,13 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
                         referenceId: order.id,
                         read: false,
                         createdAt: serverTimestamp()
+                      });
+                    }
+
+                    // Update pharmacy load (decrement)
+                    if (order.pharmacyId) {
+                      batch.update(doc(db, 'pharmacies', order.pharmacyId), {
+                        currentActiveOrders: increment(-1)
                       });
                     }
 

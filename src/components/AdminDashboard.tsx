@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, 
   Users, Activity, FileText, Package, ShieldCheck, Trash2, Search,
-  TrendingUp, DollarSign, BarChart3, Lock, CreditCard, Terminal, UserCog, Power, X, Download, MessageSquare,
+  TrendingUp, DollarSign, BarChart3, Lock, CreditCard, Terminal, UserCog, Power, X, Download, MessageSquare, Database,
   Plus, MapPin, Percent, Navigation, Camera
 } from 'lucide-react';
 import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit } from 'firebase/firestore';
@@ -278,7 +278,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     return () => unsub();
   }, [selectedChat]);
 
-  const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
+  const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '', maxConcurrentOrders: 10 });
   const [addingPharmacy, setAddingPharmacy] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
   const [addingUser, setAddingUser] = useState(false);
@@ -621,6 +621,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         licenseNumber: newPharmacy.licenseNumber || '',
         status: editingPharmacy?.status || 'active',
         isOnDuty: editingPharmacy?.isOnDuty || false,
+        maxConcurrentOrders: Number(newPharmacy.maxConcurrentOrders) || 10,
         updatedAt: serverTimestamp()
       };
 
@@ -636,7 +637,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       }
 
       await setDoc(doc(db, 'pharmacies', id), pharmacyData, { merge: true });
-      setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
+      setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '', maxConcurrentOrders: 10 });
       setEditingPharmacy(null);
       setShowPharmacyModal(false);
       toast.success(editingPharmacy ? "Pharmacie mise à jour !" : "Pharmacie ajoutée !");
@@ -659,6 +660,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       cityId: pharmacy.cityId || '',
       groupId: pharmacy.groupId || '',
       licenseNumber: pharmacy.licenseNumber || '',
+      maxConcurrentOrders: pharmacy.maxConcurrentOrders || 10,
       lat: pharmacy.location?.lat.toString() || '',
       lng: pharmacy.location?.lng.toString() || ''
     });
@@ -708,6 +710,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
           cityId: newUser.cityId,
           groupId: newUser.groupId,
           licenseNumber: newUser.licenseNumber || '',
+          maxConcurrentOrders: 10,
           status: 'active',
           isOnDuty: false,
           createdAt: serverTimestamp()
@@ -1938,7 +1941,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                     <button 
                       onClick={() => {
                         setEditingPharmacy(null);
-                        setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '' });
+                        setNewPharmacy({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '', maxConcurrentOrders: 10 });
                         setShowPharmacyModal(true);
                       }}
                       className="bg-emerald-100 text-emerald-700 px-6 py-3 rounded-2xl font-bold hover:bg-emerald-200 transition-colors flex items-center gap-2"
@@ -1954,6 +1957,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                     <th className="p-6 font-bold">Nom</th>
                     <th className="p-6 font-bold">Adresse</th>
                     <th className="p-6 font-bold">Téléphone</th>
+                    <th className="p-6 font-bold">Charge</th>
                     <th className="p-6 font-bold">Garde</th>
                     <th className="p-6 font-bold">Statut</th>
                     <th className="p-6 font-bold text-right">Actions</th>
@@ -1965,6 +1969,23 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                       <td className="p-6 font-bold text-slate-900">{pharmacy.name}</td>
                       <td className="p-6 text-slate-500 text-sm">{pharmacy.address}</td>
                       <td className="p-6 text-slate-500 text-sm">{pharmacy.phone || '-'}</td>
+                      <td className="p-6">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
+                            <span>Charge</span>
+                            <span>{pharmacy.currentActiveOrders || 0} / {pharmacy.maxConcurrentOrders || 10}</span>
+                          </div>
+                          <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full transition-all ${
+                                ((pharmacy.currentActiveOrders || 0) / (pharmacy.maxConcurrentOrders || 10)) > 0.8 ? 'bg-rose-500' : 
+                                ((pharmacy.currentActiveOrders || 0) / (pharmacy.maxConcurrentOrders || 10)) > 0.5 ? 'bg-amber-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.min(100, ((pharmacy.currentActiveOrders || 0) / (pharmacy.maxConcurrentOrders || 10)) * 100)}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      </td>
                       <td className="p-6">
                         <button 
                           onClick={async () => {
@@ -2086,6 +2107,17 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                                 onChange={(e) => setNewPharmacy({...newPharmacy, phone: e.target.value})}
                                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
                                 placeholder="Ex: +226 25 30 00 00"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Capacité (Commandes max)</label>
+                              <input 
+                                type="number" 
+                                value={newPharmacy.maxConcurrentOrders}
+                                onChange={(e) => setNewPharmacy({...newPharmacy, maxConcurrentOrders: Number(e.target.value)})}
+                                className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
+                                placeholder="Capacité de traitement"
+                                min="1"
                               />
                             </div>
                             <div className="space-y-2">
@@ -3525,11 +3557,45 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       )}
 
       {activeTab === 'database' && (
-        <>
+        <div className="space-y-8">
+          <div className="bg-gradient-to-br from-slate-900 to-indigo-900 rounded-[3rem] p-8 text-white shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 rounded-full blur-3xl opacity-30"></div>
+            <div className="relative flex flex-col md:flex-row items-center gap-10">
+              <div className="flex-1 space-y-6">
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full border border-white/10">
+                  <Database size={16} className="text-amber-400" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Technologie Cloud Native</span>
+                </div>
+                <h2 className="text-4xl font-black leading-tight italic">
+                  Google Cloud <span className="text-amber-400">Firestore</span>
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="bg-white/5 border border-white/10 p-5 rounded-[2.5rem] backdrop-blur-md hover:bg-white/10 transition-all">
+                    <p className="text-amber-400 font-bold mb-1">Capacité</p>
+                    <p className="text-xs text-slate-300 leading-relaxed font-medium">Virtuellement illimitée. Firestore gère des pétaoctets de données et des millions de connexions simultanées automatiquement.</p>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 p-5 rounded-[2.5rem] backdrop-blur-md hover:bg-white/10 transition-all">
+                    <p className="text-amber-400 font-bold mb-1">Performance</p>
+                    <p className="text-xs text-slate-300 leading-relaxed font-medium">Temps réel natif. Les mises à jour sont propagées instantanément à tous les clients connectés via WebSocket.</p>
+                  </div>
+                </div>
+                <p className="text-slate-400 text-sm leading-relaxed max-w-2xl italic font-medium">
+                  Cette base de données <strong className="text-white">NoSQL</strong> orientée documents permet de stocker vos commandes, ordonnances et journaux système de manière sécurisée et scalable, sans les contraintes de schéma rigidement fixées du SQL traditionnel.
+                </p>
+              </div>
+              <div className="w-full md:w-80 p-8 bg-white/5 rounded-[3rem] border border-white/10 flex flex-col items-center justify-center text-center shadow-inner">
+                <div className="w-20 h-20 bg-amber-400 rounded-[2.5rem] flex items-center justify-center text-slate-900 shadow-lg shadow-amber-400/20 mb-6">
+                  <Activity size={40} />
+                </div>
+                <p className="text-4xl font-black text-white mb-2 italic">99.99<span className="text-amber-400">%</span></p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Disponibilité Garantie</p>
+              </div>
+            </div>
+          </div>
           <div className="space-y-8">
             <DatabaseExplorer />
           </div>
-        </>
+        </div>
       )}
 
       {activeTab === 'logs' && (

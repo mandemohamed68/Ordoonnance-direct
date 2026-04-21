@@ -39,6 +39,8 @@ export interface Pharmacy {
   groupId: string;
   isOnDuty?: boolean;
   status?: 'active' | 'suspended' | 'maintenance';
+  maxConcurrentOrders?: number; // Capacité maximale de traitement
+  currentActiveOrders?: number; // Charge actuelle (calculée ou stockée)
 }
 
 export interface Prescription {
@@ -84,6 +86,7 @@ export interface Order {
   hospitalLocation?: string;
   cityId?: string;
   pharmacistId?: string;
+  pharmacyId?: string;
   pharmacyName?: string;
   pharmacyLocation?: string;
   deliveryId?: string;
