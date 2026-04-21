@@ -11,7 +11,7 @@ import { db, handleFirestoreError, OperationType, auth } from '../firebase';
 import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION } from '../utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION, getPrescriptionStatusLabel, getOrderStatusLabel } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
 import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
@@ -1374,7 +1374,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h3 className="text-xl font-bold">Approbations en attente</h3>
-                      <p className="text-sm text-slate-500 mt-1">Validez ou refusez les nouvelles inscriptions.</p>
+                      <p className="text-sm text-slate-500 mt-1">Validez ou rejetez les nouvelles inscriptions.</p>
                     </div>
                   </div>
                   <div className="overflow-x-auto">
@@ -1454,7 +1454,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                                     onClick={() => handleUpdateUserStatus(user.uid, 'rejected')}
                                     className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-colors font-bold text-sm flex items-center gap-2"
                                   >
-                                    <X size={16} /> Refuser
+                                    <X size={16} /> Rejeter
                                   </button>
                                 </div>
                               </td>
@@ -2521,11 +2521,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                           prescription.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
                           'bg-amber-100 text-amber-700'
                         }`}>
-                          {prescription.status === 'draft' ? 'BROUILLON' :
-                           prescription.status === 'submitted' ? 'SOUMISE' :
-                           prescription.status === 'validated' ? 'VALIDÉE' :
-                           prescription.status === 'rejected' ? 'REJETÉE' :
-                           prescription.status.toUpperCase()}
+                          {getPrescriptionStatusLabel(prescription.status).toUpperCase()}
                         </span>
                       </td>
                       <td className="p-4 text-slate-500 text-sm">{formatDate(prescription.createdAt, 'date')}</td>

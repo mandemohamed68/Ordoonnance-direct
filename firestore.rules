@@ -184,7 +184,7 @@ service cloud.firestore {
       return data.keys().hasAll(['patientId', 'status', 'createdAt']) &&
              data.patientId is string &&
              (!('imageUrl' in data) || isValidUrl(data.imageUrl)) &&
-             data.status in ['draft', 'submitted', 'validated', 'rejected', 'rejected_by_limit'] &&
+             data.status in ['draft', 'submitted', 'validated', 'paid', 'rejected', 'rejected_by_limit'] &&
              data.createdAt is timestamp &&
              (!('requestType' in data) || data.requestType in ['all', 'partial']) &&
              (!('rejectionCount' in data) || data.rejectionCount is int);
@@ -272,7 +272,7 @@ service cloud.firestore {
           resource.data.deliveryId == request.auth.uid || !('deliveryId' in resource.data)
         ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'deliveryId', 'deliveryPersonName', 'deliveryPersonPhone', 'deliveryPersonPhoto', 'pickupCode', 'deliveryCode', 'isHandedOver', 'history', 'rejectedBy', 'deliveryLocation', 'driverLocation', 'unreadCounts']))
       );
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (resource.data.patientId == request.auth.uid && !(resource.data.status in ['paid', 'preparing', 'ready', 'delivering', 'completed']));
     }
 
     match /settings/{settingId} {

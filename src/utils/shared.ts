@@ -296,3 +296,41 @@ export const findNearestCity = (userLat: number, userLng: number, cities: any[])
   return minDistance < 100 ? nearestCity : null;
 };
 
+/**
+ * Harmonized status labels for prescriptions.
+ */
+export const getPrescriptionStatusLabel = (status: string): string => {
+  const s = status?.toLowerCase();
+  switch (s) {
+    case 'draft': return 'Saisie';
+    case 'submitted': return 'Envoyée';
+    case 'validated': return 'Validée';
+    case 'paid': return 'Payée';
+    case 'rejected': return 'Rejetée';
+    case 'rejected_by_limit': return 'Rejetée (Limite)';
+    case 'preparing': return 'En préparation';
+    case 'ready': return 'Prête';
+    case 'delivering': return 'En livraison';
+    case 'completed': return 'Livrée';
+    default: return status || '';
+  }
+};
+
+/**
+ * Harmonized status labels for orders.
+ */
+export const getOrderStatusLabel = (status: string): string => {
+  const s = status?.toLowerCase();
+  switch (s) {
+    case 'pending_quote': return 'En attente devis';
+    case 'pending_payment': return 'Attente Paiement';
+    case 'paid': return 'Payée';
+    case 'preparing': return 'En préparation';
+    case 'ready': return 'Prête';
+    case 'delivering': return 'En livraison';
+    case 'completed': return 'Terminée';
+    case 'quote_rejected': return 'Devis Rejeté';
+    default: return status || '';
+  }
+};
+

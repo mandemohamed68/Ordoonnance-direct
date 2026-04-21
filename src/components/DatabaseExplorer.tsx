@@ -16,14 +16,15 @@ export const DatabaseExplorer = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   // Terminal state
-  const [sqlQuery, setSqlQuery] = useState('SELECT users WHERE role == \'patient\' LIMIT 10');
+  const [sqlQuery, setSqlQuery] = useState('SELECT users WHERE role == \'patient\' ORDER BY createdAt LIMIT 10');
   const [queryResults, setQueryResults] = useState<any[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [showSqlHelp, setShowSqlHelp] = useState(false);
 
   useEffect(() => {
     if (!selectedCollection || activeMode === 'terminal') return;
     setLoading(true);
-    const q = query(collection(db, selectedCollection), limit(50));
+    const q = query(collection(db, selectedCollection), orderBy('createdAt', 'desc'), limit(50));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
@@ -63,50 +64,109 @@ export const DatabaseExplorer = () => {
   const executeSqlQuery = async () => {
     setIsExecuting(true);
     try {
-      // Very simple SQL-like parser for Firestore
-      // Pattern: SELECT <collection> [WHERE <field> <op> <value>] [LIMIT <n>]
-      const parts = sqlQuery.trim().split(/\s+/);
-      if (parts[0].toUpperCase() !== 'SELECT') {
-        throw new Error("La requête doit commencer par SELECT");
+      // Robust SQL-like parser for Firestore
+      const cleanSql = sqlQuery.trim()
+        .replace(/\s*(=|==|!=|>|<|>=|<=)\s*/g, ' $1 ')
+        .replace(/\s*,\s*/g, ', ');
+      
+      const parts = cleanSql.split(/\s+/);
+      
+      const selectIdx = parts.findIndex(p => p.toUpperCase() === 'SELECT');
+      const deleteIdx = parts.findIndex(p => p.toUpperCase() === 'DELETE');
+
+      if (selectIdx === -1 && deleteIdx === -1) {
+        throw new Error("La requête doit commencer par SELECT ou DELETE");
       }
 
-      const collectionName = parts[1];
-      if (!collectionName) throw new Error("Collection manquante");
+      const isDelete = deleteIdx !== -1;
+      const collectionName = isDelete ? parts[deleteIdx + 1] : parts[selectIdx + 1];
+
+      if (!collectionName) throw new Error("Collection manquante (SELECT <collection> ...)");
 
       let constraints = [];
       let limitVal = 50;
+      let orderField: string | null = null;
+      let orderDir: 'asc' | 'desc' = 'desc';
 
       const whereIndex = parts.findIndex(p => p.toUpperCase() === 'WHERE');
+      const orderByIndex = parts.findIndex(p => p.toUpperCase() === 'ORDER');
       const limitIndex = parts.findIndex(p => p.toUpperCase() === 'LIMIT');
 
-      if (whereIndex !== -1) {
+      // 1. Handle WHERE
+      if (whereIndex !== -1 && parts.length > whereIndex + 3) {
         const field = parts[whereIndex + 1];
         let opRaw = parts[whereIndex + 2];
         
         // Translate SQL-like operators to Firestore operators
         if (opRaw === '=') opRaw = '==';
         
+        const validOps = ['==', '!=', '<', '<=', '>', '>=', 'array-contains', 'in', 'not-in', 'array-contains-any'];
+        if (!validOps.includes(opRaw)) {
+          throw new Error(`Opérateur non valide: ${opRaw}. Utilisez ==, !=, >, <, etc.`);
+        }
+        
         const op = opRaw as WhereFilterOp;
-        let value: any = parts[whereIndex + 3];
+        let valueStr = parts[whereIndex + 3];
         
         // Handle quotes for strings
+        if (valueStr.startsWith("'") && !valueStr.endsWith("'")) {
+            let fullValue = valueStr;
+            let i = whereIndex + 4;
+            while(i < parts.length && !parts[i].endsWith("'")) {
+                fullValue += " " + parts[i];
+                i++;
+            }
+            if(i < parts.length) fullValue += " " + parts[i];
+            valueStr = fullValue;
+        }
+
+        let value: any = valueStr;
         if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
-        else if (value === 'true') value = true;
-        else if (value === 'false') value = false;
+        else if (value.toLowerCase() === 'true') value = true;
+        else if (value.toLowerCase() === 'false') value = false;
+        else if (value.toLowerCase() === 'null') value = null;
         else if (!isNaN(Number(value))) value = Number(value);
 
         constraints.push(where(field, op, value));
       }
 
-      if (limitIndex !== -1) {
+      // 2. Handle ORDER BY
+      if (orderByIndex !== -1 && parts[orderByIndex + 1]?.toUpperCase() === 'BY') {
+        orderField = parts[orderByIndex + 2];
+        const nextPart = parts[orderByIndex + 3]?.toUpperCase();
+        if (nextPart === 'DESC') orderDir = 'desc';
+        else if (nextPart === 'ASC') orderDir = 'asc';
+      }
+
+      // 3. Handle LIMIT
+      if (limitIndex !== -1 && parts.length > limitIndex + 1) {
         limitVal = parseInt(parts[limitIndex + 1]) || 50;
       }
 
-      const q = query(collection(db, collectionName), ...constraints, limit(limitVal));
+      const queryParams: any[] = [...constraints];
+      if (orderField) queryParams.push(orderBy(orderField, orderDir));
+      queryParams.push(limit(limitVal));
+
+      const q = query(collection(db, collectionName), ...queryParams);
       const snap = await getDocs(q);
       const results = snap.docs.map(d => ({ id: d.id, _collection: collectionName, ...d.data() }));
-      setQueryResults(results);
-      toast.success(`${results.length} résultats trouvés`);
+      
+      if (isDelete) {
+        if (!window.confirm(`Voulez-vous supprimer ${results.length} documents de ${collectionName} ?`)) {
+            setIsExecuting(false);
+            return;
+        }
+        let deletedCount = 0;
+        for(const docSnap of snap.docs) {
+          await deleteDoc(doc(db, collectionName, docSnap.id));
+          deletedCount++;
+        }
+        toast.success(`${deletedCount} documents supprimés de ${collectionName}`);
+        setQueryResults([]);
+      } else {
+        setQueryResults(results);
+        toast.success(`${results.length} résultats trouvés`);
+      }
     } catch (error: any) {
       toast.error(`Erreur de syntaxe: ${error.message}`);
     } finally {
@@ -274,6 +334,12 @@ export const DatabaseExplorer = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
+                  <button 
+                    onClick={() => setShowSqlHelp(true)}
+                    className="p-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <HelpCircle size={20} />
+                  </button>
                   <div className="px-3 py-1 bg-amber-500/10 text-amber-500 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
                     <HelpCircle size={12} />
                     Base NoSQL (Firestore)
@@ -386,6 +452,62 @@ export const DatabaseExplorer = () => {
               <button onClick={() => setIsEditing(false)} className="px-8 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold">Annuler</button>
               <button onClick={handleSaveDoc} className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-600/20">Enregistrer</button>
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showSqlHelp && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-[2.5rem] p-8 max-w-2xl w-full shadow-2xl"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600">
+                  <Play size={20} />
+                </div>
+                <h3 className="text-2xl font-bold">Aide Syntaxe SQL (Interprétée)</h3>
+              </div>
+              <button onClick={() => setShowSqlHelp(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="space-y-6 text-sm text-slate-600">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <p className="font-bold text-slate-900 mb-2 font-mono">SELECT &lt;collection&gt; [WHERE &lt;champ&gt; &lt;op&gt; &lt;valeur&gt;] [ORDER BY &lt;champ&gt; [ASC|DESC]] [LIMIT &lt;n&gt;]</p>
+                <p className="text-xs text-slate-500">Ex: SELECT orders WHERE status == 'paid' ORDER BY createdAt DESC LIMIT 20</p>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <p className="font-bold text-slate-900 mb-2 font-mono">DELETE &lt;collection&gt; [WHERE &lt;champ&gt; &lt;op&gt; &lt;valeur&gt;]</p>
+                <p className="text-xs text-slate-400">Attention: Cette action est irréversible après confirmation.</p>
+              </div>
+
+              <div>
+                <p className="font-bold text-slate-900 mb-2">Opérateurs supportés :</p>
+                <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+                  <div className="bg-slate-100 p-2 rounded">== (Égal)</div>
+                  <div className="bg-slate-100 p-2 rounded">!= (Différent)</div>
+                  <div className="bg-slate-100 p-2 rounded">&gt;, &lt;, &gt;=, &lt;=</div>
+                  <div className="bg-slate-100 p-2 rounded">array-contains</div>
+                  <div className="bg-slate-100 p-2 rounded">in, not-in</div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-amber-700 text-xs">
+                <strong>Note :</strong> Les chaînes de caractères avec espaces doivent être entourées de simples guillemets (Ex: 'Jean Dupont'). Les booléens (true, false) et les nombres sont détectés automatiquement.
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setShowSqlHelp(false)}
+              className="w-full mt-8 py-4 bg-slate-900 text-white rounded-2xl font-bold transition-all hover:bg-slate-800"
+            >
+              J'ai compris
+            </button>
           </motion.div>
         </div>
       )}

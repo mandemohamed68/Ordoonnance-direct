@@ -43,8 +43,8 @@ export const DataAnalyst = () => {
   ];
 
   const orderStatusDistribution = [
-    { name: 'Complétées', value: orders.filter(o => o.status === 'completed').length },
-    { name: 'En cours', value: orders.filter(o => ['paid', 'preparing', 'ready', 'delivering', 'pending_quote'].includes(o.status)).length },
+    { name: 'Terminées', value: orders.filter(o => o.status === 'completed').length },
+    { name: 'En cours', value: orders.filter(o => ['paid', 'preparing', 'ready', 'delivering', 'pending_quote', 'pending_payment'].includes(o.status)).length },
     { name: 'Rejetées', value: orders.filter(o => o.status === 'quote_rejected').length },
   ];
 

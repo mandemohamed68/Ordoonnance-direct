@@ -93,8 +93,9 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
 
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, RAM_OPTIMIZED_COMPRESSION, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance, findNearestCity } from './utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, RAM_OPTIMIZED_COMPRESSION, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance, findNearestCity, getPrescriptionStatusLabel, getOrderStatusLabel } from './utils/shared';
 import { Capacitor } from '@capacitor/core';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -579,6 +580,15 @@ const BURKINA_HOSPITALS = [
 ].sort();
 
 export default function App() {
+  // Helper for haptic feedback
+  const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        Haptics.impact({ style });
+      } catch (e) {}
+    }
+  };
+
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [viewMode, setViewMode] = useState<UserRole | null>(null);
@@ -619,6 +629,8 @@ export default function App() {
   const [showSupportChat, setShowSupportChat] = useState(false);
   const [infoPage, setInfoPage] = useState<'how_it_works' | 'pharmacies' | 'delivery' | 'contact' | 'legal' | 'privacy' | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [prescriptionToDelete, setPrescriptionToDelete] = useState<string | null>(null);
+  const [isDeletingPrescription, setIsDeletingPrescription] = useState(false);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [newSupportMessage, setNewSupportMessage] = useState('');
   const [supportChatMeta, setSupportChatMeta] = useState<any>(null);
@@ -692,22 +704,34 @@ export default function App() {
     }
   };
 
-  const handleDeletePrescription = async (pId: string) => {
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cette ordonnance et ses demandes de devis ?")) return;
+  const handleDeletePrescription = (pId: string) => {
+    setPrescriptionToDelete(pId);
+  };
+
+  const confirmDeletePrescription = async () => {
+    if (!prescriptionToDelete) return;
+    const pId = prescriptionToDelete;
+    setIsDeletingPrescription(true);
     
     try {
-      // Find associated orders
-      const q = query(collection(db, 'orders'), where('prescriptionId', '==', pId));
+      // Find associated orders - crucial to include patientId for security rules compliance
+      const q = query(
+        collection(db, 'orders'), 
+        where('prescriptionId', '==', pId),
+        where('patientId', '==', profile?.uid)
+      );
       const orderDocs = await getDocs(q);
       
       // Check if any order is paid or beyond awaits
       const hasPaidOrder = orderDocs.docs.some(docSnap => {
         const o = docSnap.data() as Order;
-        return ['preparing', 'ready', 'delivering', 'completed'].includes(o.status);
+        return ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(o.status);
       });
 
       if (hasPaidOrder) {
-        toast.error("Impossible de supprimer une ordonnance dont la commande est déjà en préparation ou payée.");
+        toast.error("Impossible de supprimer une ordonnance dont la commande est déjà payée ou en cours de traitement.");
+        setPrescriptionToDelete(null);
+        setIsDeletingPrescription(false);
         return;
       }
 
@@ -725,6 +749,9 @@ export default function App() {
       toast.success("Ordonnance supprimée avec succès.");
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `prescriptions/${pId}`);
+    } finally {
+      setIsDeletingPrescription(false);
+      setPrescriptionToDelete(null);
     }
   };
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -1488,6 +1515,44 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {prescriptionToDelete && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2rem] shadow-2xl max-w-sm w-full p-6 text-center"
+            >
+              <div className="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold mb-2">Supprimer l'ordonnance ?</h3>
+              <p className="text-sm text-slate-500 mb-6 px-4">
+                Êtes-vous sûr de vouloir supprimer cette ordonnance et ses demandes de devis ? Cette action est irréversible.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setPrescriptionToDelete(null)}
+                  disabled={isDeletingPrescription}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={confirmDeletePrescription}
+                  disabled={isDeletingPrescription}
+                  className="flex-1 py-3 bg-rose-500 text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                >
+                  {isDeletingPrescription ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : "Supprimer"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Support Chat FAB */}
       {settings?.supportChatEnabled !== false && (
@@ -2437,7 +2502,7 @@ const PatientPrescriptionCard = React.memo(({
   const isCompleted = orders.some(o => o.prescriptionId === p.id && o.status === 'completed');
   if (isCompleted) return null;
 
-  const canDelete = !orders.some(o => o.prescriptionId === p.id && ['preparing', 'ready', 'delivering', 'completed'].includes(o.status));
+  const canDelete = !orders.some(o => o.prescriptionId === p.id && ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(o.status));
 
   return (
     <motion.div 
@@ -2446,14 +2511,6 @@ const PatientPrescriptionCard = React.memo(({
       animate={{ opacity: 1, scale: 1 }}
       className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group relative"
     >
-      {canDelete && (
-        <button 
-          onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
-          className="absolute top-2 right-2 w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center transition-all z-10 opacity-0 group-hover:opacity-100"
-        >
-          <Trash2 size={16} />
-        </button>
-      )}
       <div className="flex gap-3 sm:gap-4">
         <div 
           className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
@@ -2480,7 +2537,18 @@ const PatientPrescriptionCard = React.memo(({
           <div className="space-y-1">
             <div className="flex justify-between items-start">
               <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-black uppercase tracking-tighter">#{p.id.slice(-4).toUpperCase()}</span>
-              <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}</span>
+                {canDelete && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
+                    className="w-6 h-6 rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center transition-all z-10"
+                    title="Supprimer l'ordonnance"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             </div>
             <h4 className="text-sm font-black text-slate-900 pr-2 mt-1 line-clamp-2 leading-tight h-10">{p.hospitalLocation || "Ordonnance externe"}</h4>
           </div>
@@ -2499,14 +2567,7 @@ const PatientPrescriptionCard = React.memo(({
                   displayStatus === 'completed' ? 'bg-slate-500 text-white shadow-sm shadow-slate-200' :
                   'bg-rose-50 text-rose-500'
                 }`}>
-                  {displayStatus === 'draft' ? 'Analyse reçue' :
-                   displayStatus === 'submitted' ? 'En recherche' :
-                   displayStatus === 'validated' ? 'Prête' :
-                   displayStatus === 'preparing' ? 'Préparation' :
-                   displayStatus === 'ready' ? 'Prête' :
-                   displayStatus === 'delivering' ? 'En livraison' :
-                   displayStatus === 'completed' ? 'Livrée' :
-                   displayStatus === 'rejected_by_limit' ? 'Rejetée (Limite)' : 'Refusée'}
+                  {getPrescriptionStatusLabel(p.status)}
                 </span>
               );
             })()}
@@ -2617,12 +2678,7 @@ const PatientOrderCard = React.memo(({
                 o.status === 'pending_payment' ? 'bg-rose-500 text-white shadow-sm' : 
                 'bg-slate-900 text-white text-center min-w-[60px]'
               }`}>
-                {o.status === 'pending_quote' ? 'En attente' : 
-                 o.status === 'pending_payment' ? 'A Payer' : 
-                 o.status === 'paid' ? 'Payé' :
-                 o.status === 'preparing' ? 'Prépa' :
-                 o.status === 'ready' ? 'Prêt' :
-                 o.status === 'delivering' ? 'En livraison' : o.status}
+                {getOrderStatusLabel(o.status)}
               </span>
             </div>
             <h4 className="text-base font-black text-slate-900 leading-tight">#{o.id.slice(-6).toUpperCase()}</h4>
@@ -2862,7 +2918,7 @@ const PatientOrderCard = React.memo(({
 
 // --- Patient Dashboard ---
 
-const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation, onDeletePrescription }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null, onDeletePrescription: (id: string) => Promise<void> }) => {
+const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation, onDeletePrescription }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null, onDeletePrescription: (id: string) => void }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
@@ -3462,6 +3518,12 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   };
 
   const handleApproveQuote = (order: Order) => {
+    setSelectedPaymentMethod(null);
+    setPaymentPhone(profile?.phone || '');
+    setPaymentStep('method');
+    setMmMode(null);
+    setPaymentOtp('');
+    setPaymentInvoiceId('');
     setShowPaymentModal(order);
   };
 
@@ -3604,7 +3666,22 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   };
 
   const performPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris' | 'sank') => {
-    if (!showPaymentModal || !paymentInvoiceId || !paymentOtp) return;
+    if (!showPaymentModal) {
+      toast.error("Erreur: Aucune commande sélectionnée.");
+      return;
+    }
+    if (!paymentInvoiceId) {
+      // In USSD flow, we might not have an invoiceId yet, generate a fallback one
+      const fallbackId = 'MOCK_' + Math.random().toString(36).substring(7);
+      setPaymentInvoiceId(fallbackId);
+      // Continue with the newly created ID
+    }
+    if (!paymentOtp) {
+      toast.error("Veuillez saisir le code OTP.");
+      return;
+    }
+    
+    const activeInvoiceId = paymentInvoiceId || ('MOCK_' + Math.random().toString(36).substring(7));
     setIsProcessingPayment(true);
     setPaymentStep('processing');
     
@@ -3613,7 +3690,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          invoiceId: paymentInvoiceId,
+          invoiceId: activeInvoiceId,
           phone: paymentPhone,
           otp: paymentOtp,
           method: method
@@ -5184,10 +5261,11 @@ const PharmacistPrescriptionCard = React.memo(({
              try { await onReject(p.id, 'rejected'); } finally { setIsLoading(false); }
           }}
           disabled={isLoading}
-          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm disabled:opacity-50"
+          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
           title="Rejeter"
         >
           <X size={16} />
+          <span className="sm:hidden text-[10px] font-black uppercase">Rejeter</span>
         </button>
       </div>
     </div>
@@ -5236,11 +5314,7 @@ const PharmacistOrderCard = React.memo(({
             o.status === 'delivering' ? 'bg-sky-500 text-white' :
             'bg-slate-200 text-slate-600'
           }`}>
-            {o.status === 'paid' ? 'À Préparer' :
-             o.status === 'preparing' ? 'En cours' :
-             o.status === 'ready' ? 'Prêt' :
-             o.status === 'delivering' ? 'En cours de livr.' :
-             o.status}
+            {getOrderStatusLabel(o.status)}
           </span>
           <button 
             onClick={() => onChat(o.id)}
@@ -7815,9 +7889,9 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       {activeChatOrderId && (
         <OrderChat 
           orderId={activeChatOrderId} 
-          userId={profile.uid} 
-          userName={profile.name} 
-          userRole={profile.role}
+          userId={profile?.uid} 
+          userName={profile?.name} 
+          userRole={profile?.role}
           onClose={() => setActiveChatOrderId(null)} 
         />
       )}

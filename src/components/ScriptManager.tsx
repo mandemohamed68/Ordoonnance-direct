@@ -32,6 +32,8 @@ export const ScriptManager = () => {
     monthDay: string;
     month: string;
     excludeDays: number[];
+    isExpert: boolean;
+    rawCron: string;
   }>({
     type: 'daily',
     value: '30',
@@ -39,7 +41,9 @@ export const ScriptManager = () => {
     days: [1, 2, 3, 4, 5, 6, 0],
     monthDay: '1',
     month: '1',
-    excludeDays: []
+    excludeDays: [],
+    isExpert: false,
+    rawCron: '* * * * *'
   });
 
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -135,6 +139,8 @@ export const ScriptManager = () => {
   };
 
   const getCronFromBuilder = () => {
+    if (scheduleBuilder.isExpert) return scheduleBuilder.rawCron || '* * * * *';
+
     const [hours, minutes] = scheduleBuilder.time.split(':');
     const daysStr = scheduleBuilder.days.length === 7 ? '*' : scheduleBuilder.days.join(',');
     
@@ -158,6 +164,8 @@ export const ScriptManager = () => {
   };
 
   const getHumanDescription = () => {
+    if (scheduleBuilder.isExpert) return `Planification personnalisée : ${scheduleBuilder.rawCron}`;
+
     const [hours, minutes] = scheduleBuilder.time.split(':');
     const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
     const monthNames = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -221,7 +229,7 @@ export const ScriptManager = () => {
               </button>
               <button 
                 onClick={(e) => { e.stopPropagation(); handleDelete(script.id); }}
-                className="absolute right-10 top-1/2 -translate-y-1/2 p-2 bg-rose-50 text-rose-500 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-500 hover:text-white"
+                className="absolute right-10 top-1/2 -translate-y-1/2 p-2 bg-rose-50 text-rose-500 rounded-lg hover:bg-rose-500 hover:text-white transition-all shadow-sm"
               >
                 <Trash2 size={14} />
               </button>
@@ -353,139 +361,188 @@ export const ScriptManager = () => {
                 {/* Configuration Panel */}
                 <div className="lg:col-span-7 space-y-8">
                   
-                  {/* Step 1: Frequency Type */}
-                  <section>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">1. Type de fréquence</label>
-                    <div className="grid grid-cols-3 gap-2">
-                       {(['minutes', 'hours', 'daily', 'weekly', 'monthly', 'yearly'] as const).map((type) => (
-                         <button
-                           key={type}
-                           onClick={() => setScheduleBuilder({...scheduleBuilder, type})}
-                           className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider border-2 transition-all ${scheduleBuilder.type === type ? 'bg-primary border-primary text-white shadow-lg shadow-primary/20 scale-[1.02]' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-300'}`}
-                         >
-                           {type === 'minutes' ? 'Minutes' : type === 'hours' ? 'Heures' : type === 'daily' ? 'Quotidien' : type === 'weekly' ? 'Hebdo' : type === 'monthly' ? 'Mensuel' : 'Annuel'}
-                         </button>
-                       ))}
-                    </div>
-                  </section>
+                  {/* Step 0: Mode Toggle */}
+                  <div className="flex items-center justify-between p-1 bg-slate-100 rounded-2xl">
+                    <button 
+                      onClick={() => setScheduleBuilder({...scheduleBuilder, isExpert: false})}
+                      className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${!scheduleBuilder.isExpert ? 'bg-white shadow-sm text-primary' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Mode Assisté
+                    </button>
+                    <button 
+                      onClick={() => setScheduleBuilder({...scheduleBuilder, isExpert: true})}
+                      className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${scheduleBuilder.isExpert ? 'bg-white shadow-sm text-primary' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Mode Expert (Cron)
+                    </button>
+                  </div>
 
-                  {/* Step 2: Dynamic Inputs */}
-                  <section className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 space-y-6">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 ml-1">2. Détails de temps</label>
-                    
-                    {/* Time Input for most types */}
-                    {(['daily', 'weekly', 'monthly', 'yearly'].includes(scheduleBuilder.type)) && (
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm font-bold text-slate-600">À quelle heure ?</span>
-                        <input 
-                          type="time" 
-                          value={scheduleBuilder.time}
-                          onChange={e => setScheduleBuilder({...scheduleBuilder, time: e.target.value})}
-                          className="bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
-                        />
-                      </div>
-                    )}
+                  {!scheduleBuilder.isExpert ? (
+                    <>
+                      {/* Step 1: Frequency Type */}
+                      <section>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">1. Type de fréquence</label>
+                        <div className="grid grid-cols-3 gap-2">
+                           {(['minutes', 'hours', 'daily', 'weekly', 'monthly', 'yearly'] as const).map((type) => (
+                             <button
+                               key={type}
+                               onClick={() => setScheduleBuilder({...scheduleBuilder, type})}
+                               className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider border-2 transition-all ${scheduleBuilder.type === type ? 'bg-primary border-primary text-white shadow-lg shadow-primary/20 scale-[1.02]' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-300'}`}
+                             >
+                               {type === 'minutes' ? 'Minutes' : type === 'hours' ? 'Heures' : type === 'daily' ? 'Quotidien' : type === 'weekly' ? 'Hebdo' : type === 'monthly' ? 'Mensuel' : 'Annuel'}
+                             </button>
+                           ))}
+                        </div>
+                      </section>
 
-                    {/* Value for minutes/hours */}
-                    {(['minutes', 'hours'].includes(scheduleBuilder.type)) && (
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm font-bold text-slate-600">Toutes les combien de {scheduleBuilder.type === 'minutes' ? 'minutes' : 'heures'} ?</span>
-                        <input 
-                          type="number" 
-                          min="1"
-                          max={scheduleBuilder.type === 'minutes' ? 59 : 23}
-                          value={scheduleBuilder.value}
-                          onChange={e => setScheduleBuilder({...scheduleBuilder, value: e.target.value})}
-                          className="w-24 bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
-                        />
-                      </div>
-                    )}
+                      {/* Step 2: Dynamic Inputs */}
+                      <section className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100 space-y-6">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 ml-1">2. Détails de temps</label>
+                        
+                        {/* Time Input for most types */}
+                        {(['daily', 'weekly', 'monthly', 'yearly'].includes(scheduleBuilder.type)) && (
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm font-bold text-slate-600">À quelle heure ?</span>
+                            <input 
+                              type="time" 
+                              value={scheduleBuilder.time}
+                              onChange={e => setScheduleBuilder({...scheduleBuilder, time: e.target.value})}
+                              className="bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            />
+                          </div>
+                        )}
 
-                    {/* Day selector for weekly */}
-                    {scheduleBuilder.type === 'weekly' && (
-                      <div className="space-y-3">
-                        <span className="text-sm font-bold text-slate-600 block">Quels jours ?</span>
+                        {/* Value for minutes/hours */}
+                        {(['minutes', 'hours'].includes(scheduleBuilder.type)) && (
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm font-bold text-slate-600">Toutes les combien de {scheduleBuilder.type === 'minutes' ? 'minutes' : 'heures'} ?</span>
+                            <input 
+                              type="number" 
+                              min="1"
+                              max={scheduleBuilder.type === 'minutes' ? 59 : 23}
+                              value={scheduleBuilder.value}
+                              onChange={e => setScheduleBuilder({...scheduleBuilder, value: e.target.value})}
+                              className="w-24 bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            />
+                          </div>
+                        )}
+
+                        {/* Day selector for weekly */}
+                        {scheduleBuilder.type === 'weekly' && (
+                          <div className="space-y-3">
+                            <span className="text-sm font-bold text-slate-600 block">Quels jours ?</span>
+                            <div className="flex flex-wrap gap-2">
+                              {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((day, i) => {
+                                const val = (i + 1) % 7;
+                                const isActive = scheduleBuilder.days.includes(val);
+                                return (
+                                  <button
+                                    key={day}
+                                    onClick={() => {
+                                      const newDays = isActive 
+                                        ? scheduleBuilder.days.filter(d => d !== val)
+                                        : [...scheduleBuilder.days, val];
+                                      setScheduleBuilder({...scheduleBuilder, days: newDays});
+                                    }}
+                                    className={`w-10 h-10 rounded-xl text-[10px] font-black transition-all border-2 ${isActive ? 'bg-primary border-primary text-white' : 'bg-white border-slate-200 text-slate-400 hover:border-primary/30'}`}
+                                  >
+                                    {day}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Date selector for monthly/yearly */}
+                        {(['monthly', 'yearly'].includes(scheduleBuilder.type)) && (
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm font-bold text-slate-600">Quel jour du mois ?</span>
+                            <input 
+                              type="number" 
+                              min="1"
+                              max="31"
+                              value={scheduleBuilder.monthDay}
+                              onChange={e => setScheduleBuilder({...scheduleBuilder, monthDay: e.target.value})}
+                              className="w-20 bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            />
+                          </div>
+                        )}
+
+                        {/* Month selector for yearly */}
+                        {scheduleBuilder.type === 'yearly' && (
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm font-bold text-slate-600">Quel mois ?</span>
+                            <select 
+                              value={scheduleBuilder.month}
+                              onChange={e => setScheduleBuilder({...scheduleBuilder, month: e.target.value})}
+                              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            >
+                              {['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'].map((m, i) => (
+                                <option key={m} value={i+1}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </section>
+
+                      {/* Step 3: Exceptions */}
+                      {scheduleBuilder.type !== 'weekly' && (
+                      <section>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">3. Exceptions (Optionnel)</label>
                         <div className="flex flex-wrap gap-2">
-                          {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((day, i) => {
-                            const val = (i + 1) % 7;
-                            const isActive = scheduleBuilder.days.includes(val);
-                            return (
-                              <button
-                                key={day}
-                                onClick={() => {
-                                  const newDays = isActive 
-                                    ? scheduleBuilder.days.filter(d => d !== val)
-                                    : [...scheduleBuilder.days, val];
-                                  setScheduleBuilder({...scheduleBuilder, days: newDays});
-                                }}
-                                className={`w-10 h-10 rounded-xl text-[10px] font-black transition-all border-2 ${isActive ? 'bg-primary border-primary text-white' : 'bg-white border-slate-200 text-slate-400 hover:border-primary/30'}`}
-                              >
-                                {day}
-                              </button>
-                            );
-                          })}
+                           <span className="text-xs font-medium text-slate-500 mr-2 self-center">Exclure :</span>
+                           {['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'].map((day, i) => {
+                             const val = (i + 1) % 7;
+                             const isExcluded = scheduleBuilder.excludeDays.includes(val);
+                             return (
+                               <button
+                                 key={day}
+                                 onClick={() => {
+                                   const newExc = isExcluded 
+                                    ? scheduleBuilder.excludeDays.filter(d => d !== val)
+                                    : [...scheduleBuilder.excludeDays, val];
+                                   setScheduleBuilder({...scheduleBuilder, excludeDays: newExc});
+                                 }}
+                                 className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${isExcluded ? 'bg-rose-500 border-rose-500 text-white' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-rose-200'}`}
+                               >
+                                 {day}
+                               </button>
+                             );
+                           })}
+                        </div>
+                      </section>
+                      )}
+                    </>
+                  ) : (
+                    <section className="bg-slate-900 rounded-[2.5rem] p-8 border border-white/5 space-y-6">
+                      <div className="flex items-center gap-3">
+                        <HelpCircle size={18} className="text-amber-400" />
+                        <h4 className="font-bold text-white">Syntaxe Cron Standard</h4>
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        Entrez une expression Cron valide (5 segments : min, hour, dom, month, dow).
+                      </p>
+                      <input 
+                        type="text" 
+                        value={scheduleBuilder.rawCron}
+                        onChange={e => setScheduleBuilder({...scheduleBuilder, rawCron: e.target.value})}
+                        className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 font-mono text-emerald-400 text-xl focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                        placeholder="* * * * *"
+                      />
+                      <div className="grid grid-cols-2 gap-4 text-[10px]">
+                        <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                          <p className="text-white font-bold mb-1">Exemple 1</p>
+                          <p className="text-slate-500">0 0 24 12 *</p>
+                          <p className="text-slate-400 mt-1 italic">Chaque 24 Décembre à minuit.</p>
+                        </div>
+                        <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                          <p className="text-white font-bold mb-1">Exemple 2</p>
+                          <p className="text-slate-500">0 8 * * 1-5</p>
+                          <p className="text-slate-400 mt-1 italic">Chaque jour de la semaine à 08:00.</p>
                         </div>
                       </div>
-                    )}
-
-                    {/* Date selector for monthly/yearly */}
-                    {(['monthly', 'yearly'].includes(scheduleBuilder.type)) && (
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm font-bold text-slate-600">Quel jour du mois ?</span>
-                        <input 
-                          type="number" 
-                          min="1"
-                          max="31"
-                          value={scheduleBuilder.monthDay}
-                          onChange={e => setScheduleBuilder({...scheduleBuilder, monthDay: e.target.value})}
-                          className="w-20 bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
-                        />
-                      </div>
-                    )}
-
-                    {/* Month selector for yearly */}
-                    {scheduleBuilder.type === 'yearly' && (
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm font-bold text-slate-600">Quel mois ?</span>
-                        <select 
-                          value={scheduleBuilder.month}
-                          onChange={e => setScheduleBuilder({...scheduleBuilder, month: e.target.value})}
-                          className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-primary focus:ring-2 focus:ring-primary/20 outline-none"
-                        >
-                          {['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'].map((m, i) => (
-                            <option key={m} value={i+1}>{m}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </section>
-
-                  {/* Step 3: Exceptions */}
-                  {scheduleBuilder.type !== 'weekly' && (
-                  <section>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">3. Exceptions (Optionnel)</label>
-                    <div className="flex flex-wrap gap-2">
-                       <span className="text-xs font-medium text-slate-500 mr-2 self-center">Exclure :</span>
-                       {['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'].map((day, i) => {
-                         const val = (i + 1) % 7;
-                         const isExcluded = scheduleBuilder.excludeDays.includes(val);
-                         return (
-                           <button
-                             key={day}
-                             onClick={() => {
-                               const newExc = isExcluded 
-                                ? scheduleBuilder.excludeDays.filter(d => d !== val)
-                                : [...scheduleBuilder.excludeDays, val];
-                               setScheduleBuilder({...scheduleBuilder, excludeDays: newExc});
-                             }}
-                             className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${isExcluded ? 'bg-rose-500 border-rose-500 text-white' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-rose-200'}`}
-                           >
-                             {day}
-                           </button>
-                         );
-                       })}
-                    </div>
-                  </section>
+                    </section>
                   )}
                 </div>
 

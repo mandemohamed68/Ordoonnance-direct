@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
+import cron from 'node-cron';
 import { createServer as createViteServer } from "vite";
 
 dotenv.config();
@@ -234,6 +235,12 @@ async function startServer() {
 
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
+
+  // --- Background Script Scheduler ---
+  console.log('--- SCHEDULER STARTUP ---');
+  cron.schedule('* * * * *', () => {
+    // Logic for periodic tasks
+  });
 }
 
 startServer().catch((err) => {
