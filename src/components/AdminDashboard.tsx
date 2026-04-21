@@ -11,7 +11,7 @@ import { db, handleFirestoreError, OperationType, auth } from '../firebase';
 import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage } from '../utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
 import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
@@ -1825,7 +1825,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                const base64 = await compressImage(file);
                                 setDeliveryExtra({...deliveryExtra, idCardFront: base64});
                               }
                             }}
@@ -1852,7 +1852,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                const base64 = await compressImage(file);
                                 setDeliveryExtra({...deliveryExtra, idCardBack: base64});
                               }
                             }}
@@ -4578,7 +4578,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                       onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          const base64 = await compressImage(file, 800, 600, 0.7);
+                          const base64 = await compressImage(file);
                           setEditingDeliveryUser({...editingDeliveryUser, idCardFront: base64});
                         }
                       }}
@@ -4605,7 +4605,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                       onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          const base64 = await compressImage(file, 800, 600, 0.7);
+                          const base64 = await compressImage(file);
                           setEditingDeliveryUser({...editingDeliveryUser, idCardBack: base64});
                         }
                       }}

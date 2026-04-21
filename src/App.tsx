@@ -92,9 +92,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
 
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
-import L from 'leaflet';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance, findNearestCity } from './utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, notifyDeliveryDrivers, compressImage, RAM_OPTIMIZED_COMPRESSION, getCurrentOnCallGroup, isCityOnCallNow, calculateDistance, findNearestCity } from './utils/shared';
 import { Capacitor } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import jsPDF from 'jspdf';
@@ -107,20 +105,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { Legal } from './components/Legal';
 import { ReportsView } from './components/ReportsView';
 
-// Fix Leaflet default icon issue
-// @ts-ignore
-import icon from 'leaflet/dist/images/marker-icon.png?url';
-// @ts-ignore
-import iconShadow from 'leaflet/dist/images/marker-shadow.png?url';
-
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41]
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
+const MapComponent = React.lazy(() => import('./components/MapComponent'));
 
 // --- Global Helpers ---
 let globalIsFirstLoad = true;
@@ -355,93 +340,6 @@ function SignaturePad({ onSave, onCancel }: { onSave: (signature: string) => voi
   );
 }
 
-function RecenterMap({ center }: { center: [number, number] }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center);
-  }, [center, map]);
-  return null;
-}
-
-function MapComponent({ center, markers, zoom = 13 }: { center: [number, number], markers: { pos: [number, number], label: string, color?: string, type?: 'patient' | 'pharmacy' | 'delivery' | 'self' }[], zoom?: number }) {
-  const [route, setRoute] = useState<[number, number][]>([]);
-  const [eta, setEta] = useState<number | null>(null);
-
-  // Memoize icons to prevent memory leaks and redundant object creation
-  const markerIcon = useRef(L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41]
-  }));
-
-  useEffect(() => {
-    // If we have exactly 2 markers (e.g., delivery and patient/pharmacy), calculate route
-    if (markers.length === 2 || markers.length === 3) {
-      // If 3 markers, usually it's delivery, pharmacy, patient. Let's route from delivery to the next destination.
-      // For simplicity, we'll route between the first two markers if there are 2, or delivery to patient if 3.
-      let start = markers[0].pos;
-      let end = markers[1].pos;
-      
-      if (markers.length === 3) {
-        const delivery = markers.find(m => m.type === 'delivery');
-        const pharmacy = markers.find(m => m.type === 'pharmacy');
-        const patient = markers.find(m => m.type === 'patient');
-        if (delivery && patient) {
-          start = delivery.pos;
-          end = patient.pos; // Route to patient
-        }
-      }
-
-      fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.routes && data.routes[0]) {
-            const coords = data.routes[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
-            setRoute(coords);
-            setEta(Math.round(data.routes[0].duration / 60));
-          }
-        })
-        .catch(console.error);
-    } else {
-      setRoute([]);
-      setEta(null);
-    }
-  }, [markers]);
-
-  return (
-    <div className="h-[300px] w-full rounded-2xl overflow-hidden border border-slate-100 shadow-inner relative z-0">
-      {eta !== null && (
-        <div className="absolute top-4 right-4 z-[400] bg-white px-4 py-2 rounded-xl shadow-lg font-bold text-sm flex items-center gap-2 text-slate-700">
-          <Clock size={16} className="text-primary" />
-          ETA: {eta} min
-        </div>
-      )}
-      <MapContainer center={center} zoom={zoom} scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        <RecenterMap center={center} />
-        {route.length > 0 && <Polyline positions={route} color="#10b981" weight={4} dashArray="10, 10" />}
-        {markers.map((marker, idx) => (
-          <Marker 
-            key={`${marker.pos[0]}-${marker.pos[1]}-${idx}`} 
-            position={marker.pos}
-            icon={markerIcon.current}
-          >
-            <Popup>
-              <div className="font-bold">{marker.label}</div>
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
-    </div>
-  );
-}
-
 const calculateDeliveryFee = (settings: Settings | null) => {
   if (!settings) return 0;
   const now = new Date();
@@ -543,20 +441,16 @@ function NotificationBell({ userId }: { userId: string }) {
 
   const isFirstRun = useRef(true);
   useEffect(() => {
+    if (!userId) return;
     const q = query(
       collection(db, 'notifications'),
-      where('userId', '==', userId)
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc'),
+      limit(20)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newNotifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      newNotifs.sort((a: any, b: any) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
-        return dateB - dateA; // desc
-      });
-      const topNotifs = newNotifs.slice(0, 20);
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      // Play sound if there's a new unread notification that wasn't there before
       const hasNewUnread = snapshot.docChanges().some(change => 
         change.type === 'added' && !change.doc.data().read
       );
@@ -566,7 +460,7 @@ function NotificationBell({ userId }: { userId: string }) {
       }
       isFirstRun.current = false;
       
-      setNotifications(topNotifs);
+      setNotifications(docs);
     }, (err) => console.error("Error fetching notifications:", err));
     return () => unsubscribe();
   }, [userId]);
@@ -731,18 +625,15 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const q = query(
-      collection(db, 'support_messages'),
+      collection(db, 'support_messages'), 
       where('chatId', '==', user.uid),
-      limit(100)
+      orderBy('createdAt', 'desc'),
+      limit(30)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      messages.sort((a: any, b: any) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
-        return dateA - dateB; // asc
-      });
-      setSupportMessages(messages);
+      // Reverse because we want newest at the bottom in the UI but fetched newest first
+      setSupportMessages(messages.reverse() as any);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'support_messages'));
 
     const unsubMeta = onSnapshot(doc(db, 'support_chats', user.uid), (docSnap) => {
@@ -797,6 +688,42 @@ export default function App() {
       setNewSupportMessage('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'support_messages');
+    }
+  };
+
+  const handleDeletePrescription = async (pId: string) => {
+    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cette ordonnance et ses demandes de devis ?")) return;
+    
+    try {
+      // Find associated orders
+      const q = query(collection(db, 'orders'), where('prescriptionId', '==', pId));
+      const orderDocs = await getDocs(q);
+      
+      // Check if any order is paid or beyond awaits
+      const hasPaidOrder = orderDocs.docs.some(docSnap => {
+        const o = docSnap.data() as Order;
+        return ['preparing', 'ready', 'delivering', 'completed'].includes(o.status);
+      });
+
+      if (hasPaidOrder) {
+        toast.error("Impossible de supprimer une ordonnance dont la commande est déjà en préparation ou payée.");
+        return;
+      }
+
+      const batch = writeBatch(db);
+      
+      // 1. Delete associated orders
+      orderDocs.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      
+      // 2. Delete the prescription
+      batch.delete(doc(db, 'prescriptions', pId));
+      
+      await batch.commit();
+      toast.success("Ordonnance supprimée avec succès.");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `prescriptions/${pId}`);
     }
   };
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -1514,7 +1441,14 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 py-0 relative z-10">
         {(activeRole === 'patient') && (
           <ErrorBoundary>
-            <PatientDashboard profile={effectiveProfile!} settings={settings} location={location} cities={cities} rotation={rotation} />
+            <PatientDashboard 
+              profile={effectiveProfile!} 
+              settings={settings} 
+              location={location} 
+              cities={cities} 
+              rotation={rotation} 
+              onDeletePrescription={handleDeletePrescription}
+            />
           </ErrorBoundary>
         )}
         {(activeRole === 'pharmacist') && (
@@ -2339,7 +2273,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                const base64 = await compressImage(file, RAM_OPTIMIZED_COMPRESSION.maxWidth, RAM_OPTIMIZED_COMPRESSION.maxHeight, RAM_OPTIMIZED_COMPRESSION.quality);
                                 setDeliveryExtra({...deliveryExtra, idCardFront: base64});
                               }
                             }}
@@ -2366,7 +2300,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const base64 = await compressImage(file, 800, 600, 0.7);
+                                const base64 = await compressImage(file, RAM_OPTIMIZED_COMPRESSION.maxWidth, RAM_OPTIMIZED_COMPRESSION.maxHeight, RAM_OPTIMIZED_COMPRESSION.quality);
                                 setDeliveryExtra({...deliveryExtra, idCardBack: base64});
                               }
                             }}
@@ -2430,31 +2364,53 @@ const analyzeWithGemini = async (options: { image?: string, text?: string, promp
     }
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     let response;
-    if (options.image) {
-      response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          { inlineData: { mimeType: "image/jpeg", data: options.image } },
-          { text: options.prompt }
-        ],
-        config: { 
-          responseMimeType: "application/json"
+    
+    // Simple retry logic for 503 errors
+    let attempts = 0;
+    const maxAttempts = 2;
+    
+    while (attempts < maxAttempts) {
+      try {
+        if (options.image) {
+          response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [
+              { inlineData: { mimeType: "image/jpeg", data: options.image } },
+              { text: options.prompt }
+            ],
+            config: { 
+              responseMimeType: "application/json"
+            }
+          });
+        } else {
+          response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `${options.prompt} : "${options.text}"`,
+            config: { 
+              responseMimeType: "application/json"
+            }
+          });
         }
-      });
-    } else {
-      response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `${options.prompt} : "${options.text}"`,
-        config: { 
-          responseMimeType: "application/json"
+        return { success: true, text: response.text };
+      } catch (e: any) {
+        attempts++;
+        const isUnavailable = e.message?.includes("503") || e.message?.includes("UNAVAILABLE") || e.message?.includes("high demand");
+        if (isUnavailable && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+          continue;
         }
-      });
+        throw e;
+      }
     }
-    return { success: true, text: response.text };
+    throw new Error("Service temporairement indisponible après plusieurs tentatives.");
   } catch (error: any) {
     console.error("Gemini Error:", error);
     let msg = error.message || String(error);
-    if (msg.includes("API key not valid") || msg.includes("400")) {
+    const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
+    
+    if (isUnavailable) {
+      msg = "SERVICE_UNAVAILABLE"; // Special code for professional handling
+    } else if (msg.includes("API key not valid") || msg.includes("400")) {
       msg = "Clé API Gemini invalide ou absente. Assurez-vous qu'elle est configurée dans les paramètres de AI Studio.";
     }
     return { success: false, error: msg };
@@ -2466,25 +2422,37 @@ const PatientPrescriptionCard = React.memo(({
   orders, 
   onViewImage, 
   onRequestQuote, 
-  onShowPartialSelect 
+  onShowPartialSelect,
+  onDelete
 }: { 
   p: Prescription, 
   orders: Order[], 
   onViewImage: (url: string) => void, 
   onRequestQuote: (p: Prescription, type: 'all' | 'partial') => Promise<void> | void, 
-  onShowPartialSelect: (p: Prescription) => void 
+  onShowPartialSelect: (p: Prescription) => void,
+  onDelete: (id: string) => void
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const isCompleted = orders.some(o => o.prescriptionId === p.id && o.status === 'completed');
   if (isCompleted) return null;
+
+  const canDelete = !orders.some(o => o.prescriptionId === p.id && ['preparing', 'ready', 'delivering', 'completed'].includes(o.status));
 
   return (
     <motion.div 
       layout
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group"
+      className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group relative"
     >
+      {canDelete && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
+          className="absolute top-2 right-2 w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center transition-all z-10 opacity-0 group-hover:opacity-100"
+        >
+          <Trash2 size={16} />
+        </button>
+      )}
       <div className="flex gap-3 sm:gap-4">
         <div 
           className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
@@ -2513,16 +2481,16 @@ const PatientPrescriptionCard = React.memo(({
               <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-black uppercase tracking-tighter">#{p.id.slice(-4).toUpperCase()}</span>
               <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}</span>
             </div>
-            <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate pr-2 mt-1">{p.hospitalLocation || "Ordonnance externe"}</h4>
+            <h4 className="text-sm font-black text-slate-900 pr-2 mt-1 line-clamp-2 leading-tight h-10">{p.hospitalLocation || "Ordonnance externe"}</h4>
           </div>
           
-          <div className="mt-2">
+          <div className="mt-auto">
             {(() => {
               const displayStatus = p.status as string;
               return (
-                <span className={`text-[9px] px-2 py-0.5 rounded-lg font-black uppercase tracking-widest ${
+                <span className={`inline-flex items-center text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider ${
                   displayStatus === 'draft' ? 'bg-indigo-50 text-indigo-500' :
-                  displayStatus === 'submitted' ? 'bg-amber-50 text-amber-600' :
+                  displayStatus === 'submitted' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
                   displayStatus === 'validated' ? 'bg-emerald-50 text-emerald-600' :
                   displayStatus === 'preparing' ? 'bg-indigo-500 text-white shadow-sm shadow-indigo-200' :
                   displayStatus === 'ready' ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-200' :
@@ -2637,7 +2605,7 @@ const PatientOrderCard = React.memo(({
     >
       <div className="flex flex-col md:flex-row h-full">
         {/* Left Summary Pane */}
-        <div className="md:w-64 bg-slate-50/50 p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between">
+        <div className="md:w-56 bg-slate-50/50 p-4 sm:p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between shrink-0">
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
@@ -2646,7 +2614,7 @@ const PatientOrderCard = React.memo(({
               <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
                 o.status === 'ready' || o.status === 'delivering' ? 'bg-emerald-500 text-white shadow-sm' : 
                 o.status === 'pending_payment' ? 'bg-rose-500 text-white shadow-sm' : 
-                'bg-slate-900 text-white'
+                'bg-slate-900 text-white text-center min-w-[60px]'
               }`}>
                 {o.status === 'pending_quote' ? 'En attente' : 
                  o.status === 'pending_payment' ? 'A Payer' : 
@@ -2657,11 +2625,11 @@ const PatientOrderCard = React.memo(({
               </span>
             </div>
             <h4 className="text-base font-black text-slate-900 leading-tight">#{o.id.slice(-6).toUpperCase()}</h4>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Créée le {formatDate(o.createdAt, 'dateTime')}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Créée le {formatDate(o.createdAt, 'dateTime')}</p>
             
             <div className="mt-4 space-y-2">
               <div className="flex items-center gap-2 text-xs text-slate-600 font-bold">
-                <Building2 size={14} className="text-slate-400" />
+                <Building2 size={14} className="text-slate-400 shrink-0" />
                 <span className="truncate">{o.pharmacyName || 'Pharmacie en attente'}</span>
               </div>
               <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-100">
@@ -2686,7 +2654,7 @@ const PatientOrderCard = React.memo(({
             {o.prescriptionImageUrl && (
               <button 
                 onClick={() => onViewImage(o.prescriptionImageUrl!)}
-                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform"
+                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform shrink-0"
               >
                 <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" loading="lazy" />
               </button>
@@ -2695,9 +2663,9 @@ const PatientOrderCard = React.memo(({
         </div>
 
         {/* Right Tracking Pane */}
-        <div className="flex-1 p-5 flex flex-col justify-center">
+        <div className="flex-1 p-4 sm:p-5 flex flex-col justify-center min-w-0">
           {/* Horizontal Minimal Stepper */}
-          <div className="relative mb-6 px-2">
+          <div className="relative mb-6 px-1">
             <div className="absolute top-[14px] left-0 w-full h-[2px] bg-slate-100 rounded-full"></div>
             <div 
               className="absolute top-[14px] left-0 h-[2px] bg-primary rounded-full transition-all duration-1000"
@@ -2713,7 +2681,7 @@ const PatientOrderCard = React.memo(({
                 })()
               }}
             ></div>
-            <div className="flex justify-between relative z-10">
+            <div className="flex justify-between relative z-10 w-full">
               {[
                 { label: 'Payé', status: 'paid', icon: CreditCard },
                 { label: 'Prépa', status: 'preparing', icon: FlaskConical },
@@ -2727,13 +2695,13 @@ const PatientOrderCard = React.memo(({
                 const isActive = o.status === s.status;
                 
                 return (
-                  <div key={s.label} className="flex flex-col items-center gap-2">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-500 scale-100 ${
+                  <div key={s.label} className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-500 scale-100 shrink-0 ${
                       isDone ? 'bg-primary text-white shadow-sm' : 'bg-white border text-slate-200'
                     } ${isActive ? 'ring-2 ring-primary/20 scale-110' : ''}`}>
                       <s.icon size={12} />
                     </div>
-                    <span className={`text-[9px] font-black uppercase tracking-tight ${isDone ? 'text-slate-900' : 'text-slate-300'}`}>
+                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-tight text-center w-full truncate ${isDone ? 'text-slate-900' : 'text-slate-300'}`}>
                       {s.label}
                     </span>
                   </div>
@@ -2893,7 +2861,7 @@ const PatientOrderCard = React.memo(({
 
 // --- Patient Dashboard ---
 
-const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null }) => {
+const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation, onDeletePrescription }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null, onDeletePrescription: (id: string) => Promise<void> }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
@@ -3015,42 +2983,6 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     // Shared Cities and Rotation are now provided as props from App level
   }, []);
 
-  const handleDeletePrescription = async (id: string) => {
-    try {
-      // Check if there is a paid order for this prescription
-      const associatedOrders = orders.filter(o => o.prescriptionId === id);
-      const isPaid = associatedOrders.some(o => 
-        o.status === 'paid' || 
-        o.status === 'preparing' || 
-        o.status === 'ready' || 
-        o.status === 'delivering' || 
-        o.status === 'completed'
-      );
-
-      if (isPaid) {
-        toast.error("Cette ordonnance a déjà été payée et ne peut plus être supprimée.");
-        return;
-      }
-
-      const batch = writeBatch(db);
-      
-      // Delete the prescription itself
-      batch.delete(doc(db, 'prescriptions', id));
-
-      // Also automatically delete ALL associated order quotes to remove them from dashboards
-      associatedOrders.forEach(o => {
-        batch.delete(doc(db, 'orders', o.id));
-      });
-
-      await batch.commit();
-      
-      toast.success("Ordonnance supprimée.");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `prescriptions/${id}`);
-      toast.error("Erreur lors de la suppression.");
-    }
-  };
-
   const [isRequestingQuote, setIsRequestingQuote] = useState(false);
   const handleRequestQuote = async (p: Prescription, type: 'all' | 'partial', meds?: string[]) => {
     setIsRequestingQuote(true);
@@ -3108,15 +3040,16 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
   const isFirstRunPatientPrescriptions = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'prescriptions'), where('patientId', '==', profile.uid), limit(50));
+    const q = query(
+      collection(db, 'prescriptions'), 
+      where('patientId', '==', profile.uid), 
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       isFirstRunPatientPrescriptions.current = false;
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
-      docs.sort((a, b) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
-        return dateB - dateA;
-      });
+      // Client-side sort as fallback if order is weird, but query should handle it
       setPrescriptions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'prescriptions'));
     return () => unsubscribe();
@@ -3124,7 +3057,12 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
   const isFirstRunPatientOrders = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('patientId', '==', profile.uid), limit(50));
+    const q = query(
+      collection(db, 'orders'), 
+      where('patientId', '==', profile.uid), 
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       // Play sound for new orders or important updates (excluding initial load)
       const hasSignficantChange = snapshot.docChanges().some(change => {
@@ -3144,11 +3082,6 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       }
       isFirstRunPatientOrders.current = false;
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-      docs.sort((a, b) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
-        return dateB - dateA;
-      });
       setOrders(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
@@ -3299,11 +3232,16 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           toast.success("Analyse terminée ! Choisissez votre type de devis.");
         } catch (error: any) {
           console.error("Gemini Parsing Error:", error);
+          const isUnavailable = error.message === 'SERVICE_UNAVAILABLE';
+          const errorMessage = isUnavailable 
+            ? "L'analyse automatique est temporairement indisponible."
+            : `L'analyse automatique a rencontré un problème (${error.message || "Erreur AI"}).`;
+
           await updateDoc(docRef, {
-            extractedData: JSON.stringify([{ nom_article: "Erreur d'analyse", dosage: "", posologie: "Veuillez vérifier la saisie" }]),
+            extractedData: JSON.stringify([{ nom_article: "Analyse en attente", dosage: "", posologie: "Traitement manuel par un pharmacien" }]),
             status: 'submitted'
           });
-          toast.error(`L'analyse a échoué: ${error.message || "Erreur AI"}. La demande a été transmise pour traitement manuel.`);
+          toast.info(`${errorMessage} Votre ordonnance sera traitée manuellement par un pharmacien.`);
         }
       })();
     } catch (err) {
@@ -3430,7 +3368,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       }
 
       // Use a slightly smaller image for faster processing and to stay well within Firestore limits
-      const base64 = await compressImage(file, 800, 800, 0.6);
+      const base64 = await compressImage(file, RAM_OPTIMIZED_COMPRESSION.maxWidth, RAM_OPTIMIZED_COMPRESSION.maxHeight, RAM_OPTIMIZED_COMPRESSION.quality);
       
       const prescriptionData = {
         patientId: profile.uid,
@@ -3502,9 +3440,14 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           }
         } catch (err: any) {
           console.error("Gemini OCR failed:", err);
-          toast.error(`L'analyse automatique a échoué: ${err.message || "Erreur AI"}. Un pharmacien traitera votre ordonnance manuellement.`);
+          const isUnavailable = err.message === 'SERVICE_UNAVAILABLE';
+          const errorMessage = isUnavailable 
+            ? "L'analyse automatique est temporairement indisponible."
+            : `L'analyse automatique a rencontré un problème (${err.message || "Erreur AI"}).`;
+
+          toast.info(`${errorMessage} Un pharmacien traitera votre ordonnance manuellement.`);
           await updateDoc(doc(db, 'prescriptions', docRef.id), {
-            extractedData: "Erreur d'analyse automatique. Traitement manuel requis.",
+            extractedData: "En attente d'analyse manuelle par un pharmacien.",
             status: 'submitted'
           });
         }
@@ -4059,7 +4002,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                         input.onchange = async (e) => {
                           const file = (e.target as HTMLInputElement).files?.[0];
                           if (file) {
-                             const base64 = await compressImage(file, 600, 600, 0.6);
+                             const base64 = await compressImage(file, RAM_OPTIMIZED_COMPRESSION.maxWidth, RAM_OPTIMIZED_COMPRESSION.maxHeight, RAM_OPTIMIZED_COMPRESSION.quality);
                              setFacadePhoto(base64);
                              toast.success("Photo de façade enregistrée !");
                           }
@@ -4175,6 +4118,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                     onViewImage={setViewImage} 
                     onRequestQuote={handleRequestQuote} 
                     onShowPartialSelect={(p) => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
+                    onDelete={onDeletePrescription}
                   />
                 ))}
               </div>
@@ -4934,24 +4878,26 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 </button>
               </div>
               
-              <MapComponent 
-                center={showMapForOrder.deliveryLocation ? [showMapForOrder.deliveryLocation.lat, showMapForOrder.deliveryLocation.lng] : (showMapForOrder.pharmacyLocationCoords ? [showMapForOrder.pharmacyLocationCoords.lat, showMapForOrder.pharmacyLocationCoords.lng] : [12.3714, -1.5197])}
-                markers={[
-                  { pos: location ? [location.lat, location.lng] : [12.3714, -1.5197], label: "Moi (Patient)", color: "red", type: 'patient' },
-                  { 
-                    pos: showMapForOrder.pharmacyLocationCoords ? [showMapForOrder.pharmacyLocationCoords.lat, showMapForOrder.pharmacyLocationCoords.lng] : [12.3800, -1.5100], 
-                    label: `Pharmacie: ${showMapForOrder.pharmacyName}`, 
-                    color: "green", 
-                    type: 'pharmacy' 
-                  },
-                  ...(showMapForOrder.driverLocation ? [{
-                    pos: [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] as [number, number],
-                    label: "Livreur",
-                    color: "blue",
-                    type: 'delivery' as const
-                  }] : [])
-                ]}
-              />
+              <React.Suspense fallback={<div className="h-[300px] w-full bg-slate-100 animate-pulse rounded-2xl flex items-center justify-center font-bold text-slate-400">Chargement de la carte...</div>}>
+                <MapComponent 
+                  center={showMapForOrder.deliveryLocation ? [showMapForOrder.deliveryLocation.lat, showMapForOrder.deliveryLocation.lng] : (showMapForOrder.pharmacyLocationCoords ? [showMapForOrder.pharmacyLocationCoords.lat, showMapForOrder.pharmacyLocationCoords.lng] : [12.3714, -1.5197])}
+                  markers={[
+                    { pos: location ? [location.lat, location.lng] : [12.3714, -1.5197], label: "Moi (Patient)", color: "red", type: 'patient' },
+                    { 
+                      pos: showMapForOrder.pharmacyLocationCoords ? [showMapForOrder.pharmacyLocationCoords.lat, showMapForOrder.pharmacyLocationCoords.lng] : [12.3800, -1.5100], 
+                      label: `Pharmacie: ${showMapForOrder.pharmacyName}`, 
+                      color: "green", 
+                      type: 'pharmacy' 
+                    },
+                    ...(showMapForOrder.driverLocation ? [{
+                      pos: [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] as [number, number],
+                      label: "Livreur",
+                      color: "blue",
+                      type: 'delivery' as const
+                    }] : [])
+                  ]}
+                />
+              </React.Suspense>
 
               <div className="mt-6 p-6 bg-emerald-50 rounded-2xl border border-emerald-100 flex items-center gap-4">
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm">
@@ -5509,8 +5455,12 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
 
   const isFirstRunPharmacistPrescriptions = useRef(true);
   useEffect(() => {
-    // Get prescriptions with status submitted, sort in JS to avoid index requirement
-    const q = query(collection(db, 'prescriptions'), where('status', '==', 'submitted'), limit(50));
+    const q = query(
+      collection(db, 'prescriptions'), 
+      where('status', '==', 'submitted'), 
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allPrescriptions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription))
         .filter(p => !p.cityId || !myPharmacy?.cityId || p.cityId === myPharmacy.cityId);
@@ -5593,16 +5543,14 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
 
   const isFirstRunPharmacistOrders = useRef(true);
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('pharmacistId', '==', profile.uid), limit(150));
+    const q = query(
+      collection(db, 'orders'), 
+      where('pharmacistId', '==', profile.uid), 
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-      
-      // Sort in JS
-      allOrders.sort((a, b) => {
-        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
-        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
-        return dateB - dateA;
-      });
       
       // Play sound for new orders/updates (excluding initial load)
       const hasNew = snapshot.docChanges().some(change => change.type === 'added');
@@ -5685,6 +5633,20 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
   const [isSubmittingQuote, setIsSubmittingQuote] = useState(false);
   const handleSubmitQuote = async () => {
     if (!selectedPrescription) return;
+    
+    // Validation
+    const availableItems = quoteItems.filter(item => !item.isUnavailable);
+    if (availableItems.length === 0 && !quoteItems.some(item => item.isUnavailable)) {
+      toast.error("Veuillez ajouter au moins un article.");
+      return;
+    }
+    
+    const invalidItems = availableItems.filter(item => !item.name.trim() || item.price === '' || Number(item.price) <= 0);
+    if (invalidItems.length > 0) {
+      toast.error("Veuillez remplir le nom et un prix valide pour tous les articles disponibles.");
+      return;
+    }
+
     setIsSubmittingQuote(true);
 
     const totalAmount = quoteItems.reduce((sum, item) => {
@@ -6214,9 +6176,10 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
                 </div>
                 <button 
                   onClick={handleSubmitQuote}
-                  className="btn-primary px-10 w-full md:w-auto"
+                  disabled={isSubmittingQuote}
+                  className="btn-primary px-10 w-full md:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Envoyer le Devis
+                  {isSubmittingQuote ? "Envoi en cours..." : "Envoyer le Devis"}
                 </button>
               </div>
             </motion.div>
@@ -7411,7 +7374,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
                       if (!file) return;
                       setIsUpdatingProfile(true);
                       try {
-                        const base64 = await compressImage(file, 512, 512, 0.8);
+                        const base64 = await compressImage(file);
                         await updateDoc(doc(db, 'users', profile.uid), { photoUrl: base64 });
                         setIsUpdatingProfile(false);
                         toast.success("Photo de profil mise à jour !");
@@ -7566,7 +7529,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
                        onChange={async (e) => {
                          const file = e.target.files?.[0];
                          if (file) {
-                           const base64 = await compressImage(file, 800, 600, 0.7);
+                           const base64 = await compressImage(file, RAM_OPTIMIZED_COMPRESSION.maxWidth, RAM_OPTIMIZED_COMPRESSION.maxHeight, RAM_OPTIMIZED_COMPRESSION.quality);
                            setDeliveryPhoto(base64);
                          }
                        }}
@@ -7727,29 +7690,31 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
             </button>
           </div>
           
-          <MapComponent 
-            center={showMapForOrder.driverLocation ? [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] : [12.3714, -1.5197]}
-            markers={[
-              { 
-                pos: showMapForOrder.driverLocation ? [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] : [12.3714, -1.5197], 
-                label: "Livreur (Moi)", 
-                color: "blue", 
-                type: 'delivery' 
-              },
-              { 
-                pos: showMapForOrder.pharmacyLocationCoords ? [showMapForOrder.pharmacyLocationCoords.lat, showMapForOrder.pharmacyLocationCoords.lng] : [12.3800, -1.5100], 
-                label: `Pharmacie: ${showMapForOrder.pharmacyName}`, 
-                color: "green", 
-                type: 'pharmacy' 
-              },
-              { 
-                pos: showMapForOrder.patientLocation ? [showMapForOrder.patientLocation.lat, showMapForOrder.patientLocation.lng] : [12.3600, -1.5300], 
-                label: `Patient: ${showMapForOrder.patientName}`, 
-                color: "red", 
-                type: 'patient' 
-              }
-            ]}
-          />
+          <React.Suspense fallback={<div className="h-[300px] w-full bg-slate-100 animate-pulse rounded-2xl flex items-center justify-center font-bold text-slate-400">Chargement de la carte...</div>}>
+            <MapComponent 
+              center={showMapForOrder.driverLocation ? [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] : [12.3714, -1.5197]}
+              markers={[
+                { 
+                  pos: showMapForOrder.driverLocation ? [showMapForOrder.driverLocation.lat, showMapForOrder.driverLocation.lng] : [12.3714, -1.5197], 
+                  label: "Livreur (Moi)", 
+                  color: "blue", 
+                  type: 'delivery' 
+                },
+                { 
+                  pos: showMapForOrder.pharmacyLocationCoords ? [showMapForOrder.pharmacyLocationCoords.lat, showMapForOrder.pharmacyLocationCoords.lng] : [12.3800, -1.5100], 
+                  label: `Pharmacie: ${showMapForOrder.pharmacyName}`, 
+                  color: "green", 
+                  type: 'pharmacy' 
+                },
+                { 
+                  pos: showMapForOrder.patientLocation ? [showMapForOrder.patientLocation.lat, showMapForOrder.patientLocation.lng] : [12.3600, -1.5300], 
+                  label: `Patient: ${showMapForOrder.patientName}`, 
+                  color: "red", 
+                  type: 'patient' 
+                }
+              ]}
+            />
+          </React.Suspense>
 
           <div className="mt-6 grid grid-cols-2 gap-4">
             <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">

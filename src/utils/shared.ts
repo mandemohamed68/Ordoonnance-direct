@@ -111,10 +111,13 @@ export const notifyDeliveryDrivers = async (title: string, message: string, orde
   }
 };
 
+// --- Standardized Image Compression parameters for RAM ---
+export const RAM_OPTIMIZED_COMPRESSION = { maxWidth: 800, maxHeight: 800, quality: 0.6 };
+
 /**
  * Compresses an image to a maximum dimension and quality to avoid hitting Firestore 1MB document limit.
  */
-export const compressImage = (file: File, maxWidth = 1024, maxHeight = 1024, quality = 0.7): Promise<string> => {
+export const compressImage = (file: File, maxWidth = RAM_OPTIMIZED_COMPRESSION.maxWidth, maxHeight = RAM_OPTIMIZED_COMPRESSION.maxHeight, quality = RAM_OPTIMIZED_COMPRESSION.quality): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
