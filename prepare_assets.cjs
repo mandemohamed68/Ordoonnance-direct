@@ -7,7 +7,7 @@ console.log('--- Préparation des assets Ordonnance Direct ---');
 try {
   // Exécuter la génération des assets avec tsx
   console.log('Génération des icônes et splash screens...');
-  execSync('npx tsx generate-assets.js', { stdio: 'inherit' });
+  execSync('npx tsx build-icons.js', { stdio: 'inherit' });
   
   console.log('Synchronisation avec Capacitor Android...');
   execSync('npx capacitor-assets generate --android', { stdio: 'inherit' });

@@ -53,20 +53,45 @@ const svgSplashStr = `
 `;
 
 async function generate() {
-  await sharp(Buffer.from(svgIconStr)).png().toFile(path.join(assetsDir, 'icon.png'));
-  await sharp(Buffer.from(svgIconStr)).png().toFile(path.join(assetsDir, 'icon-only.png'));
-  await sharp(Buffer.from(svgForegroundStr)).png().toFile(path.join(assetsDir, 'icon-foreground.png'));
+  const logoPath = path.join(process.cwd(), 'public', 'logo-web.png');
+  let iconSource = Buffer.from(svgIconStr);
+  let splashSource = Buffer.from(svgSplashStr);
+  let foregroundSource = Buffer.from(svgForegroundStr);
+
+  if (fs.existsSync(logoPath) && fs.statSync(logoPath).size > 0) {
+    console.log('Utilisation du logo-web.png trouvé...');
+    try {
+      iconSource = await sharp(logoPath)
+        .resize(1024, 1024, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
+        .toBuffer();
+        
+      splashSource = await sharp(logoPath)
+        .resize(2732, 2732, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
+        .toBuffer();
+        
+      foregroundSource = iconSource;
+    } catch (e) {
+      console.warn('Erreur lors de la lecture du logo PNG, passage au mode secours :', e.message);
+    }
+  } else {
+    console.log('Aucun logo-web.png valide trouvé, utilisation du logo de secours...');
+  }
+
+  await sharp(iconSource).png().toFile(path.join(assetsDir, 'icon.png'));
+  await sharp(iconSource).png().toFile(path.join(assetsDir, 'icon-only.png'));
+  await sharp(foregroundSource).png().toFile(path.join(assetsDir, 'icon-foreground.png'));
   await sharp(Buffer.from(svgBackgroundStr)).png().toFile(path.join(assetsDir, 'icon-background.png'));
-  await sharp(Buffer.from(svgSplashStr)).png().toFile(path.join(assetsDir, 'splash.png'));
+  await sharp(splashSource).png().toFile(path.join(assetsDir, 'splash.png'));
   
   // also add them to public to overwrite PWA icons
   const publicDir = path.resolve('public');
   if (fs.existsSync(publicDir)) {
-      await sharp(Buffer.from(svgIconStr)).resize(192, 192).png().toFile(path.join(publicDir, 'logo192.png'));
-      await sharp(Buffer.from(svgIconStr)).resize(512, 512).png().toFile(path.join(publicDir, 'logo512.png'));
+      await sharp(iconSource).resize(32, 32).png().toFile(path.join(publicDir, 'favicon-32x32.png'));
+      await sharp(iconSource).resize(180, 180).png().toFile(path.join(publicDir, 'apple-touch-icon.png'));
+      await sharp(iconSource).resize(512, 512).png().toFile(path.join(publicDir, 'android-chrome-512x512.png'));
   }
   
-  console.log('Icons generated successfully.');
+  console.log('Icons and splash screens generated successfully.');
 }
 
 generate().catch(console.error);
