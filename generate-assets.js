@@ -13,6 +13,9 @@ async function generateAssets() {
   if (fs.existsSync(logoPath) && fs.statSync(logoPath).size > 0) {
     console.log(`Utilisation du logo ${logoPath} pour générer les assets Android...`);
     try {
+      // Test if image is valid
+      await sharp(logoPath).metadata();
+
       // Icon: Resize to 1024x1024 with white background padding if needed
       await sharp(logoPath, { failOnError: false })
         .resize(1024, 1024, {

@@ -61,6 +61,9 @@ async function generate() {
   if (fs.existsSync(logoPath) && fs.statSync(logoPath).size > 0) {
     console.log('Utilisation du logo-web.png trouvé...');
     try {
+      // Test if image is valid
+      await sharp(logoPath).metadata();
+      
       iconSource = await sharp(logoPath)
         .resize(1024, 1024, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
         .toBuffer();
