@@ -102,7 +102,7 @@ export interface Order {
   isHandedOver?: boolean;
   deliveryPhoto?: string;
   deliverySignature?: string;
-  status: 'pending_quote' | 'pending_payment' | 'paid' | 'preparing' | 'ready' | 'delivering' | 'completed' | 'quote_rejected';
+  status: 'pending_quote' | 'pending_payment' | 'verifying_payment' | 'paid' | 'preparing' | 'ready' | 'delivering' | 'completed' | 'quote_rejected';
   patientReview?: {
     rating: number;
     comment: string;

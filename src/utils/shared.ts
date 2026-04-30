@@ -324,6 +324,7 @@ export const getOrderStatusLabel = (status: string): string => {
   switch (s) {
     case 'pending_quote': return 'En attente devis';
     case 'pending_payment': return 'Attente Paiement';
+    case 'verifying_payment': return 'Vérification en cours';
     case 'paid': return 'Payée';
     case 'preparing': return 'En préparation';
     case 'ready': return 'Prête';

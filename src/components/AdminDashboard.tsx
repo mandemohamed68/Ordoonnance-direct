@@ -6,12 +6,12 @@ import {
   TrendingUp, DollarSign, BarChart3, Lock, CreditCard, Terminal, UserCog, Power, X, Download, MessageSquare, Database,
   Plus, MapPin, Percent, Navigation, Camera
 } from 'lucide-react';
-import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase';
 import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION, getPrescriptionStatusLabel, getOrderStatusLabel } from '../utils/shared';
+import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION, getPrescriptionStatusLabel, getOrderStatusLabel, notifyDeliveryDrivers } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
 import { ScriptManager } from './ScriptManager';
 import { DatabaseExplorer } from './DatabaseExplorer';
@@ -818,6 +818,90 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     }
   };
 
+  const handleAdminVerifyPayment = async (order: Order, isApproved: boolean) => {
+    const toastId = toast.loading(isApproved ? "Validation du paiement..." : "Rejet du paiement...");
+    try {
+      if (isApproved) {
+        const deliveryPin = Math.floor(1000 + Math.random() * 9000).toString();
+        
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'paid',
+          paymentStatus: 'completed',
+          paymentConfirmedAt: serverTimestamp(),
+          deliveryCode: deliveryPin,
+          updatedAt: serverTimestamp(),
+          history: arrayUnion({
+            status: 'paid',
+            timestamp: new Date().toISOString(),
+            label: 'Paiement confirmé manuellement par l\'administration.'
+          })
+        });
+
+        // Update pharmacy active orders
+        if (order.pharmacyId) {
+          await updateDoc(doc(db, 'pharmacies', order.pharmacyId), {
+            currentActiveOrders: increment(1)
+          });
+        }
+
+        // Notify patient
+        await createNotification(
+          order.patientId, 
+          "Paiement validé", 
+          `L'administration a confirmé la réception de votre paiement pour la commande #${order.id.slice(-6).toUpperCase()}. La préparation commence !`, 
+          'payment', 
+          order.id
+        );
+
+        // Notify pharmacist
+        if (order.pharmacistId) {
+          await createNotification(
+            order.pharmacistId, 
+            "Paiement confirmé", 
+            `Le paiement de la commande #${order.id.slice(-6).toUpperCase()} a été validé. Vous pouvez préparer les médicaments.`, 
+            'payment', 
+            order.id
+          );
+        }
+
+        // Notify drivers if delivery
+        if (order.deliveryMethod === 'delivery') {
+          const cityName = cities.find(c => c.id === order.cityId)?.name || "";
+          const deliveryDest = cityName ? `vers ${cityName}` : "pour livraison";
+          notifyDeliveryDrivers("Nouvelle livraison disponible", `Une livraison est prête de ${order.pharmacyName} ${deliveryDest}.`, order.id);
+        }
+
+        await addSystemLog('PAYMENT_VERIFIED', `Paiement pour la commande ${order.id} validé par l'admin ${profile.name}`);
+        toast.success("Paiement validé et commande activée.", { id: toastId });
+      } else {
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'pending_payment', // Back to payment selection
+          paymentStatus: 'failed',
+          updatedAt: serverTimestamp(),
+          history: arrayUnion({
+            status: 'payment_failed',
+            timestamp: new Date().toISOString(),
+            label: 'Paiement rejeté par l\'administration (SMS non reçu ou montant incorrect).'
+          })
+        });
+
+        await createNotification(
+          order.patientId, 
+          "Paiement rejeté", 
+          `Nous n'avons pas pu confirmer votre paiement pour la commande #${order.id.slice(-6).toUpperCase()}. Veuillez réessayer ou contacter le support.`, 
+          'payment', 
+          order.id
+        );
+
+        await addSystemLog('PAYMENT_REJECTED', `Paiement pour la commande ${order.id} REJETÉ par l'admin ${profile.name}`, 'warning');
+        toast.info("Paiement rejeté. Le patient a été notifié.", { id: toastId });
+      }
+    } catch (error) {
+      console.error("Payment verification error:", error);
+      toast.error("Erreur lors de la vérification.", { id: toastId });
+    }
+  };
+
   const handleUpdateUserStatus = async (uid: string, newStatus: string) => {
     try {
       await updateDoc(doc(db, 'users', uid), { status: newStatus });
@@ -1369,12 +1453,88 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               exit={{ opacity: 0, y: -20 }}
               className="w-full"
             >
-              <div className="space-y-4">
+              <div className="space-y-8">
+                {/* section: Payment Verification */}
+                <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                  <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-indigo-50/30">
+                    <div>
+                      <h3 className="text-xl font-bold flex items-center gap-2">
+                        <CreditCard className="text-indigo-600" size={24} />
+                        Paiements USSD à vérifier
+                      </h3>
+                      <p className="text-sm text-slate-500 mt-1">Validez les transactions après réception du SMS de confirmation sur le téléphone marchand.</p>
+                    </div>
+                    <div className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-2xl text-[10px] font-black uppercase tracking-widest">
+                      {orders.filter(o => o.status === 'verifying_payment').length} En attente
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-400">
+                          <th className="p-4 font-black">Commande / Patient</th>
+                          <th className="p-4 font-black">Montant / Méthode</th>
+                          <th className="p-4 font-black">Infos Paiement</th>
+                          <th className="p-4 font-black text-right">Actions de Validation</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {orders.filter(o => o.status === 'verifying_payment').length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="p-8 text-center text-slate-400 font-bold bg-white">
+                              Aucun paiement en attente de vérification.
+                            </td>
+                          </tr>
+                        ) : (
+                          orders.filter(o => o.status === 'verifying_payment').map((order) => (
+                            <tr key={order.id} className="hover:bg-indigo-50/20 transition-colors">
+                              <td className="p-4">
+                                <div className="font-bold text-slate-900 leading-tight">#{order.id.slice(-6).toUpperCase()}</div>
+                                <div className="text-sm text-indigo-600 font-black mt-1 uppercase tracking-tight">{order.patientName}</div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase mt-1">Déclaré le {formatDate(order.updatedAt, 'dateTime')}</div>
+                              </td>
+                              <td className="p-4">
+                                <div className="text-lg font-black text-slate-900">{(order.totalAmount || 0).toLocaleString()} <span className="text-xs">FCFA</span></div>
+                                <div className="flex items-center gap-1 mt-1">
+                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-[9px] font-black uppercase tracking-widest border border-slate-200">
+                                    {order.paymentMethod?.toUpperCase()}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="text-sm font-bold text-slate-700 font-mono">{(order as any).paymentPhone || 'NR'}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 font-bold uppercase tracking-tight italic">Validez si le code correspond au SMS reçu</div>
+                              </td>
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end gap-2 text-white">
+                                  <button 
+                                    onClick={() => handleAdminVerifyPayment(order, true)}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/20 flex items-center gap-2"
+                                  >
+                                    <CheckCircle size={14} /> Confirmer Paiement
+                                  </button>
+                                  <button 
+                                    onClick={() => handleAdminVerifyPayment(order, false)}
+                                    className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl transition-all"
+                                    title="Rejeter"
+                                  >
+                                    <X size={18} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
                 <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
                   <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                      <h3 className="text-xl font-bold">Approbations en attente</h3>
-                      <p className="text-sm text-slate-500 mt-1">Validez ou rejetez les nouvelles inscriptions.</p>
+                      <h3 className="text-xl font-bold">Inscriptions à approuver</h3>
+                      <p className="text-sm text-slate-500 mt-1">Validez ou rejetez les nouveaux comptes (Pharmaciens, Livreurs).</p>
                     </div>
                   </div>
                   <div className="overflow-x-auto">

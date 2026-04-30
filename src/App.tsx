@@ -421,9 +421,9 @@ const StatusTrace = React.memo(({ history, defaultExpanded = false }: { history?
 const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
     <img 
-      src="/logo192.png" 
+      src="/logo-web.png" 
       alt="Ordonnance Direct Logo" 
-      className="w-full h-full object-contain rounded-full border-2 border-white/20 shadow-sm"
+      className="w-full h-full object-contain rounded-full"
       onError={(e) => {
         // Fallback to old cross icon if image is missing
         e.currentTarget.style.display = 'none';
@@ -2728,24 +2728,26 @@ const PatientOrderCard = React.memo(({
               className="absolute top-[14px] left-0 h-[2px] bg-primary rounded-full transition-all duration-1000"
               style={{ 
                 width: (() => {
-                  const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+                  const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'verifying_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
                   const idx = stepsArr.indexOf(o.status);
                   if (idx < 4) return '0%';
-                  if (idx === 4) return '25%';
-                  if (idx === 5) return '50%';
-                  if (idx === 6) return '75%';
+                  if (idx === 4) return '15%'; // verifying_payment
+                  if (idx === 5) return '35%'; // paid
+                  if (idx === 6) return '55%'; // preparing
+                  if (idx === 7) return '80%'; // ready
                   return '100%';
                 })()
               }}
             ></div>
             <div className="flex justify-between relative z-10 w-full">
               {[
+                { label: 'Vérif', status: 'verifying_payment', icon: ShieldCheck },
                 { label: 'Payé', status: 'paid', icon: CreditCard },
                 { label: 'Prépa', status: 'preparing', icon: FlaskConical },
                 { label: 'Prêt', status: 'ready', icon: CheckCircle2 },
                 { label: 'Livré', status: 'completed', icon: Home },
               ].map((s, idx) => {
-                const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+                const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'verifying_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
                 const currentStepIdx = stepsArr.indexOf(o.status);
                 const targetStepIdx = stepsArr.indexOf(s.status);
                 const isDone = currentStepIdx >= targetStepIdx && targetStepIdx !== -1;
@@ -2802,6 +2804,25 @@ const PatientOrderCard = React.memo(({
                       <img src={o.deliverySignature} className="max-h-full object-contain" />
                     </button>
                   )}
+                </div>
+              </div>
+            )}
+
+            {o.status === 'verifying_payment' && (
+              <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between group/verify">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center animate-pulse">
+                    <ShieldCheck size={24} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900">Vérification en cours</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
+                      Un agent confirme votre paiement USSD.<br/>Reçu par SMS sous peu.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end">
+                  <div className="w-5 h-5 border-2 border-indigo-600/30 border-t-indigo-600 rounded-full animate-spin"></div>
                 </div>
               </div>
             )}
@@ -3728,13 +3749,16 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
       const deliveryPin = generateCode();
 
-      await updateDoc(doc(db, 'orders', order.id), {
-        status: 'paid',
+      // USSD/Manual methods now go to 'verifying_payment' first
+      const isManualCheckNeeded = ['orange', 'moov', 'telecel', 'sank', 'coris'].includes(method);
+      const nextStatus = isManualCheckNeeded ? 'verifying_payment' : 'paid';
+
+      const orderUpdate: any = {
+        status: nextStatus,
         paymentMethod: method,
         paymentPhone: paymentPhone,
-        paymentStatus: 'completed',
+        paymentStatus: isManualCheckNeeded ? 'pending_verification' : 'completed',
         sappayInvoiceId: paymentInvoiceId,
-        deliveryCode: deliveryPin,
         medicationTotal,
         deliveryFee,
         serviceFee,
@@ -3744,11 +3768,20 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         platformFee: finalPlatformFee,
         updatedAt: serverTimestamp(),
         history: arrayUnion({
-          status: 'paid',
+          status: nextStatus,
           timestamp: new Date().toISOString(),
-          label: `Paiement effectué via ${method.toUpperCase()}`
+          label: isManualCheckNeeded 
+            ? `Paiement ${method.toUpperCase()} déclaré. En attente de validation par l'administration.` 
+            : `Paiement effectué via ${method.toUpperCase()}`
         })
-      });
+      };
+
+      if (nextStatus === 'paid') {
+        orderUpdate.deliveryCode = deliveryPin;
+        orderUpdate.paymentConfirmedAt = serverTimestamp();
+      }
+
+      await updateDoc(doc(db, 'orders', order.id), orderUpdate);
 
       if (order.prescriptionId) {
         try {
@@ -3762,19 +3795,36 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         }
       }
 
-      await createNotification(order.patientId, "Paiement confirmé", `Votre paiement de ${totalToPay} FCFA pour la commande #${order.id.slice(-6).toUpperCase()} a été reçu.`, 'payment', order.id);
-      if (order.pharmacistId) {
-        await createNotification(order.pharmacistId, "Nouveau paiement", `Le patient a payé la commande #${order.id.slice(-6).toUpperCase()}. Vous pouvez commencer la préparation.`, 'payment', order.id);
-      }
-      
-      if (order.deliveryMethod === 'delivery') {
-        const cityName = cities.find(c => c.id === order.cityId)?.name || "";
-        const deliveryDest = cityName ? `vers ${cityName}` : "pour livraison";
-        await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une livraison est prête de ${order.pharmacyName} ${deliveryDest}. (Prescription: ${order.hospitalLocation})`, order.id);
+      if (isManualCheckNeeded) {
+        // Notify Admins
+        const adminsQuery = query(collection(db, 'users'), where('role', 'in', ['admin', 'super-admin']));
+        const adminsSnap = await getDocs(adminsQuery);
+        adminsSnap.forEach(adminDoc => {
+          createNotification(adminDoc.id, "Paiement à vérifier", `La commande #${order.id.slice(-6).toUpperCase()} attend votre validation.`, 'payment', order.id);
+        });
+        
+        await createNotification(order.patientId, "Paiement en vérification", `Nous vérifions votre transaction de ${totalToPay} FCFA. Un agent validera votre commande dès réception du SMS de confirmation.`, 'payment', order.id);
+      } else {
+        if (order.pharmacyId) {
+          await updateDoc(doc(db, 'pharmacies', order.pharmacyId), {
+            currentActiveOrders: increment(1)
+          });
+        }
+        
+        await createNotification(order.patientId, "Paiement confirmé", `Votre paiement de ${totalToPay} FCFA pour la commande #${order.id.slice(-6).toUpperCase()} a été reçu.`, 'payment', order.id);
+        if (order.pharmacistId) {
+          await createNotification(order.pharmacistId, "Nouveau paiement", `Le patient a payé la commande #${order.id.slice(-6).toUpperCase()}. Vous pouvez commencer la préparation.`, 'payment', order.id);
+        }
+        
+        if (order.deliveryMethod === 'delivery') {
+          const cityName = cities.find(c => c.id === order.cityId)?.name || "";
+          const deliveryDest = cityName ? `vers ${cityName}` : "pour livraison";
+          await notifyDeliveryDrivers("Nouvelle livraison disponible", `Une livraison est prête de ${order.pharmacyName} ${deliveryDest}.`, order.id);
+        }
       }
 
       setPaymentStep('success');
-      toast.success("Paiement effectué avec succès !");
+      toast.success(isManualCheckNeeded ? "Transaction envoyée pour vérification." : "Paiement effectué avec succès !");
       
       setTimeout(() => {
         setShowPaymentModal(null);
@@ -5309,6 +5359,7 @@ const PharmacistOrderCard = React.memo(({
         <div className="flex items-center gap-2">
           <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
             o.status === 'paid' ? 'bg-emerald-500 text-white' : 
+            o.status === 'verifying_payment' ? 'bg-amber-100 text-amber-700' :
             o.status === 'preparing' ? 'bg-indigo-500 text-white' :
             o.status === 'ready' ? 'bg-emerald-600 text-white' :
             o.status === 'delivering' ? 'bg-sky-500 text-white' :
@@ -5414,6 +5465,14 @@ const PharmacistOrderCard = React.memo(({
           ) : o.status === 'pending_payment' ? (
             <div className="text-center p-4 bg-slate-50 rounded-2xl">
               <p className="text-xs text-slate-400 font-medium">En attente de paiement par le client</p>
+            </div>
+          ) : o.status === 'verifying_payment' ? (
+            <div className="text-center p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 ring-1 ring-indigo-200">
+              <div className="flex items-center justify-center gap-2 text-indigo-700 mb-1">
+                <ShieldCheck size={14} />
+                <p className="text-xs font-black uppercase tracking-tight">Validation Admin en cours</p>
+              </div>
+              <p className="text-[9px] text-indigo-500 font-bold leading-tight">Patient a déclaré le paiement USSD.<br/>En attente du feu vert administratif.</p>
             </div>
           ) : o.status === 'ready' && !o.deliveryMethod ? (
             <div className="text-center p-4 bg-amber-50 rounded-2xl border border-amber-100">
