@@ -13,7 +13,8 @@
     "cap:sync": "npx cap sync",
     "cap:open:android": "npx cap open android",
     "cap:build:android": "npm run build && npx cap sync && npx cap open android",
-    "cap:assets": "npx capacitor-assets generate --android"
+    "cap:assets": "npx capacitor-assets generate --android",
+    "prepare-assets": "node prepare_assets.cjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
