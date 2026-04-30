@@ -64,6 +64,7 @@ async function generate() {
       // Test if image is valid
       await sharp(logoPath).metadata();
       
+      console.log('Logo valide détecté, génération des assets...');
       iconSource = await sharp(logoPath)
         .resize(1024, 1024, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
         .toBuffer();
