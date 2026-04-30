@@ -421,7 +421,7 @@ const StatusTrace = React.memo(({ history, defaultExpanded = false }: { history?
 const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
     <img 
-      src="/logo-web.png" 
+      src="/android-chrome-512x512.png" 
       alt="Ordonnance Direct Logo" 
       className="w-full h-full object-contain rounded-full"
       onError={(e) => {
@@ -429,7 +429,9 @@ const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, cla
         e.currentTarget.style.display = 'none';
         const svg = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="${className}"><rect width="100" height="100" rx="24" fill="#10b981" /><path d="M35 25C35 22.2386 37.2386 20 40 20H60C62.7614 20 65 22.2386 65 25V75C65 77.7614 62.7614 80 60 80H40C37.2386 80 35 77.7614 35 75V25Z" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M42 20V25H58V20" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M30 50H70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M50 30V70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M35 75V85H65L75 75" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M65 85L75 75L65 65" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/></svg>`;
         if (e.currentTarget.parentElement) {
-          e.currentTarget.parentElement.innerHTML = svg;
+          const div = document.createElement('div');
+          div.innerHTML = svg;
+          e.currentTarget.parentElement.appendChild(div.firstChild!);
         }
       }}
     />
