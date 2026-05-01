@@ -196,6 +196,21 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["orderId", "senderId", "text", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Global announcement for users managed by admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "warning", "success", "urgent"] },
+        "targetRoles": { "type": "array", "items": { "type": "string" }, "description": "Roles like 'patient', 'pharmacist', 'delivery' or 'all'." },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "content", "type", "active", "createdAt"]
     }
   },
   "firestore": {
@@ -210,6 +225,7 @@
     "/transactions/{transactionId}": { "schema": "Transaction", "description": "Wallet transactions." },
     "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications." },
     "/cities/{cityId}": { "schema": "City", "description": "City configurations." },
-    "/on_call_rotation/{rotationId}": { "schema": "OnCallRotation", "description": "Global rotation settings." }
+    "/on_call_rotation/{rotationId}": { "schema": "OnCallRotation", "description": "Global rotation settings." },
+    "/announcements/{announcementId}": { "schema": "Announcement", "description": "Global announcements." }
   }
 }

@@ -36,9 +36,9 @@
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then(registration => {
-            console.log('SW registered: ', registration);
+            // SW registered
           }).catch(registrationError => {
-            console.log('SW registration failed: ', registrationError);
+            // SW registration failed
           });
         });
       }
@@ -55,7 +55,6 @@
           errorLog.innerHTML += '<br/>Promise Rejection: ' + (event.reason ? (event.reason.message || event.reason) : 'Unknown');
         }
       });
-      console.log('HTML Root Ready. Loading main.tsx...');
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

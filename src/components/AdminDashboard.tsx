@@ -1,22 +1,22 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, 
+  Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, Megaphone,
   Users, Activity, FileText, Package, ShieldCheck, Trash2, Search,
   TrendingUp, DollarSign, BarChart3, Lock, CreditCard, Terminal, UserCog, Power, X, Download, MessageSquare, Database,
   Plus, MapPin, Percent, Navigation, Camera
 } from 'lucide-react';
 import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase';
-import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation } from '../types';
+import { UserProfile, Settings, Order, Prescription, Pharmacy, WithdrawalRequest, SystemLog, City, OnCallRotation, Announcement } from '../types';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION, getPrescriptionStatusLabel, getOrderStatusLabel, notifyDeliveryDrivers } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
-import { ScriptManager } from './ScriptManager';
-import { DatabaseExplorer } from './DatabaseExplorer';
-import { DataAnalyst } from './DataAnalyst';
-import { OrderChat } from './OrderChat';
+const ScriptManager = lazy(() => import('./ScriptManager').then(m => ({ default: m.ScriptManager })));
+const DatabaseExplorer = lazy(() => import('./DatabaseExplorer').then(m => ({ default: m.DatabaseExplorer })));
+const DataAnalyst = lazy(() => import('./DataAnalyst').then(m => ({ default: m.DataAnalyst })));
+const OrderChat = lazy(() => import('./OrderChat').then(m => ({ default: m.OrderChat })));
 import { PHARMACIES_OUAGA } from '../data/pharmacies_ouaga';
 
 import { getApiUrl } from '../config';
@@ -155,7 +155,7 @@ const FinancialReconciliation = React.memo(({ orders }: { orders: Order[] }) => 
 
 export const AdminDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
   const [systemStatus, setSystemStatus] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall' | 'announcements'>('overview');
   const [cities, setCities] = useState<City[]>([]);
 
   useEffect(() => {
@@ -237,6 +237,16 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
   const [selectedRoleForPerms, setSelectedRoleForPerms] = useState<string | null>(null);
   
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [newAnnouncement, setNewAnnouncement] = useState<Partial<Announcement>>({
+    title: '',
+    content: '',
+    type: 'info',
+    targetRoles: ['all'],
+    active: true
+  });
   const [orders, setOrders] = useState<Order[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
@@ -540,9 +550,15 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
       }
     });
+
+    const unsubAnnouncements = onSnapshot(query(collection(db, 'announcements'), orderBy('createdAt', 'desc')), (snapshot) => {
+      setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
+    });
+
     return () => {
       unsubCities();
       unsubRotation();
+      unsubAnnouncements();
     };
   }, []);
 
@@ -1046,6 +1062,51 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     }
   };
 
+  const handleSaveAnnouncement = async () => {
+    if (!newAnnouncement.title || !newAnnouncement.content) {
+      toast.error("Veuillez remplir le titre et le contenu.");
+      return;
+    }
+    try {
+      const id = editingAnnouncement?.id || 'ann_' + Date.now().toString(36);
+      const data = {
+        ...newAnnouncement,
+        id,
+        active: newAnnouncement.active ?? true,
+        createdAt: editingAnnouncement?.createdAt || serverTimestamp(),
+      };
+      await setDoc(doc(db, 'announcements', id), data, { merge: true });
+      toast.success(editingAnnouncement ? "Annonce mise à jour" : "Annonce créée");
+      setIsAddingAnnouncement(false);
+      setEditingAnnouncement(null);
+      setNewAnnouncement({ title: '', content: '', type: 'info', targetRoles: ['all'], active: true });
+      await addSystemLog(editingAnnouncement ? 'UPDATE_ANNOUNCEMENT' : 'CREATE_ANNOUNCEMENT', `Annonce: ${newAnnouncement.title}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'announcements');
+      toast.error("Échec de l'enregistrement de l'annonce");
+    }
+  };
+
+  const handleToggleAnnouncement = async (annId: string, active: boolean) => {
+    try {
+      await updateDoc(doc(db, 'announcements', annId), { active });
+      toast.success(active ? "Annonce activée" : "Annonce désactivée");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `announcements/${annId}`);
+    }
+  };
+
+  const handleDeleteAnnouncement = async (annId: string) => {
+    if (!confirm("Supprimer cette annonce ?")) return;
+    try {
+      await deleteDoc(doc(db, 'announcements', annId));
+      toast.success("Annonce supprimée");
+      await addSystemLog('DELETE_ANNOUNCEMENT', `Annonce supprimée: ${annId}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `announcements/${annId}`);
+    }
+  };
+
   const handleProcessWithdrawal = async (withdrawalId: string, status: 'approved' | 'rejected') => {
     try {
       const withdrawal = withdrawals.find(w => w.id === withdrawalId);
@@ -1158,6 +1219,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               { id: 'users', label: 'Users', icon: Users },
               { id: 'pharmacies', label: 'Pharma', icon: Package },
               { id: 'orders', label: 'CMD', icon: Truck },
+              { id: 'announcements', label: 'Annonces', icon: Megaphone },
               { id: 'settings', label: 'Param', icon: SettingsIcon },
             ].map(tab => (
               <button
@@ -1196,6 +1258,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                 category: 'Général',
                 items: [
                   { id: 'overview', label: "Vue d'ensemble", icon: Activity, color: 'text-primary', bg: 'bg-primary/5' },
+                  { id: 'announcements', label: 'Annonces Globales', icon: Megaphone, color: 'text-orange-600', bg: 'bg-orange-50' },
                   { id: 'support', label: 'Support Chat', icon: MessageSquare, color: 'text-primary', bg: 'bg-primary/5', badge: (supportChats || []).reduce((acc, chat) => acc + (chat.unreadAdminCount || 0), 0) },
                 ]
               },
@@ -1445,7 +1508,106 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
             </>
           )}
 
-          {activeTab === 'approvals' && (
+              {activeTab === 'announcements' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-2xl font-black text-slate-800">Annonces Globales</h3>
+                      <p className="text-slate-500">Gérez les messages diffusés à tous les intervenants.</p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setEditingAnnouncement(null);
+                        setNewAnnouncement({ title: '', content: '', type: 'info', targetRoles: ['all'], active: true });
+                        setIsAddingAnnouncement(true);
+                      }}
+                      className="bg-primary text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 hover:scale-105 transition-transform"
+                    >
+                      <Plus size={20} /> Nouvelle Annonce
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {announcements.map(ann => (
+                      <div key={ann.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                              ann.type === 'urgent' ? 'bg-rose-100 text-rose-600' :
+                              ann.type === 'warning' ? 'bg-amber-100 text-amber-600' :
+                              ann.type === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'
+                            }`}>
+                              <Megaphone size={24} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-lg font-black text-slate-900">{ann.title}</h4>
+                                <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${
+                                  ann.type === 'urgent' ? 'bg-rose-100 text-rose-700' :
+                                  ann.type === 'warning' ? 'bg-amber-100 text-amber-700' :
+                                  ann.type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {ann.type}
+                                </span>
+                              </div>
+                              <p className="text-sm text-slate-500 mt-1 line-clamp-2">{ann.content}</p>
+                              <div className="flex items-center gap-4 mt-3">
+                                <div className="flex items-center gap-1">
+                                  <Users size={12} className="text-slate-400" />
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                    Cible: {ann.targetRoles.includes('all') ? 'Tous' : ann.targetRoles.join(', ')}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Activity size={12} className="text-slate-400" />
+                                  <span className={`text-[10px] font-bold uppercase tracking-widest ${ann.active ? 'text-emerald-500' : 'text-slate-400'}`}>
+                                    {ann.active ? 'Active' : 'Inactive'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={() => {
+                                setEditingAnnouncement(ann);
+                                setNewAnnouncement(ann);
+                                setIsAddingAnnouncement(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-xl transition-all"
+                            >
+                              <SettingsIcon size={18} />
+                            </button>
+                            <button 
+                              onClick={() => handleToggleAnnouncement(ann.id, !ann.active)}
+                              className={`p-2 rounded-xl transition-all ${ann.active ? 'text-amber-500 hover:bg-amber-50' : 'text-emerald-500 hover:bg-emerald-50'}`}
+                            >
+                              <Power size={18} />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteAnnouncement(ann.id)}
+                              className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {announcements.length === 0 && (
+                      <div className="bg-slate-50 rounded-3xl p-12 text-center border-2 border-dashed border-slate-200">
+                        <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-slate-300 mx-auto mb-4 shadow-sm">
+                          <Megaphone size={32} />
+                        </div>
+                        <h4 className="text-slate-500 font-bold">Aucune annonce configurée</h4>
+                        <p className="text-slate-400 text-sm mt-1">Créez votre première annonce pour informer vos utilisateurs.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'approvals' && (
             <motion.div
               key="approvals"
               initial={{ opacity: 0, y: 20 }}
@@ -3699,7 +3861,9 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               </div>
             </div>
           </div>
-          <ScriptManager />
+          <Suspense fallback={<div className="p-8 text-center text-slate-400">Chargement de la console...</div>}>
+            <ScriptManager />
+          </Suspense>
         </div>
         </>
       )}
@@ -3707,7 +3871,9 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       {activeTab === 'analytics' && (
         <>
           <div className="space-y-8">
+          <Suspense fallback={<div className="p-8 text-center text-slate-400">Analyse des données en cours...</div>}>
             <DataAnalyst />
+          </Suspense>
           </div>
         </>
       )}
@@ -3749,7 +3915,9 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
             </div>
           </div>
           <div className="space-y-8">
+          <Suspense fallback={<div className="p-8 text-center text-slate-400">Exploration de la base de données...</div>}>
             <DatabaseExplorer />
+          </Suspense>
           </div>
         </div>
       )}
@@ -4230,7 +4398,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
 
               <div className="space-y-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
                 <h4 className="text-sm font-bold text-slate-900 mb-2">Comptes Marchands (Paiements Clients)</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold text-orange-600 uppercase tracking-widest">Orange Money</label>
                     <input 
@@ -4277,6 +4445,22 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                       })}
                       placeholder="Numéro Marchand"
                       className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-red-500/20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-sky-600 uppercase tracking-widest">Coris Money</label>
+                    <input 
+                      type="text"
+                      value={editSettings.paymentConfig?.paymentAccounts?.corisMoney || ''}
+                      onChange={(e) => setEditSettings({
+                        ...editSettings,
+                        paymentConfig: {
+                          ...editSettings.paymentConfig!,
+                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), corisMoney: e.target.value }
+                        }
+                      })}
+                      placeholder="ID Coris Money"
+                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-sky-500/20"
                     />
                   </div>
                 </div>
@@ -4727,6 +4911,126 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
 </AnimatePresence>
 
 <AnimatePresence>
+  {isAddingAnnouncement && (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white rounded-[2.5rem] p-6 max-w-lg w-full shadow-2xl overflow-y-auto max-h-[90vh]"
+      >
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-2xl font-black text-slate-900">
+            {editingAnnouncement ? "Modifier l'annonce" : "Nouvelle Annonce"}
+          </h3>
+          <button onClick={() => setIsAddingAnnouncement(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Titre</label>
+            <input 
+              type="text" 
+              value={newAnnouncement.title}
+              onChange={(e) => setNewAnnouncement({...newAnnouncement, title: e.target.value})}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              placeholder="Ex: Maintenance prévue"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Contenu</label>
+            <textarea 
+              value={newAnnouncement.content}
+              onChange={(e) => setNewAnnouncement({...newAnnouncement, content: e.target.value})}
+              rows={4}
+              className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all resize-none"
+              placeholder="Écrivez votre message ici..."
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Type</label>
+              <select
+                value={newAnnouncement.type}
+                onChange={(e) => setNewAnnouncement({...newAnnouncement, type: e.target.value as any})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                <option value="info">Information (Bleu)</option>
+                <option value="warning">Avertissement (Orange)</option>
+                <option value="urgent">Urgent (Rouge)</option>
+                <option value="success">Succès (Vert)</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Statut</label>
+              <select
+                value={newAnnouncement.active ? 'active' : 'inactive'}
+                onChange={(e) => setNewAnnouncement({...newAnnouncement, active: e.target.value === 'active'})}
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                <option value="active">Active (Visible)</option>
+                <option value="inactive">Inactive (Masquée)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Destinataires</label>
+            <div className="flex flex-wrap gap-2">
+              {['all', 'patient', 'pharmacist', 'delivery'].map(role => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => {
+                    const current = newAnnouncement.targetRoles || [];
+                    if (role === 'all') {
+                      setNewAnnouncement({...newAnnouncement, targetRoles: ['all']});
+                    } else {
+                      let next = current.filter(r => r !== 'all');
+                      if (next.includes(role)) {
+                        next = next.filter(r => r !== role);
+                        if (next.length === 0) next = ['all'];
+                      } else {
+                        next.push(role);
+                      }
+                      setNewAnnouncement({...newAnnouncement, targetRoles: next});
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    (newAnnouncement.targetRoles || []).includes(role)
+                      ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                      : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                  }`}
+                >
+                  {role === 'all' ? 'Tous' : role === 'patient' ? 'Patients' : role === 'pharmacist' ? 'Pharmaciens' : 'Livreurs'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button 
+            onClick={handleSaveAnnouncement}
+            className="w-full bg-primary text-white py-4 rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 mt-4 flex items-center justify-center gap-2"
+          >
+            <Megaphone size={20} />
+            {editingAnnouncement ? "Mettre à jour l'annonce" : "Publier l'annonce"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )}
+</AnimatePresence>
+
+<AnimatePresence>
   {editingDeliveryUser && (
     <motion.div
       initial={{ opacity: 0 }}
@@ -4867,13 +5171,15 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
   )}
 </AnimatePresence>
       {activeChatOrderId && (
-        <OrderChat 
-          orderId={activeChatOrderId} 
-          userId={profile.uid} 
-          userName={profile.name} 
-          userRole="admin"
-          onClose={() => setActiveChatOrderId(null)} 
-        />
+        <Suspense fallback={null}>
+          <OrderChat 
+            orderId={activeChatOrderId} 
+            userId={profile.uid} 
+            userName={profile.name} 
+            userRole="admin"
+            onClose={() => setActiveChatOrderId(null)} 
+          />
+        </Suspense>
       )}
   </PullToRefresh>
   );

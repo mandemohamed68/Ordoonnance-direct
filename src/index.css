@@ -21,10 +21,14 @@
     @apply bg-slate-50 text-slate-900 antialiased selection:bg-primary/20 selection:text-primary;
     min-height: 100vh;
     min-height: -webkit-fill-available;
+    /* --- Android APK Fluidity Optimizations --- */
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
   }
   
   html {
     height: -webkit-fill-available;
+    scroll-behavior: smooth;
   }
   
   h1, h2, h3, h4 {
@@ -90,6 +94,19 @@
   
   .safe-area-pb {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  /* Hardware Acceleration for smooth animations and transitions */
+  .gpu-accelerated {
+    transform: translateZ(0);
+    will-change: transform, opacity;
+    backface-visibility: hidden;
+    perspective: 1000px;
+  }
+
+  /* Reduce memory footprint by limiting layout calculations */
+  .content-contain {
+    contain: content;
   }
 }
 

@@ -175,6 +175,7 @@ export interface Settings {
       orangeMoney?: string;
       moovMoney?: string;
       telecelCash?: string;
+      corisMoney?: string;
       bankName?: string;
       bankAccountName?: string;
       bankAccountNumber?: string;
@@ -281,4 +282,14 @@ export interface OfflinePrescription {
   patientLocation?: { lat: number; lng: number };
   cityId?: string;
   createdAt: number;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  type: 'info' | 'warning' | 'success' | 'urgent';
+  targetRoles: string[]; // ['patient', 'pharmacist', 'delivery', 'all']
+  active: boolean;
+  createdAt: any;
 }

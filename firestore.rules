@@ -1,6 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Default deny for all collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // ===============================================================
     // Assumed Data Model
     // ===============================================================
@@ -214,6 +219,17 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['id', 'title', 'content', 'type', 'active', 'createdAt', 'targetRoles']) &&
+             data.id is string &&
+             data.title is string && data.title.size() < 200 &&
+             data.content is string && data.content.size() < 5000 &&
+             data.type in ['info', 'warning', 'success', 'urgent'] &&
+             data.active is bool &&
+             data.targetRoles is list &&
+             (data.createdAt is timestamp || data.createdAt == request.time);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -361,6 +377,13 @@ service cloud.firestore {
                       get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.deliveryId == request.auth.uid
                     );
       allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidAnnouncement(request.resource.data);
+      allow update: if isAdmin() && isValidAnnouncement(request.resource.data);
       allow delete: if isAdmin();
     }
   }

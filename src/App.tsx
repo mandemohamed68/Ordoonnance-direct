@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense, lazy } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -35,9 +35,15 @@ import {
   increment,
   writeBatch
 } from 'firebase/firestore';
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const ReportsView = lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
+const MapComponent = lazy(() => import('./components/MapComponent'));
+const OrderChat = lazy(() => import('./components/OrderChat').then(m => ({ default: m.OrderChat })));
+const Legal = lazy(() => import('./components/Legal').then(m => ({ default: m.Legal })));
+
 import { auth, db, handleFirestoreError, OperationType, messaging } from './firebase';
 import { getToken, onMessage } from 'firebase/messaging';
-import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest, City, OnCallRotation } from './types';
+import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest, City, OnCallRotation, Announcement } from './types';
 import { 
   Camera, 
   Upload, 
@@ -73,6 +79,7 @@ import {
   TrendingUp,
   Save,
   Bell,
+  Megaphone,
   BellOff,
   Terminal,
   Store,
@@ -100,14 +107,8 @@ import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { PullToRefresh } from './components/PullToRefresh';
-import { OrderChat } from './components/OrderChat';
 import { getApiUrl } from './config';
 import { GoogleGenAI, ThinkingLevel, Modality } from "@google/genai";
-import { AdminDashboard } from './components/AdminDashboard';
-import { Legal } from './components/Legal';
-import { ReportsView } from './components/ReportsView';
-
-const MapComponent = React.lazy(() => import('./components/MapComponent'));
 
 // --- Global Helpers ---
 let globalIsFirstLoad = true;
@@ -614,6 +615,7 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [cities, setCities] = useState<City[]>([]);
   const [rotation, setRotation] = useState<OnCallRotation | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   
   // Failsafe timeout to prevent infinite loading screen
   useEffect(() => {
@@ -788,6 +790,14 @@ export default function App() {
   const [showLegal, setShowLegal] = useState(false);
   const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
 
+  useEffect(() => {
+    const q = query(collection(db, 'announcements'), where('active', '==', true), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
+    }, (err) => console.error("Announcements fetch error:", err));
+    return () => unsub();
+  }, []);
+
   // Request FCM Permission and Token
   useEffect(() => {
     if (!profile?.uid) return;
@@ -914,11 +924,9 @@ export default function App() {
       if (firebaseUser) {
         const docRef = doc(db, 'users', firebaseUser.uid);
         const unsubProfile = onSnapshot(docRef, (docSnap) => {
-          console.log("[Auth] Profile snapshot for", firebaseUser.email, ":", docSnap.exists() ? "exists" : "not found");
           try {
             if (docSnap.exists()) {
               const data = docSnap.data() as UserProfile;
-              console.log("[Auth] Profile role:", data.role, "status:", data.status);
               
               // Force super-admin role for the specific emails
               if (isSuperAdminEmail(firebaseUser.email) && data.role !== 'super-admin') {
@@ -973,7 +981,6 @@ export default function App() {
           } catch (err) {
             console.error("Error processing profile data:", err);
           } finally {
-            console.log("[Auth] Setting isAuthReady to true");
             setLoading(false);
             setIsAuthReady(true);
           }
@@ -998,10 +1005,8 @@ export default function App() {
       return;
     }
     const unsubscribe = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
-      console.log("[Settings] Snapshot received:", docSnap.exists() ? "exists" : "not found");
       if (docSnap.exists()) {
         const data = docSnap.data() as Settings;
-        console.log("[Settings] Data loaded:", data.appName || "Ordonnance Direct");
         setSettings(data);
       } else if (isSuperAdminEmail(user.email)) {
         // Initialize default settings if they don't exist (only for admin)
@@ -1146,18 +1151,6 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    console.log("[App] State Update:", {
-      isAuthReady,
-      loading,
-      hasUser: !!user,
-      hasProfile: !!profile,
-      activeRole,
-      viewMode,
-      hasSettings: !!settings
-    });
-  }, [isAuthReady, loading, user, profile, activeRole, viewMode, settings]);
-
   if (!isAuthReady || (user && loading)) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
@@ -1231,7 +1224,11 @@ export default function App() {
   }
 
   if (showLegal) {
-    return <Legal onBack={() => setShowLegal(false)} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-400">Chargement...</div>}>
+        <Legal onBack={() => setShowLegal(false)} />
+      </Suspense>
+    );
   }
 
   if (!profile) {
@@ -1304,7 +1301,29 @@ export default function App() {
         />
       </div>
 
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50 gpu-accelerated" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
+        <AnimatePresence>
+          {announcements.filter(ann => {
+            if (!activeRole) return false;
+            return ann.targetRoles.includes('all') || ann.targetRoles.includes(activeRole);
+          }).map(ann => (
+            <motion.div
+              key={ann.id}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className={`px-4 py-2 text-center text-xs font-bold border-b transition-colors flex items-center justify-center gap-2 ${
+                ann.type === 'urgent' ? 'bg-rose-500 text-white border-rose-600' :
+                ann.type === 'warning' ? 'bg-amber-500 text-white border-amber-600' :
+                ann.type === 'success' ? 'bg-emerald-500 text-white border-emerald-600' :
+                'bg-blue-600 text-white border-blue-700'
+              }`}
+            >
+              <Megaphone size={14} className="flex-shrink-0 animate-bounce" />
+              <span className="line-clamp-1">{ann.content}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
         <div className="max-w-7xl mx-auto px-4 h-14 md:h-16 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setViewMode(profile?.role || null); setIsMobileMenuOpen(false); }}>
             <motion.div 
@@ -1468,7 +1487,7 @@ export default function App() {
         </AnimatePresence>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-0 relative z-10">
+      <main className="max-w-7xl mx-auto px-4 py-0 relative z-10 gpu-accelerated content-contain">
         {(activeRole === 'patient') && (
           <ErrorBoundary>
             <PatientDashboard 
@@ -1493,7 +1512,9 @@ export default function App() {
         )}
         {(activeRole === 'admin' || activeRole === 'super-admin') && (
           <ErrorBoundary>
+          <Suspense fallback={<div className="flex items-center justify-center p-12 text-slate-400 font-medium">Chargement du tableau de bord...</div>}>
             <AdminDashboard profile={effectiveProfile!} settings={settings} />
+          </Suspense>
           </ErrorBoundary>
         )}
         {!activeRole && (
@@ -1720,7 +1741,7 @@ export default function App() {
                     </div>
                     <div className="flex gap-4">
                       <div className="w-8 h-8 rounded-full bg-slate-100 font-black text-sm flex items-center justify-center shrink-0">3</div>
-                      <p className="text-slate-600"><strong className="text-slate-900">Payez en ligne.</strong> Optez pour le devis de votre choix et payez avec Orange Money, Moov, Sank Money ou Carte bancaire.</p>
+                      <p className="text-slate-600"><strong className="text-slate-900">Payez en ligne.</strong> Optez pour le devis de votre choix et payez avec Orange Money, Moov, Telecel ou Coris Money.</p>
                     </div>
                     <div className="flex gap-4">
                       <div className="w-8 h-8 rounded-full bg-slate-100 font-black text-sm flex items-center justify-center shrink-0">4</div>
@@ -2955,7 +2976,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const [selectedMeds, setSelectedMeds] = useState<string[]>([]);
   const [showDeliveryConfirm, setShowDeliveryConfirm] = useState<{ orderId: string, fee: number } | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState<Order | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'orange' | 'moov' | 'telecel' | 'card' | 'bank' | 'sank' | 'coris' | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'orange' | 'moov' | 'telecel' | 'coris' | null>(null);
   const [paymentPhone, setPaymentPhone] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'method' | 'phone' | 'otp' | 'processing' | 'success'>('method');
@@ -3652,7 +3673,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     }
   };
 
-  const initPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris' | 'sank') => {
+  const initPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
     if (!showPaymentModal) return;
     if (!paymentPhone) {
       toast.error("Veuillez entrer votre numéro de téléphone.");
@@ -3688,7 +3709,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     }
   };
 
-  const performPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris' | 'sank') => {
+  const performPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
     if (!showPaymentModal) {
       toast.error("Erreur: Aucune commande sélectionnée.");
       return;
@@ -3752,7 +3773,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       const deliveryPin = generateCode();
 
       // USSD/Manual methods now go to 'verifying_payment' first
-      const isManualCheckNeeded = ['orange', 'moov', 'telecel', 'sank', 'coris'].includes(method);
+      const isManualCheckNeeded = ['orange', 'moov', 'telecel', 'coris'].includes(method);
       const nextStatus = isManualCheckNeeded ? 'verifying_payment' : 'paid';
 
       const orderUpdate: any = {
@@ -4524,14 +4545,15 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
               <div className="space-y-4">
                 {(!settings?.paymentConfig || settings.paymentConfig.mobileMoneyEnabled) && !selectedPaymentMethod && (
                   <>
-                    <p className="text-left text-sm font-bold text-slate-700 mb-2">Mobile Money</p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <p className="text-left text-sm font-bold text-slate-700 mb-2">Mobile Money (Burkina Faso)</p>
+                    <div className="grid grid-cols-2 gap-3">
                       <button 
                         onClick={() => setSelectedPaymentMethod('orange')}
                         className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-orange-500 hover:bg-orange-50 transition-all gap-2"
                       >
                         <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
-                           <img src="https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg" alt="Orange" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                           {/* Pour changer le logo, remplacez src par le chemin local : /payments/orange.png */}
+                           <img src="/payments/orange.png" alt="Orange" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg"; }} />
                         </div>
                         <span className="text-xs font-bold text-slate-700">Orange Money</span>
                       </button>
@@ -4540,24 +4562,33 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                         className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2"
                       >
                         <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
-                           <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png" alt="Moov" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                           <img src="/payments/moov.png" alt="Moov" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png"; }} />
                         </div>
                         <span className="text-xs font-bold text-slate-700">Moov Money</span>
                       </button>
                       <button 
-                        onClick={() => setSelectedPaymentMethod('sank')}
+                        onClick={() => setSelectedPaymentMethod('telecel')}
                         className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-red-600 hover:bg-red-50 transition-all gap-2"
                       >
                         <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
-                           <img src="https://sankmoney.com/wp-content/uploads/2022/10/Logo-Sank-Money-1.png" alt="Sank" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-red-600 font-black text-[10px]">SANK</span>'; }} />
+                           <img src="/payments/telecel.png" alt="Telecel" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-red-600 font-black text-[12px]">TELECEL</span>'; }} />
                         </div>
-                        <span className="text-xs font-bold text-slate-700">Sank Money</span>
+                        <span className="text-xs font-bold text-slate-700">Telecel Money</span>
+                      </button>
+                      <button 
+                        onClick={() => setSelectedPaymentMethod('coris')}
+                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-sky-600 hover:bg-sky-50 transition-all gap-2"
+                      >
+                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
+                           <img src="/payments/coris.png" alt="Coris" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-sky-600 font-black text-[12px]">CORIS</span>'; }} />
+                        </div>
+                        <span className="text-xs font-bold text-slate-700">Coris Money</span>
                       </button>
                     </div>
                   </>
                 )}
 
-                {selectedPaymentMethod && selectedPaymentMethod !== 'bank' && selectedPaymentMethod !== 'card' && (
+                {selectedPaymentMethod && (
                   <div className="space-y-4 text-left animate-in fade-in slide-in-from-bottom-4">
                     <div className="flex items-center justify-between mb-4">
                       <p className="font-bold text-slate-900 flex items-center gap-2">
@@ -4573,13 +4604,15 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                     {paymentStep === 'method' && !mmMode && (
                       <div className="space-y-3">
                         <p className="text-sm text-slate-600 font-medium">Comment souhaitez-vous payer ?</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <button onClick={() => setMmMode('ussd')} className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-slate-100 hover:border-primary hover:bg-emerald-50 transition-all gap-2 text-center text-slate-700">
-                            <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                              <PhoneCall size={20} />
-                            </div>
-                            <span className="text-xs font-bold leading-tight mt-1">Code USSD<br/><span className="text-[10px] font-normal text-slate-500">Appel direct</span></span>
-                          </button>
+                        <div className={`grid ${selectedPaymentMethod === 'coris' ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
+                          {selectedPaymentMethod !== 'coris' && (
+                            <button onClick={() => setMmMode('ussd')} className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-slate-100 hover:border-primary hover:bg-emerald-50 transition-all gap-2 text-center text-slate-700">
+                              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                                <PhoneCall size={20} />
+                              </div>
+                              <span className="text-xs font-bold leading-tight mt-1">Code USSD<br/><span className="text-[10px] font-normal text-slate-500">Appel direct</span></span>
+                            </button>
+                          )}
                           <button onClick={() => setMmMode('otp')} className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-slate-100 hover:border-primary hover:bg-emerald-50 transition-all gap-2 text-center text-slate-700">
                             <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
                               <Smartphone size={20} />
@@ -4744,83 +4777,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                   </div>
                 )}
 
-                {(!settings?.paymentConfig || settings.paymentConfig.cardEnabled) && !selectedPaymentMethod && (
-                  <>
-                    <div className="relative py-2">
-                      <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                      <div className="relative flex justify-center"><span className="bg-white px-4 text-xs text-slate-400 font-bold uppercase">Ou</span></div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3">
-                      <button 
-                        onClick={() => simulatePayment('card')}
-                        disabled={isProcessingPayment}
-                        className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/20 flex items-center justify-center gap-3"
-                      >
-                        <CreditCard size={20} />
-                        Payer par Carte Bancaire
-                      </button>
-                      
-                      {settings?.paymentConfig?.paymentAccounts?.bankAccountNumber && (
-                        <button 
-                          onClick={() => setSelectedPaymentMethod('bank')}
-                          disabled={isProcessingPayment}
-                          className="w-full bg-white text-slate-900 border-2 border-slate-200 py-4 rounded-2xl font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-3"
-                        >
-                          <Building2 size={20} />
-                          Virement Bancaire
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
+                {/* Other payment methods removed as requested */}
 
-                {selectedPaymentMethod === 'bank' && (
-                  <div className="space-y-4 text-left animate-in fade-in slide-in-from-bottom-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <p className="font-bold text-slate-900 flex items-center gap-2">
-                        <button onClick={() => setSelectedPaymentMethod(null)} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronRight className="rotate-180" size={16}/></button>
-                        Virement Bancaire
-                      </p>
-                    </div>
-                    
-                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 space-y-4">
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Banque</p>
-                        <p className="font-bold text-slate-900">{settings?.paymentConfig?.paymentAccounts?.bankName}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Nom du Compte</p>
-                        <p className="font-bold text-slate-900">{settings?.paymentConfig?.paymentAccounts?.bankAccountName}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Numéro de Compte</p>
-                        <p className="font-mono font-bold text-slate-900 bg-white p-2 rounded-lg border border-slate-100">{settings?.paymentConfig?.paymentAccounts?.bankAccountNumber}</p>
-                      </div>
-                      {settings?.paymentConfig?.paymentAccounts?.bankIBAN && (
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">IBAN / RIB</p>
-                          <p className="font-mono font-bold text-slate-900 bg-white p-2 rounded-lg border border-slate-100">{settings?.paymentConfig?.paymentAccounts?.bankIBAN}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex gap-3">
-                      <AlertCircle className="text-amber-500 shrink-0" size={20} />
-                      <p className="text-[10px] text-amber-700 leading-relaxed">
-                        Veuillez effectuer le virement puis cliquer sur le bouton ci-dessous. Votre commande sera validée après réception des fonds.
-                      </p>
-                    </div>
-
-                    <button 
-                      onClick={() => simulatePayment('bank')}
-                      disabled={isProcessingPayment}
-                      className="btn-primary w-full flex items-center justify-center gap-3"
-                    >
-                      <CheckCircle size={20} />
-                      J'ai effectué le virement
-                    </button>
-                  </div>
-                )}
+                {/* Bank transfer logic removed as requested */}
                 
                 {!selectedPaymentMethod && (
                   <button 
@@ -4897,21 +4856,20 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
-              { id: 'om', name: 'Orange Money', color: 'bg-white', borderColor: 'border-slate-100', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg', desc: 'Paiement instantané' },
-              { id: 'moov', name: 'Moov Money', color: 'bg-white', borderColor: 'border-slate-100', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png', desc: 'Simple et rapide' },
-              { id: 'sank', name: 'Sank Money', color: 'bg-white', borderColor: 'border-slate-100', logo: 'https://sankmoney.com/wp-content/uploads/2022/10/Logo-Sank-Money-1.png', fallbackText: 'SANK', desc: 'Solution locale' },
-              { id: 'card', name: 'Carte Bancaire', color: 'bg-slate-900', borderColor: 'border-slate-900', icon: CreditCard, desc: 'Visa / Mastercard' },
+              { id: 'om', name: 'Orange Money', color: 'bg-white', borderColor: 'border-slate-100', logo: '/payments/orange.png', desc: 'Paiement instantané' },
+              { id: 'moov', name: 'Moov Money', color: 'bg-white', borderColor: 'border-slate-100', logo: '/payments/moov.png', desc: 'Simple et rapide' },
+              { id: 'telecel', name: 'Telecel Money', color: 'bg-white', borderColor: 'border-slate-100', logo: '/payments/telecel.png', fallbackText: 'TELECEL', desc: 'Liberté de payer' },
+              { id: 'coris', name: 'Coris Money', color: 'bg-white', borderColor: 'border-slate-100', logo: '/payments/coris.png', fallbackText: 'CORIS', desc: 'Solution bancaire' },
             ].map((m) => (
-              <div key={m.id} className="group relative bg-white p-4 rounded-2xl border border-slate-100 ring-2 ring-transparent hover:border-transparent hover:ring-primary/20 hover:shadow-lg transition-all duration-300 cursor-pointer">
+              <div key={m.id} className="group relative bg-white p-4 rounded-2xl border border-slate-100 ring-2 ring-transparent hover:border-transparent hover:ring-primary/20 hover:shadow-lg transition-all duration-300 cursor-default">
                 <div className="flex items-center gap-3">
                   <div className={`w-12 h-12 shrink-0 ${m.color} border border-slate-100/50 rounded-xl flex items-center justify-center overflow-hidden p-1.5 group-hover:scale-105 transition-transform duration-300 shadow-sm`}>
-                    {m.logo ? <img src={m.logo} alt={m.name} referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[10px] font-black text-center leading-tight ${m.id === 'sank' ? 'text-red-600' : ''}">${m.fallbackText || m.name}</span>`; }} /> : m.icon && <m.icon className="text-white" size={24} />}
+                    {m.logo ? <img src={m.logo} alt={m.name} referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[10px] font-black text-center leading-tight text-slate-600">${m.fallbackText || m.name}</span>`; }} /> : null}
                   </div>
                   <div className="flex-1 flex flex-col justify-center">
                     <span className="block text-[14px] font-black text-slate-900 leading-tight">{m.name}</span>
                     <span className="block text-[9px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">{m.desc}</span>
                   </div>
-                  <ChevronRight size={16} className="text-slate-300 group-hover:text-primary group-hover:translate-x-1 transition-all shrink-0" />
                 </div>
               </div>
             ))}
@@ -5055,13 +5013,15 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       </AnimatePresence>
     </div>
     {activeChatOrderId && (
-      <OrderChat 
-        orderId={activeChatOrderId} 
-        userId={profile.uid} 
-        userName={profile.name} 
-        userRole={profile.role}
-        onClose={() => setActiveChatOrderId(null)} 
-      />
+      <Suspense fallback={null}>
+        <OrderChat 
+          orderId={activeChatOrderId} 
+          userId={profile.uid} 
+          userName={profile.name} 
+          userRole={profile.role}
+          onClose={() => setActiveChatOrderId(null)} 
+        />
+      </Suspense>
     )}
   </PullToRefresh>
   );
@@ -6482,7 +6442,9 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
               {activeTab === 'reports' && (
                 <>
                   <div>
-                    <ReportsView profile={profile} />
+                    <Suspense fallback={<div className="p-4 text-slate-400">Chargement des rapports...</div>}>
+                      <ReportsView profile={profile} />
+                    </Suspense>
                   </div>
                 </>
               )}
@@ -6777,13 +6739,15 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       </AnimatePresence>
     </div>
     {activeChatOrderId && (
-      <OrderChat 
-        orderId={activeChatOrderId} 
-        userId={profile.uid} 
-        userName={profile.name} 
-        userRole={profile.role}
-        onClose={() => setActiveChatOrderId(null)} 
-      />
+      <Suspense fallback={null}>
+        <OrderChat 
+          orderId={activeChatOrderId} 
+          userId={profile.uid} 
+          userName={profile.name} 
+          userRole={profile.role}
+          onClose={() => setActiveChatOrderId(null)} 
+        />
+      </Suspense>
     )}
   </PullToRefresh>
   );
@@ -7948,13 +7912,15 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       </div>
     )}
       {activeChatOrderId && (
-        <OrderChat 
-          orderId={activeChatOrderId} 
-          userId={profile?.uid} 
-          userName={profile?.name} 
-          userRole={profile?.role}
-          onClose={() => setActiveChatOrderId(null)} 
-        />
+        <Suspense fallback={null}>
+          <OrderChat 
+            orderId={activeChatOrderId} 
+            userId={profile?.uid} 
+            userName={profile?.name} 
+            userRole={profile?.role}
+            onClose={() => setActiveChatOrderId(null)} 
+          />
+        </Suspense>
       )}
   </PullToRefresh>
   );
