@@ -108,7 +108,6 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { PullToRefresh } from './components/PullToRefresh';
 import { getApiUrl } from './config';
-import { GoogleGenAI, ThinkingLevel, Modality } from "@google/genai";
 
 // --- Global Helpers ---
 let globalIsFirstLoad = true;
@@ -908,15 +907,20 @@ export default function App() {
   useEffect(() => {
     // Native mobile initializations
     if (Capacitor.isNativePlatform()) {
-      import('@capacitor/splash-screen').then(({ SplashScreen }) => {
-        SplashScreen.hide();
-      });
-      
       import('@capacitor/status-bar').then(({ StatusBar }) => {
         StatusBar.setBackgroundColor({ color: '#059669' }); // emerald-600
       });
     }
   }, []);
+
+  // Handle SplashScreen hide
+  useEffect(() => {
+    if (isAuthReady && !loading && Capacitor.isNativePlatform()) {
+      import('@capacitor/splash-screen').then(({ SplashScreen }) => {
+        SplashScreen.hide();
+      });
+    }
+  }, [isAuthReady, loading]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -1154,6 +1158,10 @@ export default function App() {
   if (!isAuthReady || (user && loading)) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
+        {/* Decorative background for loader */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl opacity-50"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary/5 rounded-full translate-y-1/2 -translate-x-1/2 blur-3xl opacity-50"></div>
+        
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -1165,16 +1173,42 @@ export default function App() {
               scale: [1, 1.05, 1],
               boxShadow: [
                 "0 0 0 0 rgba(16, 185, 129, 0)",
-                "0 0 0 30px rgba(16, 185, 129, 0.03)",
+                "0 0 0 30px rgba(16, 185, 129, 0.05)",
                 "0 0 0 0 rgba(16, 185, 129, 0)"
               ]
             }}
             transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-            className="w-28 h-28 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center text-emerald-600 mb-4"
+            className="w-32 h-32 bg-emerald-50 rounded-[3rem] flex items-center justify-center text-emerald-600 mb-8 border border-emerald-100 shadow-xl"
           >
-            <LogoIcon size={64} />
+            <LogoIcon size={80} />
           </motion.div>
+          
+          <div className="flex flex-col items-center gap-2">
+            <h2 className="text-xl font-black text-slate-800 italic animate-pulse">Ordonnance Direct</h2>
+            <div className="flex items-center gap-1.5 h-6">
+              <motion.div 
+                animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
+                transition={{ duration: 1, repeat: Infinity, delay: 0 }}
+                className="w-1.5 h-1.5 bg-primary rounded-full" 
+              />
+              <motion.div 
+                animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
+                transition={{ duration: 1, repeat: Infinity, delay: 0.2 }}
+                className="w-1.5 h-1.5 bg-primary rounded-full" 
+              />
+              <motion.div 
+                animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
+                transition={{ duration: 1, repeat: Infinity, delay: 0.4 }}
+                className="w-1.5 h-1.5 bg-primary rounded-full" 
+              />
+            </div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2">Sécurisation de session...</p>
+          </div>
         </motion.div>
+        
+        <div className="absolute bottom-12 text-center">
+          <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Technologie Santé • Burkina Faso</p>
+        </div>
       </div>
     );
   }
@@ -2448,59 +2482,30 @@ function ImageViewerModal({ imageUrl, onClose }: { imageUrl: string, onClose: ()
 
 const analyzeWithGemini = async (options: { image?: string, text?: string, prompt: string }) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("Clé API Gemini non configurée.");
-    }
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    let response;
+    const response = await fetch(getApiUrl('/api/analyze'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(options)
+    });
     
-    // Simple retry logic for 503 errors
-    let attempts = 0;
-    const maxAttempts = 2;
-    
-    while (attempts < maxAttempts) {
-      try {
-        if (options.image) {
-          response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: [
-              { inlineData: { mimeType: "image/jpeg", data: options.image } },
-              { text: options.prompt }
-            ],
-            config: { 
-              responseMimeType: "application/json"
-            }
-          });
-        } else {
-          response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: `${options.prompt} : "${options.text}"`,
-            config: { 
-              responseMimeType: "application/json"
-            }
-          });
-        }
-        return { success: true, text: response.text };
-      } catch (e: any) {
-        attempts++;
-        const isUnavailable = e.message?.includes("503") || e.message?.includes("UNAVAILABLE") || e.message?.includes("high demand");
-        if (isUnavailable && attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
-          continue;
-        }
-        throw e;
+    const data = await response.json();
+    if (!data.success) {
+      if (data.error === "GEMINI_API_KEY_NOT_CONFIGURED") {
+        return { success: false, error: "Clé API Gemini non configurée sur le serveur." };
       }
+      throw new Error(data.error || "Erreur lors de l'analyse.");
     }
-    throw new Error("Service temporairement indisponible après plusieurs tentatives.");
+    
+    return { success: true, text: data.text };
   } catch (error: any) {
-    console.error("Gemini Error:", error);
+    console.error("Gemini Proxy Error:", error);
     let msg = error.message || String(error);
-    const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand");
+    const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("SERVICE_UNAVAILABLE");
     
     if (isUnavailable) {
-      msg = "SERVICE_UNAVAILABLE"; // Special code for professional handling
-    } else if (msg.includes("API key not valid") || msg.includes("400")) {
-      msg = "Clé API Gemini invalide ou absente. Assurez-vous qu'elle est configurée dans les paramètres de AI Studio.";
+      msg = "SERVICE_UNAVAILABLE";
     }
     return { success: false, error: msg };
   }

@@ -213,6 +213,40 @@ async function startServer() {
     }
   });
 
+  // --- Gemini API ---
+  app.post("/api/analyze", async (req, res) => {
+    const { image, text, prompt } = req.body;
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ success: false, error: "GEMINI_API_KEY_NOT_CONFIGURED" });
+      }
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      let response;
+      if (image) {
+        response = await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: [
+            { inlineData: { mimeType: "image/jpeg", data: image } },
+            { text: prompt }
+          ]
+        });
+      } else {
+        response = await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: `${prompt} : "${text}"`
+        });
+      }
+
+      res.json({ success: true, text: response.text });
+    } catch (error) {
+      console.error("Gemini Analysis Error:", error);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

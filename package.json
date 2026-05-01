@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "start": "node dist/server.js",
     "assets:generate": "npx tsx build-icons.js && npx capacitor-assets generate --android",
+    "assets:prepare": "node prepare_assets.cjs",
     "cap:sync": "npm run build && npx cap sync android",
     "cap:open": "npx cap open android"
   },

@@ -13,8 +13,6 @@ import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { logTransaction, createNotification, formatDate, isSuperAdminEmail, isPrimaryAdminEmail, compressImage, RAM_OPTIMIZED_COMPRESSION, getPrescriptionStatusLabel, getOrderStatusLabel, notifyDeliveryDrivers } from '../utils/shared';
 import { sendSMS } from '../utils/sms';
-const ScriptManager = lazy(() => import('./ScriptManager').then(m => ({ default: m.ScriptManager })));
-const DatabaseExplorer = lazy(() => import('./DatabaseExplorer').then(m => ({ default: m.DatabaseExplorer })));
 const DataAnalyst = lazy(() => import('./DataAnalyst').then(m => ({ default: m.DataAnalyst })));
 const OrderChat = lazy(() => import('./OrderChat').then(m => ({ default: m.OrderChat })));
 import { PHARMACIES_OUAGA } from '../data/pharmacies_ouaga';
@@ -155,7 +153,7 @@ const FinancialReconciliation = React.memo(({ orders }: { orders: Order[] }) => 
 
 export const AdminDashboard = React.memo(({ profile, settings }: { profile: UserProfile, settings: Settings | null }) => {
   const [systemStatus, setSystemStatus] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'scripts' | 'database' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall' | 'announcements'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'approvals' | 'users' | 'pharmacies' | 'orders' | 'history' | 'prescriptions' | 'settings' | 'revenue' | 'withdrawals' | 'security' | 'payments' | 'logs' | 'roles' | 'analytics' | 'transactions' | 'reports' | 'support' | 'tests' | 'oncall' | 'announcements'>('overview');
   const [cities, setCities] = useState<City[]>([]);
 
   useEffect(() => {
@@ -1300,8 +1298,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                 items: [
                   { id: 'security', label: 'Sécurité & API', icon: Lock, color: 'text-violet-600', bg: 'bg-violet-50' },
                   { id: 'roles', label: 'Rôles', icon: UserCog, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50' },
-                  { id: 'database', label: 'Base de Données', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
-                  { id: 'scripts', label: 'Terminal', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
                   { id: 'logs', label: 'Logs', icon: Terminal, color: 'text-slate-600', bg: 'bg-slate-100' },
                   { id: 'settings', label: 'Paramètres', icon: SettingsIcon, color: 'text-slate-600', bg: 'bg-slate-50' },
                 ]
@@ -3799,75 +3795,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         </>
       )}
 
-      {activeTab === 'scripts' && (
-        <>
-          <div className="space-y-8">
-          <div className="bg-slate-900 text-white p-6 rounded-[3rem] shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
-            <div className="relative z-10">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center text-white">
-                  <Terminal size={28} />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold">Scripts & Base de Données</h3>
-                  <p className="text-slate-400 text-sm">Gestion avancée et exécution de scripts</p>
-                </div>
-              </div>
-              
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 mb-8 flex gap-4">
-                <ShieldCheck className="text-amber-500 shrink-0" size={24} />
-                <div>
-                  <h4 className="text-amber-500 font-bold mb-2">Restriction de Sécurité (Architecture Serverless)</h4>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Pour des raisons de sécurité strictes et conformément à l'architecture Serverless (Frontend React + Firebase), l'exécution de scripts arbitraires (Bash, Python, PowerShell) ou l'accès direct via une interface CMD n'est pas autorisée depuis le navigateur web.
-                  </p>
-                  <p className="text-slate-300 text-sm leading-relaxed mt-2">
-                    L'accès direct à la base de données (requêtes complexes, modifications de schéma) doit être effectué via la <strong>Console Firebase officielle</strong> pour garantir l'intégrité des données et les règles de sécurité.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <a 
-                  href="https://console.firebase.google.com/" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl p-6 transition-all group flex items-start gap-4"
-                >
-                  <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                    <BarChart3 size={24} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-lg mb-1">Console Firebase</h4>
-                    <p className="text-slate-400 text-sm">Accéder à l'interface officielle pour gérer Firestore, l'authentification et le stockage.</p>
-                  </div>
-                </a>
-
-                <a 
-                  href="https://console.cloud.google.com/functions" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl p-6 transition-all group flex items-start gap-4"
-                >
-                  <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                    <Terminal size={24} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-lg mb-1">Google Cloud Functions</h4>
-                    <p className="text-slate-400 text-sm">Déployer et planifier des scripts backend (Node.js, Python) de manière sécurisée.</p>
-                  </div>
-                </a>
-              </div>
-            </div>
-          </div>
-          <Suspense fallback={<div className="p-8 text-center text-slate-400">Chargement de la console...</div>}>
-            <ScriptManager />
-          </Suspense>
-        </div>
-        </>
-      )}
-
       {activeTab === 'analytics' && (
         <>
           <div className="space-y-8">
@@ -3876,50 +3803,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
           </Suspense>
           </div>
         </>
-      )}
-
-      {activeTab === 'database' && (
-        <div className="space-y-8">
-          <div className="bg-gradient-to-br from-slate-900 to-indigo-900 rounded-[3rem] p-8 text-white shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 rounded-full blur-3xl opacity-30"></div>
-            <div className="relative flex flex-col md:flex-row items-center gap-10">
-              <div className="flex-1 space-y-6">
-                <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full border border-white/10">
-                  <Database size={16} className="text-amber-400" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">Technologie Cloud Native</span>
-                </div>
-                <h2 className="text-4xl font-black leading-tight italic">
-                  Google Cloud <span className="text-amber-400">Firestore</span>
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="bg-white/5 border border-white/10 p-5 rounded-[2.5rem] backdrop-blur-md hover:bg-white/10 transition-all">
-                    <p className="text-amber-400 font-bold mb-1">Capacité</p>
-                    <p className="text-xs text-slate-300 leading-relaxed font-medium">Virtuellement illimitée. Firestore gère des pétaoctets de données et des millions de connexions simultanées automatiquement.</p>
-                  </div>
-                  <div className="bg-white/5 border border-white/10 p-5 rounded-[2.5rem] backdrop-blur-md hover:bg-white/10 transition-all">
-                    <p className="text-amber-400 font-bold mb-1">Performance</p>
-                    <p className="text-xs text-slate-300 leading-relaxed font-medium">Temps réel natif. Les mises à jour sont propagées instantanément à tous les clients connectés via WebSocket.</p>
-                  </div>
-                </div>
-                <p className="text-slate-400 text-sm leading-relaxed max-w-2xl italic font-medium">
-                  Cette base de données <strong className="text-white">NoSQL</strong> orientée documents permet de stocker vos commandes, ordonnances et journaux système de manière sécurisée et scalable, sans les contraintes de schéma rigidement fixées du SQL traditionnel.
-                </p>
-              </div>
-              <div className="w-full md:w-80 p-8 bg-white/5 rounded-[3rem] border border-white/10 flex flex-col items-center justify-center text-center shadow-inner">
-                <div className="w-20 h-20 bg-amber-400 rounded-[2.5rem] flex items-center justify-center text-slate-900 shadow-lg shadow-amber-400/20 mb-6">
-                  <Activity size={40} />
-                </div>
-                <p className="text-4xl font-black text-white mb-2 italic">99.99<span className="text-amber-400">%</span></p>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Disponibilité Garantie</p>
-              </div>
-            </div>
-          </div>
-          <div className="space-y-8">
-          <Suspense fallback={<div className="p-8 text-center text-slate-400">Exploration de la base de données...</div>}>
-            <DatabaseExplorer />
-          </Suspense>
-          </div>
-        </div>
       )}
 
       {activeTab === 'logs' && (
