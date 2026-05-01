@@ -421,7 +421,7 @@ const StatusTrace = React.memo(({ history, defaultExpanded = false }: { history?
 const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
     <img 
-      src="/android-chrome-512x512.png" 
+      src="/logo-web.png" 
       alt="Ordonnance Direct Logo" 
       className="w-full h-full object-contain rounded-full"
       onError={(e) => {

@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
+import cron from "node-cron";
 import { createServer as createViteServer } from "vite";
 dotenv.config();
 var __filename = fileURLToPath(import.meta.url);
@@ -193,6 +194,9 @@ async function startServer() {
   });
   server.keepAliveTimeout = 65e3;
   server.headersTimeout = 66e3;
+  console.log("--- SCHEDULER STARTUP ---");
+  cron.schedule("* * * * *", () => {
+  });
 }
 startServer().catch((err) => {
   console.error("FAILED TO START SERVER:", err);
