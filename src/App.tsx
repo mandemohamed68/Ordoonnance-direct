@@ -3,6 +3,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { 
+  auth, 
+  db, 
+  handleFirestoreError, 
+  OperationType, 
+  messaging,
+  doc, 
+  getDoc, 
+  setDoc, 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc,
+  deleteDoc,
+  getDocs,
+  limit, 
+  serverTimestamp, 
+  orderBy, 
+  arrayUnion, 
+  increment, 
+  writeBatch
+} from './firebase';
 import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense, lazy } from 'react';
 import { 
   onAuthStateChanged, 
@@ -16,32 +40,11 @@ import {
   sendPasswordResetEmail,
   updateProfile
 } from 'firebase/auth';
-import { 
-  doc, 
-  getDoc, 
-  setDoc, 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc,
-  deleteDoc,
-  getDocs,
-  limit,
-  serverTimestamp,
-  orderBy,
-  arrayUnion,
-  increment,
-  writeBatch
-} from 'firebase/firestore';
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 const ReportsView = lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
 const MapComponent = lazy(() => import('./components/MapComponent'));
 const OrderChat = lazy(() => import('./components/OrderChat').then(m => ({ default: m.OrderChat })));
 const Legal = lazy(() => import('./components/Legal').then(m => ({ default: m.Legal })));
-
-import { auth, db, handleFirestoreError, OperationType, messaging } from './firebase';
 import { getToken, onMessage } from 'firebase/messaging';
 import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest, City, OnCallRotation, Announcement } from './types';
 import { 
@@ -96,6 +99,7 @@ import {
   Mail, PhoneCall
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from "@google/genai";
 import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -790,12 +794,13 @@ export default function App() {
   const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
 
   useEffect(() => {
+    if (!user) return;
     const q = query(collection(db, 'announcements'), where('active', '==', true), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snapshot) => {
       setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
-    }, (err) => console.error("Announcements fetch error:", err));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'announcements'));
     return () => unsub();
-  }, []);
+  }, [user]);
 
   // Request FCM Permission and Token
   useEffect(() => {
@@ -1732,7 +1737,7 @@ export default function App() {
           </div>
         </div>
         <div className="mt-12 pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-slate-400">© 2026 Ordonnance Direct. Tous droits réservés.</p>
+          <p className="text-xs text-slate-400">© 2026 Ordonnance Direct par NME TECHNOLOGIE Group. Tous droits réservés.</p>
           <div className="flex gap-6 text-xs text-slate-400">
             {(isSuperAdminEmail(user?.email) || profile?.role === 'admin') && (
               <button onClick={() => setShowResetConfirm(true)} className="text-rose-400 hover:text-rose-600 font-bold">Réinitialiser les données (Test)</button>
@@ -1819,8 +1824,8 @@ export default function App() {
                   <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center mb-6"><Phone size={28} /></div>
                   <h3 className="text-2xl font-black text-slate-900 mb-6">Contactez-nous</h3>
                   <div className="space-y-4">
-                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><Phone size={16}/></span> <strong>+226 00 00 00 00</strong></p>
-                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><Mail size={16}/></span> <strong>contact@ordonnancedirect.bf</strong></p>
+                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><Phone size={16}/></span> <strong>+226 72 56 76 06</strong></p>
+                     <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><Mail size={16}/></span> <strong>nmetechnologiegroup@gmail.com</strong></p>
                      <p className="flex items-center gap-4 text-slate-600"><span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><MapPin size={16}/></span> <strong>Ouagadougou, Burkina Faso</strong></p>
                   </div>
                 </div>
@@ -1830,7 +1835,7 @@ export default function App() {
                 <div>
                   <h3 className="text-xl font-black text-slate-900 mb-4">Mentions Légales</h3>
                   <div className="text-sm text-slate-500 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-                    <p><strong>Éditeur du site :</strong> Ordonnance Direct BF</p>
+                    <p><strong>Éditeur du site :</strong> NME TECHNOLOGIE Group</p>
                     <p><strong>Directeur de la publication :</strong> Direction Générale</p>
                     <p><strong>Hébergement :</strong> Les services sont hébergés sur des serveurs sécurisés Google Firebase en stricte conformité avec les lois de protection en vigueur.</p>
                     <p>La plateforme Ordonnance Direct ne remplace pas une consultation médicale. Elle agit en qualité de simple intermédiaire technique de mise en relation de patients avec des professionnels de santé.</p>
@@ -2482,32 +2487,62 @@ function ImageViewerModal({ imageUrl, onClose }: { imageUrl: string, onClose: ()
 
 const analyzeWithGemini = async (options: { image?: string, text?: string, prompt: string }) => {
   try {
-    const response = await fetch(getApiUrl('/api/analyze'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(options)
-    });
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      return { success: false, error: "La clé API Gemini n'est pas configurée. Veuillez l'ajouter dans les secrets de Google AI Studio." };
+    }
     
-    const data = await response.json();
-    if (!data.success) {
-      if (data.error === "GEMINI_API_KEY_NOT_CONFIGURED") {
-        return { success: false, error: "Clé API Gemini non configurée sur le serveur." };
+    const ai = new GoogleGenAI({ apiKey: key });
+    let result;
+    
+    if (options.image) {
+      let base64Data = options.image;
+      if (options.image.startsWith("data:")) {
+        base64Data = options.image.split(",")[1];
       }
-      throw new Error(data.error || "Erreur lors de l'analyse.");
+      
+      result = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: {
+          parts: [
+            { text: options.prompt },
+            { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+          ]
+        }
+      });
+    } else {
+      result = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: `${options.prompt} : "${options.text || ''}"`
+      });
     }
     
-    return { success: true, text: data.text };
+    if (!result.text) {
+      throw new Error("Aucune réponse de l'IA.");
+    }
+    
+    return { success: true, text: result.text };
   } catch (error: any) {
-    console.error("Gemini Proxy Error:", error);
+    console.error("Gemini Error:", error);
     let msg = error.message || String(error);
-    const isUnavailable = msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("SERVICE_UNAVAILABLE");
     
-    if (isUnavailable) {
-      msg = "SERVICE_UNAVAILABLE";
+    // Check for common error patterns
+    if (msg.includes("API key not valid") || (error && error.status === 400)) {
+      return { 
+        success: false, 
+        error: "La clé API Gemini configurée est invalide ou corrompue. Assurez-vous d'avoir entré la bonne clé dans les paramètres de l'application (Settings > Secrets)." 
+      };
     }
-    return { success: false, error: msg };
+    
+    // Handle quota errors
+    if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) {
+      return { 
+        success: false, 
+        error: "Le quota de l'API Gemini est épuisé. Veuillez vérifier vos crédits Google AI Studio." 
+      };
+    }
+
+    return { success: false, error: `Erreur d'analyse: ${msg}` };
   }
 };
 
@@ -2586,7 +2621,7 @@ const PatientPrescriptionCard = React.memo(({
               const displayStatus = p.status as string;
               return (
                 <span className={`inline-flex items-center text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider ${
-                  displayStatus === 'draft' ? 'bg-indigo-50 text-indigo-500' :
+                  displayStatus === 'draft' || displayStatus === 'analyzed' ? 'bg-indigo-50 text-indigo-500' :
                   displayStatus === 'submitted' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
                   displayStatus === 'validated' ? 'bg-emerald-50 text-emerald-600' :
                   displayStatus === 'preparing' ? 'bg-indigo-500 text-white shadow-sm shadow-indigo-200' :
@@ -2603,7 +2638,7 @@ const PatientPrescriptionCard = React.memo(({
         </div>
       </div>
 
-      {!p.extractedData && p.status === 'draft' && (
+      {!p.extractedData && (p.status === 'draft' || p.status === 'analyzed') && (
         <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse en cours...</p>
@@ -2620,7 +2655,7 @@ const PatientPrescriptionCard = React.memo(({
             {(() => {
               try {
                 const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                if (!jsonStr) return null;
+                if (!jsonStr) return <p className="text-[10px] text-slate-400 italic">Données en attente</p>;
                 const parsed = JSON.parse(jsonStr);
                 const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
                 const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
@@ -2634,13 +2669,13 @@ const PatientPrescriptionCard = React.memo(({
                     </div>
                   );
                 });
-              } catch (e) { return null; }
+              } catch (e) { return <p className="text-[10px] text-slate-400 italic">Analyse manuelle requise</p>; }
             })()}
           </div>
         </div>
       )}
 
-      {p.status === 'draft' && p.extractedData && (
+      {(p.status === 'draft' || p.status === 'analyzed') && p.extractedData && (
         <div className="flex gap-3 mt-1">
           <button 
             onClick={async () => {
@@ -2675,7 +2710,8 @@ const PatientOrderCard = React.memo(({
   onViewImage, 
   onApproveQuote, 
   onSelectDeliveryMethod, 
-  onShowMap 
+  onShowMap,
+  compact = false
 }: { 
   o: Order, 
   settings: Settings | null, 
@@ -2684,8 +2720,26 @@ const PatientOrderCard = React.memo(({
   onViewImage: (url: string) => void, 
   onApproveQuote: (o: Order) => void, 
   onSelectDeliveryMethod: (id: string, method: 'pickup' | 'delivery') => void, 
-  onShowMap: (o: Order) => void 
+  onShowMap: (o: Order) => void,
+  compact?: boolean
 }) => {
+  const [availableDrivers, setAvailableDrivers] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (o.status === 'pending_quote' && !o.deliveryMethod) {
+      const fetchDrivers = async () => {
+        try {
+          const q = query(collection(db, 'users'), where('role', '==', 'delivery'), where('status', '==', 'active'));
+          const snap = await getDocs(q);
+          setAvailableDrivers(snap.size);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      fetchDrivers();
+    }
+  }, [o.status, o.deliveryMethod]);
+
   return (
     <motion.div 
       layout
@@ -2693,17 +2747,17 @@ const PatientOrderCard = React.memo(({
       animate={{ opacity: 1, scale: 1 }}
       className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all duration-300 group"
     >
-      <div className="flex flex-col md:flex-row h-full">
+      <div className={`flex flex-col ${compact ? '' : 'md:flex-row'} h-full`}>
         {/* Left Summary Pane */}
-        <div className="md:w-56 bg-slate-50/50 p-4 sm:p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between shrink-0">
+        <div className={`${compact ? '' : 'md:w-56'} bg-slate-50/50 p-4 sm:p-5 border-b ${compact ? '' : 'md:border-b-0 md:border-r'} border-slate-100 flex flex-col justify-between shrink-0`}>
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
                 <Package size={18} className="text-primary" />
               </div>
               <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
-                o.status === 'ready' || o.status === 'delivering' ? 'bg-emerald-500 text-white shadow-sm' : 
-                o.status === 'pending_payment' ? 'bg-rose-500 text-white shadow-sm' : 
+                o.status === 'ready' || o.status === 'delivering' || o.status === 'paid' || o.status === 'completed' ? 'bg-emerald-500 text-white shadow-sm' : 
+                o.status === 'pending_payment' ? 'bg-amber-500 text-white shadow-sm' : 
                 'bg-slate-900 text-white text-center min-w-[60px]'
               }`}>
                 {getOrderStatusLabel(o.status)}
@@ -2885,6 +2939,22 @@ const PatientOrderCard = React.memo(({
                     <p className="text-xs text-slate-500 font-medium leading-relaxed">Choisissez pour passer au paiement.</p>
                   </div>
                 </div>
+
+                {availableDrivers !== null && (
+                  <div className={`p-3 rounded-xl border flex items-start gap-3 ${availableDrivers > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-orange-50 border-orange-100'}`}>
+                    <div className={`mt-0.5 w-6 h-6 rounded flex-shrink-0 flex items-center justify-center ${availableDrivers > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-orange-100 text-orange-600'}`}>
+                      {availableDrivers > 0 ? <Truck size={12} /> : <AlertCircle size={12} />}
+                    </div>
+                    <div>
+                      <p className={`text-xs font-black leading-tight ${availableDrivers > 0 ? 'text-emerald-900' : 'text-orange-900'}`}>
+                        {availableDrivers > 0 ? `${availableDrivers} livreur${availableDrivers > 1 ? 's' : ''} disponible${availableDrivers > 1 ? 's' : ''}` : 'Aucun livreur disponible en ce moment'}
+                      </p>
+                      <p className={`text-[10px] mt-0.5 leading-relaxed ${availableDrivers > 0 ? 'text-emerald-700' : 'text-orange-700'}`}>
+                        {availableDrivers > 0 ? "Vous pouvez choisir la livraison à domicile." : "La livraison pourrait connaître un retard. Vous pouvez tout de même la demander ou choisir le retrait sur place."}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button 
@@ -2985,9 +3055,11 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const [paymentPhone, setPaymentPhone] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'method' | 'phone' | 'otp' | 'processing' | 'success'>('method');
+  const [paymentStatusMessage, setPaymentStatusMessage] = useState<string>('');
   const [mmMode, setMmMode] = useState<'ussd' | 'otp' | null>(null);
   const [paymentOtp, setPaymentOtp] = useState('');
   const [paymentInvoiceId, setPaymentInvoiceId] = useState('');
+  const [paymentProcessorId, setPaymentProcessorId] = useState('');
   const [showMapForOrder, setShowMapForOrder] = useState<Order | null>(null);
   const [pharmacySearch, setPharmacySearch] = useState('');
   const [showManualEntryModal, setShowManualEntryModal] = useState(false);
@@ -3319,10 +3391,12 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           });
 
           if (!data.success) throw new Error(data.error);
-
+          
           let parsed;
           try {
-            parsed = JSON.parse(data.text || '{}');
+            const cleanText = (data.text || '{}').replace(/```json/ig, '').replace(/```/g, '').trim();
+            const jsonStr = cleanText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0] || '{}';
+            parsed = JSON.parse(jsonStr);
           } catch(e) {
             parsed = { articles: [], etablissement: "" };
           }
@@ -3333,21 +3407,19 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
           await updateDoc(docRef, {
             extractedData: JSON.stringify(parsed.articles || []),
-            hospitalLocation: parsed.etablissement || hospitalLocation || "Non spécifié"
+            hospitalLocation: parsed.etablissement || hospitalLocation || "Non spécifié",
+            status: 'analyzed'
           });
-          toast.success("Analyse terminée ! Choisissez votre type de devis.");
+          toast.success("Analyse terminée ! Veuillez maintenant choisir votre mode d'envoi (Complet ou Partiel).");
         } catch (error: any) {
           console.error("Gemini Parsing Error:", error);
-          const isUnavailable = error.message === 'SERVICE_UNAVAILABLE';
-          const errorMessage = isUnavailable 
-            ? "L'analyse automatique est temporairement indisponible."
-            : `L'analyse automatique a rencontré un problème (${error.message || "Erreur AI"}).`;
+          const errorMessage = error.message || "Erreur lors de l'analyse automatique.";
 
           await updateDoc(docRef, {
             extractedData: JSON.stringify([{ nom_article: "Analyse en attente", dosage: "", posologie: "Traitement manuel par un pharmacien" }]),
-            status: 'submitted'
+            status: 'analyzed'
           });
-          toast.info(`${errorMessage} Votre ordonnance sera traitée manuellement par un pharmacien.`);
+          toast.info(`${errorMessage}. Veuillez choisir votre mode d'envoi.`);
         }
       })();
     } catch (err) {
@@ -3527,7 +3599,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           if (data.text) {
             let parsed;
             try {
-              parsed = JSON.parse(data.text || '{}');
+              const cleanText = (data.text || '{}').replace(/```json/ig, '').replace(/```/g, '').trim();
+              const jsonStr = cleanText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0] || '{}';
+              parsed = JSON.parse(jsonStr);
             } catch(e) {
               parsed = { articles: [], etablissement: "" };
             }
@@ -3538,23 +3612,21 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
             await updateDoc(doc(db, 'prescriptions', docRef.id), {
               extractedData: JSON.stringify(parsed.articles || []),
-              hospitalLocation: parsed.etablissement || hospitalLocation || "Non spécifié"
+              hospitalLocation: parsed.etablissement || hospitalLocation || "Non spécifié",
+              status: 'analyzed'
             });
-            toast.success("Analyse de l'ordonnance terminée ! Choisissez votre type de devis.");
+            toast.success("Analyse terminée ! Veuillez maintenant choisir votre mode d'envoi (Complet ou Partiel).");
           } else {
             throw new Error("Aucun texte extrait de l'ordonnance.");
           }
         } catch (err: any) {
           console.error("Gemini OCR failed:", err);
-          const isUnavailable = err.message === 'SERVICE_UNAVAILABLE';
-          const errorMessage = isUnavailable 
-            ? "L'analyse automatique est temporairement indisponible."
-            : `L'analyse automatique a rencontré un problème (${err.message || "Erreur AI"}).`;
+          const errorMessage = err.message || "Erreur lors de l'analyse automatique.";
 
-          toast.info(`${errorMessage} Un pharmacien traitera votre ordonnance manuellement.`);
+          toast.info(`${errorMessage}. Veuillez choisir votre mode d'envoi.`);
           await updateDoc(doc(db, 'prescriptions', docRef.id), {
             extractedData: "En attente d'analyse manuelle par un pharmacien.",
-            status: 'submitted'
+            status: 'analyzed'
           });
         }
       })();
@@ -3684,10 +3756,23 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       toast.error("Veuillez entrer votre numéro de téléphone.");
       return;
     }
+    
+    // Validate phone number (Burkina numbers are 8 digits usually, or 10 with country code)
+    const cleanPhone = paymentPhone.replace(/\D/g, '');
+    if (cleanPhone.length < 8) {
+      toast.error("Numéro de téléphone invalide.");
+      return;
+    }
+
     setIsProcessingPayment(true);
     setPaymentStep('processing');
+    setPaymentStatusMessage("Initialisation du paiement...");
     
     try {
+      const isTestMode = settings?.paymentConfig?.testMode || false;
+      if (isTestMode) setPaymentStatusMessage("Mode Test (Sandbox) : Création d'une facture fictive...");
+      else setPaymentStatusMessage("Connexion sécurisée à Sappay...");
+
       const response = await fetch(getApiUrl('/api/payment/init'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3695,20 +3780,34 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           amount: showPaymentModal.totalAmount,
           phone: paymentPhone,
           email: profile.email,
-          method: method
+          method: method,
+          isTest: isTestMode
         })
       });
 
       const data = await response.json();
       if (!data.success) throw new Error(data.error);
 
+      if (data.otpRequired) {
+        setPaymentStatusMessage("Code de confirmation envoyé par SMS...");
+      }
+
       setPaymentInvoiceId(data.invoiceId);
+      // Store processorId if returned for perform step
+      if (data.processorId) {
+        setPaymentProcessorId(data.processorId);
+      }
+      
       setPaymentStep('otp');
+      
+      if (method === 'orange' || method === 'telecel') {
+        const syntax = method === 'orange' ? '*144*4*6*' : '*808*4*4*';
+        toast.info(`Composez ${syntax}${showPaymentModal.totalAmount}# pour obtenir votre code OTP`, { duration: 6000 });
+      }
     } catch (error) {
-      // Create a mock invoice for manual validation when in local environment without real backend
-      setPaymentInvoiceId('MOCK_' + Math.random().toString(36).substring(7));
-      setPaymentStep('otp');
-      toast.info("Validation manuelle (Sandbox / API Indisponible).");
+      console.error("Erreur d'initialisation du paiement:", error);
+      toast.error(error instanceof Error ? error.message : "Erreur lors de l'initialisation du paiement.");
+      setPaymentStep('method');
     } finally {
       setIsProcessingPayment(false);
     }
@@ -3719,38 +3818,65 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       toast.error("Erreur: Aucune commande sélectionnée.");
       return;
     }
-    if (!paymentInvoiceId) {
-      // In USSD flow, we might not have an invoiceId yet, generate a fallback one
-      const fallbackId = 'MOCK_' + Math.random().toString(36).substring(7);
-      setPaymentInvoiceId(fallbackId);
-      // Continue with the newly created ID
-    }
+    
     if (!paymentOtp) {
-      toast.error("Veuillez saisir le code OTP.");
+      toast.error("Veuillez saisir le code de confirmation.");
       return;
     }
     
-    const activeInvoiceId = paymentInvoiceId || ('MOCK_' + Math.random().toString(36).substring(7));
     setIsProcessingPayment(true);
     setPaymentStep('processing');
+    setPaymentStatusMessage("Validation du code OTP...");
     
-    try {
-      const response = await fetch(getApiUrl('/api/payment/perform'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invoiceId: activeInvoiceId,
-          phone: paymentPhone,
-          otp: paymentOtp,
-          method: method
-        })
-      });
+    const isAutomatic = mmMode === 'otp';
+    const isTestMode = settings?.paymentConfig?.testMode || false;
+    let apiSuccess = false;
+    let apiData = null;
 
-      const data = await response.json();
-      if (!data.success) throw new Error(data.error);
+    try {
+      if (isAutomatic) {
+        if (!paymentInvoiceId) {
+          throw new Error("L'identifiant de la transaction est manquant. Veuillez recommencer.");
+        }
+        
+        if (isTestMode) setPaymentStatusMessage("Simulation du paiement en cours...");
+        else setPaymentStatusMessage("Transaction en cours de traitement...");
+
+        const response = await fetch(getApiUrl('/api/payment/perform'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            invoiceId: paymentInvoiceId,
+            processorId: paymentProcessorId,
+            phone: paymentPhone,
+            otp: paymentOtp,
+            method: method,
+            isTest: isTestMode
+          })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          apiSuccess = true;
+          apiData = data.data;
+        } else {
+          throw new Error(data.error || "Le paiement a été rejeté. Vérifiez votre solde ou le code saisi.");
+        }
+      } else {
+        // Mode USSD: Toujours considéré comme "à vérifier manuellement"
+        apiSuccess = false;
+      }
     } catch (e) {
-      console.log("Mock / Manual payment recorded.");
+      if (isAutomatic) {
+        console.error("Erreur API de paiement:", e);
+        toast.error(e instanceof Error ? e.message : "Erreur lors de la validation du paiement.");
+        setIsProcessingPayment(false);
+        setPaymentStep('otp');
+        return;
+      }
+      apiSuccess = false;
     }
+
     
     try {
       const order = showPaymentModal;
@@ -3777,8 +3903,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
       const deliveryPin = generateCode();
 
-      // USSD/Manual methods now go to 'verifying_payment' first
-      const isManualCheckNeeded = ['orange', 'moov', 'telecel', 'coris'].includes(method);
+      // NEW LOGIC: Only USSD or failed-API-in-sandbox counts as "manual check needed"
+      // If it's OTP and we got here (apiSuccess or sandbox), it's considered PAID.
+      const isManualCheckNeeded = mmMode === 'ussd' || !apiSuccess;
       const nextStatus = isManualCheckNeeded ? 'verifying_payment' : 'paid';
 
       const orderUpdate: any = {
@@ -3799,8 +3926,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           status: nextStatus,
           timestamp: new Date().toISOString(),
           label: isManualCheckNeeded 
-            ? `Paiement ${method.toUpperCase()} déclaré. En attente de validation par l'administration.` 
-            : `Paiement effectué via ${method.toUpperCase()}`
+            ? `Paiement ${method.toUpperCase()} (USSD) déclaré. En attente de validation par l'administration.` 
+            : `Paiement automatique ${method.toUpperCase()} (OTP) validé avec succès.`
         })
       };
 
@@ -3861,6 +3988,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         setPaymentPhone('');
         setPaymentOtp('');
         setPaymentInvoiceId('');
+        setPaymentProcessorId('');
       }, 2000);
       
     } catch (error) {
@@ -4363,7 +4491,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                             onViewImage={setViewImage} 
                             onApproveQuote={handleApproveQuote} 
                             onSelectDeliveryMethod={handleSelectDeliveryMethod} 
-                            onShowMap={setShowMapForOrder} 
+                            onShowMap={setShowMapForOrder}
+                            compact={true}
                          />
                       ))}
                     </div>
@@ -4528,14 +4657,6 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
               )}
               <h3 className="text-xl font-bold mb-2">Paiement Sécurisé</h3>
               
-              {/* SANDBOX MODE BANNER */}
-              {(!settings?.paymentConfig || settings.paymentConfig.testMode !== false) && (
-                <div className="mb-4 bg-amber-50 border border-amber-200 flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg w-fit mx-auto shadow-sm">
-                  <AlertCircle size={14} className="text-amber-500 shrink-0" />
-                  <span className="text-[10px] font-bold text-amber-700 uppercase tracking-tighter">Mode Sandbox Actif</span>
-                </div>
-              )}
-
               {!selectedPaymentMethod && (
                 <p className="text-slate-500 mb-4 text-xs">
                   Choisissez une méthode pour la commande <span className="font-bold text-slate-900">#{showPaymentModal.id.slice(-6).toUpperCase()}</span>
@@ -4552,43 +4673,50 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                   <>
                     <p className="text-left text-sm font-bold text-slate-700 mb-2">Mobile Money (Burkina Faso)</p>
                     <div className="grid grid-cols-2 gap-3">
-                      <button 
-                        onClick={() => setSelectedPaymentMethod('orange')}
-                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-orange-500 hover:bg-orange-50 transition-all gap-2"
-                      >
-                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
-                           {/* Pour changer le logo, remplacez src par le chemin local : /payments/orange.png */}
-                           <img src="/payments/orange.png" alt="Orange" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg"; }} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-700">Orange Money</span>
-                      </button>
-                      <button 
-                        onClick={() => setSelectedPaymentMethod('moov')}
-                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2"
-                      >
-                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
-                           <img src="/payments/moov.png" alt="Moov" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png"; }} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-700">Moov Money</span>
-                      </button>
-                      <button 
-                        onClick={() => setSelectedPaymentMethod('telecel')}
-                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-red-600 hover:bg-red-50 transition-all gap-2"
-                      >
-                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
-                           <img src="/payments/telecel.png" alt="Telecel" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-red-600 font-black text-[12px]">TELECEL</span>'; }} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-700">Telecel Money</span>
-                      </button>
-                      <button 
-                        onClick={() => setSelectedPaymentMethod('coris')}
-                        className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-sky-600 hover:bg-sky-50 transition-all gap-2"
-                      >
-                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
-                           <img src="/payments/coris.png" alt="Coris" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-sky-600 font-black text-[12px]">CORIS</span>'; }} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-700">Coris Money</span>
-                      </button>
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.orange) && (
+                        <button 
+                          onClick={() => setSelectedPaymentMethod('orange')}
+                          className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-orange-500 hover:bg-orange-50 transition-all gap-2"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
+                             <img src="/payments/orange.png" alt="Orange" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "https://upload.wikimedia.org/wikipedia/commons/c/c8/Orange_logo.svg"; }} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-700">Orange Money</span>
+                        </button>
+                      )}
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.moov) && (
+                        <button 
+                          onClick={() => setSelectedPaymentMethod('moov')}
+                          className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
+                             <img src="/payments/moov.png" alt="Moov" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Moov_Africa_Logo.png/640px-Moov_Africa_Logo.png"; }} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-700">Moov Money</span>
+                        </button>
+                      )}
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.telecel) && (
+                        <button 
+                          onClick={() => setSelectedPaymentMethod('telecel')}
+                          className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-red-600 hover:bg-red-50 transition-all gap-2"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
+                             <img src="/payments/telecel.png" alt="Telecel" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-red-600 font-black text-[12px]">TELECEL</span>'; }} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-700">Telecel Money</span>
+                        </button>
+                      )}
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.coris) && (
+                        <button 
+                          onClick={() => setSelectedPaymentMethod('coris')}
+                          className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-sky-600 hover:bg-sky-50 transition-all gap-2"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-2 border border-slate-100">
+                             <img src="/payments/coris.png" alt="Coris" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-sky-600 font-black text-[12px]">CORIS</span>'; }} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-700">Coris Money</span>
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -4596,14 +4724,22 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 {selectedPaymentMethod && (
                   <div className="space-y-4 text-left animate-in fade-in slide-in-from-bottom-4">
                     <div className="flex items-center justify-between mb-4">
-                      <p className="font-bold text-slate-900 flex items-center gap-2">
-                        <button onClick={() => {
-                          setSelectedPaymentMethod(null);
-                          setPaymentStep('method');
-                          setMmMode(null);
-                        }} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronRight className="rotate-180" size={16}/></button>
-                        Paiement {selectedPaymentMethod.toUpperCase()}
-                      </p>
+                      <div className="flex flex-col gap-1">
+                        <p className="font-bold text-slate-900 flex items-center gap-2">
+                          <button onClick={() => {
+                            setSelectedPaymentMethod(null);
+                            setPaymentStep('method');
+                            setMmMode(null);
+                          }} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronRight className="rotate-180" size={16}/></button>
+                          Paiement {selectedPaymentMethod.toUpperCase()}
+                        </p>
+                        {settings?.paymentConfig?.testMode && (
+                          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full border border-amber-200 self-start ml-8">
+                            <AlertCircle size={10} />
+                            <span className="text-[10px] font-black uppercase tracking-wider">Mode Test Actif</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     
                     {paymentStep === 'method' && !mmMode && (
@@ -4630,8 +4766,64 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
                     {paymentStep === 'method' && mmMode === 'otp' && (
                       <div className="space-y-4 animate-in fade-in">
+                        {selectedPaymentMethod === 'orange' && (
+                          <div className="p-4 bg-orange-50 border border-orange-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
+                            <Info className="text-orange-500 shrink-0" size={18} />
+                            <div className="flex flex-col gap-1">
+                              <p className="text-[11px] text-orange-800 leading-tight font-bold">
+                                Instructions Orange Money :
+                              </p>
+                              <p className="text-[10px] text-orange-700 leading-relaxed font-medium">
+                                1. Composez <span className="font-black text-slate-900">*144*4*6*{showPaymentModal.totalAmount}#</span> sur votre mobile.<br/>
+                                2. Validez avec votre code PIN secret pour recevoir l'OTP.<br/>
+                                3. Cliquez sur le bouton ci-dessous puis saisissez le code reçu.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        {selectedPaymentMethod === 'telecel' && (
+                          <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
+                            <Info className="text-indigo-500 shrink-0" size={18} />
+                            <div className="flex flex-col gap-1">
+                              <p className="text-[11px] text-indigo-800 leading-tight font-bold">
+                                Instructions Telecel Money :
+                              </p>
+                              <p className="text-[10px] text-indigo-700 leading-relaxed font-medium">
+                                1. Composez <span className="font-black text-slate-900">*808*4*4*{showPaymentModal.totalAmount}#</span> sur votre mobile.<br/>
+                                2. Saisissez votre code PIN pour obtenir le code de transaction.<br/>
+                                3. Saisissez ce code ici après avoir cliqué sur le bouton.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        {selectedPaymentMethod === 'moov' && (
+                          <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
+                            <Info className="text-blue-500 shrink-0" size={18} />
+                            <div className="flex flex-col gap-1">
+                              <p className="text-[11px] text-blue-800 leading-tight font-bold">
+                                Workflow Moov Money :
+                              </p>
+                              <p className="text-[10px] text-blue-700 leading-relaxed font-medium">
+                                En cliquant sur le bouton, un code de confirmation vous sera envoyé par SMS par Moov Africa.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        {selectedPaymentMethod === 'coris' && (
+                          <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
+                            <Info className="text-sky-500 shrink-0" size={18} />
+                            <div className="flex flex-col gap-1">
+                              <p className="text-[11px] text-sky-800 leading-tight font-bold">
+                                Paiement Coris Money :
+                              </p>
+                              <p className="text-[10px] text-sky-700 leading-relaxed font-medium">
+                                Un code de vérification SMS est requis pour valider cette transaction.
+                              </p>
+                            </div>
+                          </div>
+                        )}
                         <div className="space-y-2">
-                          <label className="text-xs font-bold text-slate-500 uppercase">Numéro de téléphone</label>
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Numéro de téléphone {selectedPaymentMethod.toUpperCase()}</label>
                           <input 
                             type="tel" 
                             placeholder="Ex: 0102030405"
@@ -4646,10 +4838,10 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                         <button 
                           onClick={() => initPayment(selectedPaymentMethod)}
                           disabled={isProcessingPayment || !paymentPhone}
-                          className="btn-primary w-full flex items-center justify-center gap-3"
+                          className="btn-primary w-full flex items-center justify-center gap-3 py-4"
                         >
                           <Smartphone size={20} />
-                          Demander le paiement (OTP)
+                          {['orange', 'telecel'].includes(selectedPaymentMethod) ? 'Continuer le paiement' : 'Recevoir le code SMS'}
                         </button>
                       </div>
                     )}
@@ -4663,13 +4855,13 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                               let syntax = "";
                               let account = "";
                               if (selectedPaymentMethod === 'orange') {
-                                syntax = settings?.paymentConfig?.ussdSyntaxes?.orange || '*144*4*6*{amount}*#';
+                                syntax = settings?.paymentConfig?.ussdSyntaxes?.orange || '*144*4*6*{amount}#';
                                 account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
                               } else if (selectedPaymentMethod === 'moov') {
                                 syntax = settings?.paymentConfig?.ussdSyntaxes?.moov || '*555*2*1*{amount}#';
                                 account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
                               } else if (selectedPaymentMethod === 'telecel') {
-                                syntax = settings?.paymentConfig?.ussdSyntaxes?.telecel || '*160*2*1*{amount}#';
+                                syntax = settings?.paymentConfig?.ussdSyntaxes?.telecel || '*808*4*4*{amount}#';
                                 account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
                               }
                               return syntax
@@ -4735,22 +4927,30 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                       <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                         <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
                           <AlertCircle className="text-blue-500 shrink-0" size={20} />
-                          <p className="text-[10px] text-blue-700 leading-relaxed">
-                            Un code OTP a été envoyé sur votre téléphone ou généré via USSD. Veuillez le saisir ci-dessous pour valider le paiement.
-                          </p>
+                          <div className="flex flex-col">
+                            <p className="text-[11px] text-blue-700 leading-relaxed font-medium">
+                              {selectedPaymentMethod === 'moov' 
+                                ? "Veuillez saisir le code de confirmation reçu par SMS de la part de Moov Money."
+                                : "Un code OTP a été envoyé sur votre téléphone ou généré via USSD. Veuillez le saisir ci-dessous pour valider le paiement."}
+                            </p>
+                            {selectedPaymentMethod === 'moov' && (
+                              <p className="text-[10px] text-blue-500 mt-1">Si vous n'avez pas reçu de code, vérifiez votre réseau et réessayez.</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-slate-500 uppercase">Code OTP</label>
+                        <div className="space-y-4">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block text-center">
+                            {mmMode === 'otp' ? 'Saisissez votre code OTP' : 'Référence de transaction'}
+                          </label>
                           <input 
                             type="text" 
-                            placeholder="Ex: 12345"
+                            placeholder={mmMode === 'otp' ? "000000" : "ID Transaction"}
                             value={paymentOtp}
                             onChange={(e) => setPaymentOtp(e.target.value)}
                             onFocus={(e) => {
-                              // Scroll into view on mobile keyboard popups
                               setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
                             }}
-                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold text-center tracking-widest focus:border-primary outline-none transition-all"
+                            className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl px-4 py-5 font-mono text-3xl font-black text-center tracking-[0.3em] focus:border-emerald-500 focus:bg-white outline-none transition-all shadow-inner text-slate-800 placeholder:text-slate-300"
                           />
                         </div>
                         <button 
@@ -4759,15 +4959,20 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                           className="btn-primary w-full flex items-center justify-center gap-3"
                         >
                           <CheckCircle size={20} />
-                          Valider le paiement
+                          {mmMode === 'otp' ? 'Valider le paiement' : 'Confirmer le paiement'}
                         </button>
                       </div>
                     )}
 
                     {paymentStep === 'processing' && (
                       <div className="py-8 flex flex-col items-center justify-center gap-4">
-                        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                        <p className="font-bold text-slate-600">Traitement en cours...</p>
+                        <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+                        <div className="flex flex-col items-center gap-1 text-center">
+                          <p className="font-bold text-slate-700">Traitement en cours...</p>
+                          <p className="text-xs text-slate-500 font-medium max-w-[240px]">
+                            {paymentStatusMessage || "Veuillez patienter pendant la validation."}
+                          </p>
+                        </div>
                       </div>
                     )}
 
@@ -5620,12 +5825,6 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
           if (parseInt(myPharmacy.groupId) !== activeGroup) return false;
         }
 
-        // Proximity Logic (Only applies if pharmacy has coordinates and order has distance/location)
-        const prescriptionAgeMins = (new Date().getTime() - (p.createdAt?.toDate ? p.createdAt.toDate().getTime() : new Date(p.createdAt || 0).getTime())) / (1000 * 60);
-        if (prescriptionAgeMins < 10 && (p.distance || 0) > 3) {
-           return false; // Hide if > 3km and younger than 10 mins
-        }
-        
         return true;
       });
 
@@ -5783,7 +5982,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       // Create Order
       await addDoc(collection(db, 'orders'), {
         prescriptionId: selectedPrescription.id,
-        prescriptionImageUrl: selectedPrescription.imageUrl,
+        prescriptionImageUrl: selectedPrescription.imageUrl || null,
         patientId: selectedPrescription.patientId,
         patientName: selectedPrescription.patientName || "Anonyme",
         cityId: selectedPrescription.cityId || profile.cityId || null,
@@ -5797,8 +5996,8 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
         pharmacyLocationCoords: profile.location || null, // Real-time location of the pharmacy
         status: 'pending_quote',
         quoteType: isPartialQuote ? 'partial' : 'full',
-        items: quoteItems.filter(item => !item.isUnavailable),
-        unavailableItems: quoteItems.filter(item => item.isUnavailable),
+        items: JSON.parse(JSON.stringify(quoteItems.filter(item => !item.isUnavailable), (k, v) => v === undefined ? null : v)),
+        unavailableItems: JSON.parse(JSON.stringify(quoteItems.filter(item => item.isUnavailable), (k, v) => v === undefined ? null : v)),
         totalAmount,
         medicationTotal: totalAmount,
         deliveryFee: 0, // Will be calculated when patient selects delivery method
@@ -7324,7 +7523,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
                         deliveryPersonName: profile.name,
                         deliveryPersonPhone: profile.phone || "Non spécifié",
                         deliveryPersonPhoto: profile.photoUrl || null,
-                        pickupCode: Math.random().toString(36).substr(2, 6).toUpperCase(), // Use simple random code if generateCode not available
+                        pickupCode: generateCode(),
                         isHandedOver: false,
                         updatedAt: serverTimestamp(),
                         history: arrayUnion({

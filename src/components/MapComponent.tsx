@@ -72,7 +72,7 @@ export function MapComponent({ center, markers, zoom = 13 }: MapComponentProps) 
       {eta !== null && (
         <div className="absolute top-4 right-4 z-[400] bg-white px-4 py-2 rounded-xl shadow-lg font-bold text-sm flex items-center gap-2 text-slate-700">
           <Clock size={16} className="text-primary" />
-          ETA: {eta} min
+          Arrivée : {eta} min
         </div>
       )}
       <MapContainer center={center} zoom={zoom} scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>

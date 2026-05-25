@@ -187,6 +187,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       cashEnabled: true, 
       ussdEnabled: false, 
       testMode: false,
+      enabledProcessors: { orange: true, moov: true, telecel: true, coris: true },
       ussdSyntaxes: { orange: '', moov: '', telecel: '' },
       withdrawalUssdSyntaxes: { orange: '', moov: '', telecel: '' },
       paymentAccounts: { orangeMoney: '', moovMoney: '', telecelCash: '', bankName: '', bankAccountName: '', bankAccountNumber: '', bankIBAN: '' }
@@ -218,6 +219,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
             cashEnabled: true, 
             ussdEnabled: false, 
             testMode: false,
+            enabledProcessors: { orange: true, moov: true, telecel: true, coris: true },
             ussdSyntaxes: { orange: '', moov: '', telecel: '' },
             withdrawalUssdSyntaxes: { orange: '', moov: '', telecel: '' },
             paymentAccounts: { orangeMoney: '', moovMoney: '', telecelCash: '', bankName: '', bankAccountName: '', bankAccountNumber: '', bankIBAN: '' }
@@ -467,6 +469,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
             cashEnabled: true, 
             ussdEnabled: false, 
             testMode: false,
+            enabledProcessors: { orange: true, moov: true, telecel: true, coris: true },
             ussdSyntaxes: { orange: '', moov: '', telecel: '' },
             withdrawalUssdSyntaxes: { orange: '', moov: '', telecel: '' },
             paymentAccounts: { orangeMoney: '', moovMoney: '', telecelCash: '', bankName: '', bankAccountName: '', bankAccountNumber: '', bankIBAN: '' }
@@ -836,7 +839,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     const toastId = toast.loading(isApproved ? "Validation du paiement..." : "Rejet du paiement...");
     try {
       if (isApproved) {
-        const deliveryPin = Math.floor(1000 + Math.random() * 9000).toString();
+        const deliveryPin = Math.floor(100000 + Math.random() * 900000).toString();
         
         await updateDoc(doc(db, 'orders', order.id), {
           status: 'paid',
@@ -1914,7 +1917,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                         className={`border-none rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 ${
                           user.status === 'suspended' ? 'bg-amber-100 text-amber-700' :
                           user.status === 'blocked' ? 'bg-red-100 text-red-700' :
-                          user.status === 'test' ? 'bg-purple-100 text-purple-700' :
                           user.status === 'pending' ? 'bg-blue-100 text-blue-700' :
                           'bg-emerald-100 text-emerald-700'
                         }`}
@@ -1922,7 +1924,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                         <option value="active">Actif</option>
                         <option value="suspended">Suspendu</option>
                         <option value="blocked">Bloqué</option>
-                        <option value="test">Test</option>
                         <option value="pending">En attente</option>
                       </select>
                     </td>
@@ -3157,6 +3158,34 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   )}
                 </div>
               </div>
+
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 mt-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                      <Terminal size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-slate-900">API Gemini (IA)</p>
+                      <p className="text-[10px] text-slate-500">Analyse des ordonnances</p>
+                    </div>
+                  </div>
+                  {systemStatus?.gemini?.configured ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
+                      <CheckCircle size={14} /> Configuré
+                    </span>
+                  ) : systemStatus?.gemini ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">
+                      <AlertCircle size={14} /> Non configuré
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-[10px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse"></span>
+                      Chargement...
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="flex items-center justify-between p-4 bg-violet-50 rounded-2xl border border-violet-100 mt-8">
@@ -3236,15 +3265,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               {saving ? 'Enregistrement...' : 'Enregistrer les paramètres de sécurité'}
             </button>
             
-            <div className="pt-6 border-t border-slate-100">
-              <button 
-                onClick={() => toast.success("SMS de test envoyé avec succès ! (Simulation)")}
-                className="w-full bg-slate-100 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
-              >
-                <ShieldCheck size={18} />
-                Tester l'envoi de SMS
-              </button>
-            </div>
           </div>
         </div>
       </motion.div>
@@ -3270,21 +3290,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
           </div>
 
           <div className="space-y-6">
-            <div className="flex items-center justify-between p-4 bg-amber-50 rounded-2xl border border-amber-100">
-              <div>
-                <p className="font-bold text-sm text-amber-900">Mode Test (Sandbox)</p>
-                <p className="text-xs text-amber-700">Simuler les paiements sans transaction réelle</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="sr-only peer"
-                  checked={editSettings.paymentConfig?.testMode || false}
-                  onChange={(e) => setEditSettings({...editSettings, paymentConfig: {...(editSettings.paymentConfig || { mobileMoneyEnabled: true, cardEnabled: true, cashEnabled: true, ussdEnabled: false, testMode: false }), testMode: e.target.checked}})}
-                />
-                <div className="w-11 h-6 bg-amber-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-amber-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
-              </label>
-            </div>
 
             <div className="space-y-4">
               {[
@@ -3461,26 +3466,6 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               {saving ? 'Enregistrement...' : 'Enregistrer les paiements'}
             </button>
 
-            <div className="pt-6 border-t border-slate-100">
-              <button 
-                onClick={async () => {
-                  try {
-                    await addSystemLog(
-                      'PAYMENT_SIMULATION',
-                      'Simulation de paiement de test réussie (15000 FCFA)',
-                      'info'
-                    );
-                    toast.success("Simulation de paiement réussie et enregistrée dans les logs !");
-                  } catch (error) {
-                    toast.error("Erreur lors de la simulation.");
-                  }
-                }}
-                className="w-full bg-slate-100 text-slate-600 font-bold py-4 rounded-2xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
-              >
-                <CreditCard size={18} />
-                Simuler un paiement de test
-              </button>
-            </div>
           </div>
         </div>
       </motion.div>
@@ -4198,6 +4183,54 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   />
                   <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
                 </label>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div>
+                  <p className="font-bold text-sm">Mode Sandbox (Test)</p>
+                  <p className="text-xs text-slate-500">Utiliser pour tester l'intégration sans frais réels</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={editSettings.paymentConfig?.testMode ?? false}
+                    onChange={(e) => setEditSettings({
+                      ...editSettings, 
+                      paymentConfig: {
+                        ...(editSettings.paymentConfig || { mobileMoneyEnabled: true, cardEnabled: true, cashEnabled: false, ussdEnabled: false }), 
+                        testMode: e.target.checked
+                      }
+                    })}
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
+                </label>
+              </div>
+
+              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+                <h4 className="text-sm font-bold text-slate-900">Opérateurs Mobile Money (Sappay)</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                   {['orange', 'moov', 'telecel', 'coris'].map(op => (
+                     <label key={op} className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
+                       <input 
+                         type="checkbox" 
+                         className="w-4 h-4 text-primary rounded border-slate-300 focus:ring-primary"
+                         checked={editSettings.paymentConfig?.enabledProcessors?.[op as any] ?? true}
+                         onChange={(e) => setEditSettings({
+                           ...editSettings,
+                           paymentConfig: {
+                             ...editSettings.paymentConfig!,
+                             enabledProcessors: {
+                               ...(editSettings.paymentConfig?.enabledProcessors || { orange: true, moov: true, telecel: true, coris: true }),
+                               [op]: e.target.checked
+                             }
+                           }
+                         })}
+                       />
+                       <span className="text-xs font-bold capitalize text-slate-700">{op} Money</span>
+                     </label>
+                   ))}
+                </div>
               </div>
 
               <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">

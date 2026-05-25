@@ -8,12 +8,12 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.json" />
     <title>Ordonnance Direct | Burkina Faso</title>
-    <script type="module" src="./assets/index-q0K48-C1.js"></script>
-    <link rel="modulepreload" href="./assets/vendor-ui-BZ4PM60y.js">
-    <link rel="modulepreload" href="./assets/vendor-pdf-76ahPA1L.js">
-    <link rel="modulepreload" href="./assets/vendor-firebase-dMcQZQgX.js">
-    <link rel="modulepreload" href="./assets/vendor-utils-BBuGtzx9.js">
-    <link rel="stylesheet" href="./assets/index-DqBG0FxW.css">
+    <script type="module" src="./assets/index-Cn_dwRuz.js"></script>
+    <link rel="modulepreload" href="./assets/vendor-ui-DF9Repcu.js">
+    <link rel="modulepreload" href="./assets/vendor-pdf-3ecOjcnm.js">
+    <link rel="modulepreload" href="./assets/vendor-firebase-DGTLLPVg.js">
+    <link rel="modulepreload" href="./assets/vendor-utils-C5g3-66T.js">
+    <link rel="stylesheet" href="./assets/index-BnVEfSvc.css">
   </head>
   <body>
     <div id="root">
@@ -42,9 +42,9 @@
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then(registration => {
-            console.log('SW registered: ', registration);
+            // SW registered
           }).catch(registrationError => {
-            console.log('SW registration failed: ', registrationError);
+            // SW registration failed
           });
         });
       }
@@ -61,7 +61,6 @@
           errorLog.innerHTML += '<br/>Promise Rejection: ' + (event.reason ? (event.reason.message || event.reason) : 'Unknown');
         }
       });
-      console.log('HTML Root Ready. Loading main.tsx...');
     </script>
   </body>
 </html>

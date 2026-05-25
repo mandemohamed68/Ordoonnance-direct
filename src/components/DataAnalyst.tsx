@@ -21,9 +21,9 @@ export const DataAnalyst = () => {
         const oSnap = await getDocs(collection(db, 'orders'));
         const tSnap = await getDocs(query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(100)));
         
-        setUsers(uSnap.docs.map(doc => doc.data() as UserProfile));
-        setOrders(oSnap.docs.map(doc => doc.data() as Order));
-        setTransactions(tSnap.docs.map(doc => doc.data()));
+        setUsers(uSnap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+        setOrders(oSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+        setTransactions(tSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       } catch (error) {
         console.error("Error fetching data for analysis", error);
       } finally {

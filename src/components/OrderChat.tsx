@@ -177,7 +177,7 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
                 }`}>
                   <div className="flex items-center gap-2 mb-1 opacity-70">
                     <span className="font-bold text-[10px]">{m.senderName}</span>
-                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 uppercase tracking-wider">{m.senderRole || 'User'}</span>
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-black/10 uppercase tracking-wider">{m.senderRole || 'Utilisateur'}</span>
                   </div>
                   {m.type === 'voice' ? (
                     <div className="flex items-center gap-3 py-1">

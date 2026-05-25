@@ -53,7 +53,7 @@ export interface Prescription {
   extractedData?: string;
   selectedMedications?: string[];
   requestType?: 'all' | 'partial';
-  status: 'draft' | 'submitted' | 'validated' | 'rejected' | 'rejected_by_limit' | 'paid';
+  status: 'draft' | 'analyzed' | 'submitted' | 'validated' | 'rejected' | 'rejected_by_limit' | 'paid';
   createdAt: any;
   lockedBy?: string;
   lockedAt?: any;
@@ -161,6 +161,12 @@ export interface Settings {
     cashEnabled: boolean;
     ussdEnabled: boolean;
     testMode: boolean;
+    enabledProcessors?: {
+      orange: boolean;
+      moov: boolean;
+      telecel: boolean;
+      coris: boolean;
+    };
     ussdSyntaxes?: {
       orange: string;
       moov: string;

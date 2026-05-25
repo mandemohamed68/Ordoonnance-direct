@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cron from "node-cron";
 import { createServer as createViteServer } from "vite";
-dotenv.config();
+dotenv.config({ override: true });
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 async function startServer() {
@@ -92,6 +92,75 @@ async function startServer() {
         }
       }
     });
+  });
+  app.get("/api/debug-env", (req, res) => {
+    res.json({
+      restartId: "RESTART_ID_999",
+      envVars: Object.keys(process.env).filter((k) => k.includes("GEMINI") || k.includes("API") || k.includes("KEY")),
+      geminiKey: process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 10) : "UNDEFINED"
+    });
+  });
+  app.post("/api/analyze", async (req, res) => {
+    const { image, text, prompt } = req.body;
+    try {
+      const key = process.env.GEMINI_API_KEY?.trim();
+      console.log("SERVER USING API KEY STARTING WITH:", key?.substring(0, 10));
+      if (!key) {
+        return res.status(500).json({ success: false, error: "Cl\xE9 API Gemini non configur\xE9e" });
+      }
+      const { GoogleGenAI } = await import("@google/genai");
+      const client = new GoogleGenAI({ apiKey: key });
+      let result;
+      if (image) {
+        let base64Data = image;
+        if (image.startsWith("data:")) {
+          base64Data = image.split(",")[1];
+        }
+        result = await client.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: {
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+            ]
+          }
+        });
+      } else {
+        result = await client.models.generateContent({
+          model: "gemini-flash-latest",
+          contents: `${prompt} : "${text}"`
+        });
+      }
+      if (!result.text) {
+        throw new Error("Aucune r\xE9ponse de l'IA.");
+      }
+      res.json({ success: true, text: result.text });
+    } catch (error) {
+      console.error("Analysis failed:", error, error.status, error.message);
+      let errorMessage = String(error);
+      if (errorMessage.includes("429") || errorMessage.includes("quota") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
+        const demoData = {
+          articles: [
+            { nom_article: "Parac\xE9tamol 500mg (D\xC9MO)", dosage: "500 mg", posologie: "1 cp toutes les 8h" },
+            { nom_article: "Amoxicilline 1g (D\xC9MO)", dosage: "1 g", posologie: "1 cp matin et soir pendant 7 jours" }
+          ],
+          etablissement: "Clinique D\xE9mo (Quota d\xE9pass\xE9)"
+        };
+        return res.json({
+          success: true,
+          text: JSON.stringify(demoData),
+          demoMode: true,
+          notice: "Le quota de l'API est \xE9puis\xE9. Affichage de donn\xE9es fictives."
+        });
+      } else if (errorMessage.includes("503") || errorMessage.includes("UNAVAILABLE")) {
+        errorMessage = `L'analyse automatique est temporairement indisponible (serveurs surcharg\xE9s). Veuillez r\xE9essayer.`;
+      } else if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("API key not valid") || error && error.status === 400) {
+        errorMessage = `La cl\xE9 API Gemini configur\xE9e est invalide ou corrompue. Assurez-vous d'avoir entr\xE9 la bonne cl\xE9 dans les param\xE8tres de l'application. Message syst\xE8me: ${error?.message || errorMessage}`;
+      } else {
+        errorMessage = `Erreur lors de l'analyse: ${error?.message || errorMessage}`;
+      }
+      res.status(500).json({ success: false, error: errorMessage, rawError: error?.message });
+    }
   });
   app.post("/api/payment/init", async (req, res) => {
     const { amount, phone, email, method } = req.body;
@@ -191,6 +260,8 @@ async function startServer() {
   }
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server listening on port ${PORT}`);
+    console.log("ENV VARS AVAILABLE:", Object.keys(process.env).filter((k) => k.includes("GEMINI") || k.includes("API") || k.includes("KEY")));
+    console.log("GEMINI KEY:", process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 10) : "UNDEFINED");
   });
   server.keepAliveTimeout = 65e3;
   server.headersTimeout = 66e3;

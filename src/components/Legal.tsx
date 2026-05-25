@@ -14,7 +14,7 @@ export const Legal = ({ onBack }: { onBack: () => void }) => {
             <ArrowLeft size={20} />
           </button>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-600/20">
+            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
               <Shield size={20} />
             </div>
             <h1 className="text-xl font-bold tracking-tight">Mentions Légales & Confidentialité</h1>
@@ -38,12 +38,12 @@ export const Legal = ({ onBack }: { onBack: () => void }) => {
           <div className="space-y-6 text-slate-600 leading-relaxed">
             <div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">1. Éditeur du site</h3>
-              <p>Le présent site est édité par PharmaLiv, société par actions simplifiée au capital de 10 000 euros, immatriculée au Registre du Commerce et des Sociétés sous le numéro [Numéro RCS], dont le siège social est situé à [Adresse du siège social].</p>
+              <p>Le présent site est édité par Ordonnance Direct, société à responsabilité limitée dont le siège social est situé à Ouagadougou, Burkina Faso.</p>
             </div>
             
             <div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">2. Directeur de la publication</h3>
-              <p>Le directeur de la publication est [Nom du directeur], en sa qualité de Président.</p>
+              <p>Le directeur de la publication est le représentant légal de Ordonnance Direct.</p>
             </div>
 
             <div>
@@ -53,7 +53,7 @@ export const Legal = ({ onBack }: { onBack: () => void }) => {
 
             <div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">4. Propriété intellectuelle</h3>
-              <p>L'ensemble de ce site relève de la législation française et internationale sur le droit d'auteur et la propriété intellectuelle. Tous les droits de reproduction sont réservés, y compris pour les documents téléchargeables et les représentations iconographiques et photographiques.</p>
+              <p>L'ensemble de ce site relève de la législation burkinabè et internationale sur le droit d'auteur et la propriété intellectuelle. Tous les droits de reproduction sont réservés, y compris pour les documents téléchargeables et les représentations iconographiques et photographiques.</p>
             </div>
           </div>
         </motion.section>
@@ -95,7 +95,7 @@ export const Legal = ({ onBack }: { onBack: () => void }) => {
 
             <div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">4. Vos droits</h3>
-              <p>Conformément à la réglementation applicable (RGPD), vous disposez d'un droit d'accès, de rectification, de suppression et d'opposition au traitement de vos données personnelles. Vous pouvez exercer ces droits en nous contactant à l'adresse email : privacy@pharmaliv.com.</p>
+              <p>Conformément à la réglementation applicable, vous disposez d'un droit d'accès, de rectification, de suppression et d'opposition au traitement de vos données personnelles. Vous pouvez exercer ces droits en nous contactant via le support de l'application.</p>
             </div>
           </div>
         </motion.section>

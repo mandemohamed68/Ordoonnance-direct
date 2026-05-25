@@ -216,7 +216,11 @@ export const isCityOnCallNow = (startTime: string, endTime: string): boolean => 
   // 1. Sunday is always on-call
   if (day === 0) return true;
 
-  // 2. Night: Default 19:00 to 08:00 (or custom city settings)
+  // 2. Saturday: Usually on-call from noon or all day in many contexts
+  // Here we'll treat Saturday as on-call if it's after 12:00
+  if (day === 6 && currentHour >= 12) return true;
+
+  // 3. Night: Default 19:00 to 08:00 (or custom city settings)
   const [startHour, startMinute] = (startTime || "19:00").split(':').map(Number);
   const startTimeInMinutes = startHour * 60 + startMinute;
 
@@ -303,6 +307,7 @@ export const getPrescriptionStatusLabel = (status: string): string => {
   const s = status?.toLowerCase();
   switch (s) {
     case 'draft': return 'Saisie';
+    case 'analyzed': return 'Analyse Terminée';
     case 'submitted': return 'Envoyée';
     case 'validated': return 'Validée';
     case 'paid': return 'Payée';

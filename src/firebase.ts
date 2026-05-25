@@ -1,14 +1,58 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { 
+  getFirestore, 
+  initializeFirestore,
+  doc, 
+  getDoc,
+  getDocFromServer, 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  getDocs, 
+  setDoc,
+  limit, 
+  serverTimestamp, 
+  orderBy, 
+  arrayUnion, 
+  increment, 
+  writeBatch 
+} from 'firebase/firestore';
 import { getMessaging, isSupported } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  ignoreUndefinedProperties: true
-}, firebaseConfig.firestoreDatabaseId);
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+
+// Use initializeFirestore with forceLongPolling for better stability in restricted environments
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
+
+export { 
+  doc, 
+  getDoc,
+  getDocFromServer, 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  getDocs, 
+  setDoc,
+  limit, 
+  serverTimestamp, 
+  orderBy, 
+  arrayUnion, 
+  increment, 
+  writeBatch 
+};
 
 // Test database connection on boot
 async function testConnection() {
@@ -84,6 +128,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Firestore Error: ', JSON.stringify(errInfo, null, 2));
+  // DO NOT throw new Error here. It breaks async callbacks and promise chains.
 }
