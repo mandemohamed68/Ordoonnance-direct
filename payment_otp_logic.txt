@@ -1,0 +1,75 @@
+--- LOGIQUE DE PAIEMENT OTP (IMPLEMENTATION BURKINA FASO) ---
+
+1. CONFIGURATION DES PROCESSEURS (server.ts)
+const SAPPAY_PROCESSORS = {
+  orange: "11688813752134336",
+  moov: "11688813838374580",
+  telecel: "11744695746597207",
+  coris: "11702302492453862"
+};
+
+2. INITIALISATION DU PAIEMENT (BACKEND)
+- Génère d'abord une facture "SIMPLE" via Sappay.
+- Pour MOOV et CORIS : Déclenche automatiquement l'envoi du code OTP par SMS via /get-otp/.
+- Pour ORANGE et TELECEL : Retourne simplement l'ID de facture (le client doit générer son code via USSD).
+
+Extrait server.ts :
+async (amount, phone, email, method) => {
+    // 1. Création de la facture
+    const invoiceResponse = await fetch(`${publicUrl}/invoice/`, { ... });
+    const invoiceId = invoiceData.invoice_id;
+
+    // 2. Déclenchement OTP pour PUSH (Moov, Coris)
+    const pushOperators = ["moov", "coris"];
+    if (pushOperators.includes(method)) {
+       const otpResponse = await fetch(`${checkoutUrl}/get-otp/`, {
+          body: JSON.stringify({ customer_msisdn: phone, invoice_id: invoiceId, ... })
+       });
+       const transId = otpData.response?.trans_id;
+       return { success: true, invoiceId, transId, otpRequired: true };
+    }
+    return { success: true, invoiceId, otpRequired: false };
+}
+
+3. EXECUTION DU PAIEMENT (BACKEND)
+- Valide la transaction avec le code OTP fourni par l'utilisateur.
+- Gère les erreurs spécifiques (solde insuffisant, code erroné, etc.).
+
+Extrait server.ts :
+async (invoiceId, processorId, phone, otp, trans_id) => {
+    const body = { invoice_id: invoiceId, payment_processor_id: processorId, customer_msisdn: phone, otp: otp };
+    if (trans_id) body.trans_id = trans_id;
+
+    const performResponse = await fetch(`${checkoutUrl}/perform/`, { ... });
+    const performData = await safeJson(performResponse);
+
+    // Gestion d'erreurs polie pour l'utilisateur
+    if (isFailed) {
+       // Mappage des erreurs techniques en messages humains (ex: "Solde insuffisant", "OTP incorrect")
+       throw new Error(finalMsg);
+    }
+    return { success: true, data: performData };
+}
+
+4. LOGIQUE FRONTEND (App.tsx)
+- initPayment() : Appelle l'initialisation et passe à l'étape de saisie OTP.
+- performPayment() : Envoie l'OTP saisi au serveur pour validation finale.
+
+Extrait App.tsx :
+const initPayment = async (method) => {
+  const response = await fetch('/api/payment/init', { body: JSON.stringify({ amount, phone, method }) });
+  const data = await response.json();
+  setPaymentInvoiceId(data.invoiceId);
+  setPaymentStep('otp');
+};
+
+const performPayment = async (method) => {
+  const response = await fetch('/api/payment/perform', { 
+    body: JSON.stringify({ invoiceId: paymentInvoiceId, phone: paymentPhone, otp: paymentOtp }) 
+  });
+  const data = await response.json();
+  if (data.success) {
+    setPaymentStep('success');
+    finalizePaidOrder(...);
+  }
+};

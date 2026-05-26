@@ -97,21 +97,57 @@ async function startServer() {
   };
 
   const cleanMsisdn = (phone: string): string => {
-    let cleaned = phone.replace(/[\s\-\(\)]+/g, "");
-    cleaned = cleaned.replace(/^(\+226|226|00226)/, "");
-    cleaned = cleaned.replace(/^0+/, "");
+    // Remove all non-digits
+    let cleaned = phone.replace(/\D/g, "");
+    
+    // Remove common prefixes for Burkina Faso
+    if (cleaned.startsWith("00226")) cleaned = cleaned.substring(5);
+    else if (cleaned.startsWith("226")) cleaned = cleaned.substring(3);
+    
+    // If it starts with 0 (e.g. 01, 02, etc. in some formats), remove it if length > 8
+    if (cleaned.length > 8 && cleaned.startsWith("0")) {
+      cleaned = cleaned.substring(1);
+    }
+    
+    // Ensure we only have the last 8 digits for Burkina operators
+    if (cleaned.length > 8) {
+      cleaned = cleaned.substring(cleaned.length - 8);
+    }
+    
     return cleaned;
   };
 
   const safeJson = async (response: Response) => {
     const contentType = response.headers.get("content-type");
+    const text = await response.text();
+    
     if (contentType && contentType.includes("application/json")) {
-      return await response.json();
-    } else {
-      const text = await response.text();
-      console.error(`[Sappay] Expected JSON but got ${contentType}. Body snippet: ${text.substring(0, 200)}`);
-      throw new Error(`Erreur API Sappay (Non-JSON): ${response.status} ${response.statusText}`);
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        console.error(`[Sappay] JSON parsing failed: ${e}. Body: ${text}`);
+      }
     }
+
+    // Fallback for non-JSON or failed JSON parsing
+    console.log(`[Sappay Text Response] Statut: ${response.status}. Body: ${text.substring(0, 500)}`);
+    
+    // Si on a un texte brut qui ressemble à un ID de facture (ex: "W7VNFP9QFMX")
+    // On exclut les mots de statut comme SUCCESS, OK, FAILED
+    const statusWords = ["SUCCESS", "OK", "FAILED", "ERROR"];
+    if (text.match(/^[A-Z0-9]{5,}$/) && !statusWords.includes(text.toUpperCase())) {
+      return { invoice_id: text, success: true };
+    }
+    
+    if (text.toUpperCase() === "SUCCESS" || text.toUpperCase() === "OK") {
+      return { success: true, message: text };
+    }
+
+    if (response.ok) {
+       return { success: true, response: text };
+    }
+
+    throw new Error(`Erreur API Sappay: ${response.status} ${response.statusText}. Réponse: ${text.substring(0, 100)}`);
   };
 
   const getSappayToken = async (isTest: boolean = false) => {
@@ -287,10 +323,9 @@ async function startServer() {
     // Normalisation du numéro de téléphone (seulement les 8 chiffres locaux pour Sappay)
     const formattedPhone = cleanMsisdn(phone);
     
-    console.log(`[Sappay Prod] Phone normalization: ${phone} -> ${formattedPhone}`);
+    console.log(`[Sappay Prod] Initialisation: ${amount} FCFA via ${method} (${formattedPhone})`);
 
     // 1. Create SIMPLE invoice before payment
-    console.log(`[Sappay Prod] Creating invoice for ${amount}...`);
     const invoiceResponse = await fetch(`${publicUrl}/invoice/`, {
       method: "POST",
       headers: {
@@ -304,65 +339,65 @@ async function startServer() {
           country: 1 // BF
         },
         amount: String(amount),
-        note: `Paiement Ordonnance Direct - Opérateur: ${method.toUpperCase()}`
+        note: `Ordonnance Direct - ${method.toUpperCase()}`
       })
     });
     
     const invoiceData = await safeJson(invoiceResponse);
-    console.log("[Sappay Prod] Données facture reçues:", JSON.stringify(invoiceData, null, 2));
+    console.log("[Sappay Prod] Données facture:", JSON.stringify(invoiceData, null, 2));
     
-    // Extraction exhaustive de l'ID de la facture
-    const findId = (obj: any): string | null => {
-      if (!obj || typeof obj !== 'object') return null;
-      
-      // Liste des clés de redirection ou d'ID probables
-      const keys = ['invoice_id', 'id', 'invoice_uid', 'uid', 'reference', 'invoiceId'];
-      for (const key of keys) {
-        if (obj[key] && typeof obj[key] === 'string' && obj[key].length > 3) return obj[key];
-      }
-      
-      // Recherche dans les sous-objets communs d'API
-      const subKeys = ['response', 'data', 'invoice', 'details', 'invoice_details', 'invoice_detail'];
-      for (const sk of subKeys) {
-        if (obj[sk] && typeof obj[sk] === 'object') {
-          const found = findId(obj[sk]);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
+    // Comprehensive Search for ID according to the user provided flow logic
+    // Log shows: response.invoice_detail.invoice_id
+    let invoiceId = invoiceData.response?.invoice_detail?.invoice_id || 
+                    invoiceData.invoice_detail?.invoice_id || 
+                    invoiceData.response?.invoice_id ||
+                    invoiceData.invoice_id || 
+                    invoiceData.id;
 
-    let invoiceId = findId(invoiceData);
-    
-    // Fallback si l'ID est encodé différemment ou si l'ID est la 'response' elle-même
     if (!invoiceId) {
-       if (typeof invoiceData.response === 'string' && invoiceData.response.length > 5) invoiceId = invoiceData.response;
-       else if (typeof invoiceData.message === 'string' && invoiceData.message.match(/^W[A-Z0-9]{5,}$/)) invoiceId = invoiceData.message;
+      // General search fallback if standard path fails
+      const findId = (obj: any): string | null => {
+        if (!obj) return null;
+        if (typeof obj === "string" && obj.match(/^W[A-Z0-9]{5,}$/)) return obj;
+        if (typeof obj === "object" && !Array.isArray(obj)) {
+          const keys = ["invoice_id", "id", "uid", "reference", "invoiceId", "response"];
+          for (const k of keys) {
+            if (typeof obj[k] === "string" && obj[k].match(/^W[A-Z0-9]{5,}$/)) return obj[k];
+          }
+          for (const k in obj) {
+            const res = findId(obj[k]);
+            if (res) return res;
+          }
+        }
+        return null;
+      };
+      invoiceId = findId(invoiceData);
     }
-    
+
     if (!invoiceId) {
-      const fullDataStr = JSON.stringify(invoiceData);
-      console.error("[Sappay Prod] ID introuvable. Structure:", fullDataStr);
-      
-      const isSuccess = invoiceData.success === true || invoiceData.status === "Success" || invoiceData.message === "Success";
-      if (isSuccess) {
-        throw new Error(`Succès Sappay mais identifiant manquant. Réponse: ${fullDataStr.substring(0, 100)}...`);
-      }
-      
-      const errorDetail = invoiceData.error || invoiceData.message || invoiceData.detail || "ID introuvable";
-      throw new Error(`Erreur facture: ${errorDetail}`);
+      const getError = (data: any) => {
+        if (!data) return null;
+        if (typeof data.message === 'string' && data.message.length > 0) return data.message;
+        if (data.error) {
+          if (typeof data.error === 'string' && data.error.length > 0) return data.error;
+          if (typeof data.error === 'object' && Object.keys(data.error).length > 0) {
+            return data.error.message || data.error.description || JSON.stringify(data.error);
+          }
+        }
+        return null;
+      };
+      const errorMsg = getError(invoiceData) || "Identifiant de facture introuvable.";
+      throw new Error(`Erreur Sappay: ${errorMsg}`);
     }
+
     const processorId = SAPPAY_PROCESSORS[method as keyof typeof SAPPAY_PROCESSORS];
     
-    if (!processorId) {
-      throw new Error(`Méthode de paiement non supportée: ${method}`);
-    }
+    // 2. Trigger OTP only for PUSH operators (Moov, Coris) per requested flow
+    const pushOperators = ["moov", "coris"];
+    const isPush = pushOperators.includes(method.toLowerCase());
 
-    // 2. Trigger OTP only if required by operator
-    let otpRequired = false;
-    // According to documentation: Moov and Coris use get-otp. Orange and Telecel use USSD first.
-    if (method === "moov" || method === "coris") {
-       console.log(`[Sappay Prod] Déclenchement de get-otp pour ${method} (${formattedPhone})...`);
+    if (isPush) {
+       console.log(`[Sappay Prod] PUSH Flow: Déclenchement /get-otp/ pour ${method}...`);
        const otpResponse = await fetch(`${checkoutUrl}/get-otp/`, {
           method: "POST",
           headers: {
@@ -375,22 +410,52 @@ async function startServer() {
             payment_processor_id: processorId
           })
        });
+       
        const otpData = await safeJson(otpResponse);
-       console.log(`[Sappay Prod] Réponse requête OTP pour ${method}:`, otpData);
+       console.log(`[Sappay Prod] Réponse OTP:`, JSON.stringify(otpData, null, 2));
        
-       // Handle specific error cases for get-otp
-       if (otpResponse.status >= 400) {
-         const errorMsg = otpData.message || otpData.error || "Échec de l'envoi de l'OTP.";
-         throw new Error(`Erreur OTP (${method}): ${errorMsg}`);
+       if (!otpResponse.ok || (otpData.success === false)) {
+          const getError = (data: any) => {
+            if (!data) return null;
+            if (typeof data.message === 'string' && data.message.length > 0) return data.message;
+            if (data.error) {
+              if (typeof data.error === 'string' && data.error.length > 0) return data.error;
+              if (typeof data.error === 'object' && Object.keys(data.error).length > 0) {
+                return data.error.message || data.error.description || JSON.stringify(data.error);
+              }
+            }
+            if (data.response && typeof data.response.message === 'string') return data.response.message;
+            return null;
+          };
+          const msg = getError(otpData) || "Échec de l'envoi du code par SMS.";
+          throw new Error(`Erreur opérateur: ${msg}`);
        }
+
+       // Extraction de trans_id (le log montre response.trans_id)
+       const transId = otpData.response?.trans_id || otpData.trans_id || otpData.transaction_id;
        
-       otpRequired = true;
+       return { 
+         success: true, 
+         invoiceId, 
+         processorId, 
+         transId,
+         otpRequired: true, 
+         flowType: "PUSH-OTP",
+         normalizedPhone: formattedPhone 
+       };
     }
 
-    return { success: true, invoiceId, processorId, otpRequired, normalizedPhone: formattedPhone };
+    return { 
+      success: true, 
+      invoiceId, 
+      processorId, 
+      otpRequired: false, 
+      flowType: "PULL-OTP",
+      normalizedPhone: formattedPhone 
+    };
   };
 
-  const handleProductionPaymentPerform = async (invoiceId: string, processorId: string, phone: string, otp: string, trans_id?: string) => {
+  const handleProductionPaymentPerform = async (invoiceId: string, processorId: string, phone: string, otp: string, trans_id?: string, amount?: string, email?: string) => {
     const checkoutUrl = "https://api.prod.sappay.net/api/checkout";
     const token = await getSappayToken(false);
 
@@ -404,8 +469,10 @@ async function startServer() {
       otp: otp
     };
 
-    // Moov might need trans_id if provided from a previous step or specific flow
+    // Sappay logs show email and amount are sometimes required in perform
     if (trans_id) body.trans_id = trans_id;
+    if (amount) body.amount = amount;
+    if (email) body.email = email || "client@e-recharge.app";
 
     console.log(`[Sappay Prod] Exécution du paiement: Facture=${invoiceId}, MSISDN=${formattedPhone}, Mode=${processorId}...`);
     const performResponse = await fetch(`${checkoutUrl}/perform/`, {
@@ -440,6 +507,8 @@ async function startServer() {
     // Evaluate if the payment failed
     const isFailed = 
       transactionStatus === "FAILED" || 
+      transactionStatus === "ERROR" ||
+      transactionStatus === "REJECTED" ||
       performData.success === false || 
       performData.success === "false" ||
       messageLower.includes("failed") || 
@@ -448,19 +517,44 @@ async function startServer() {
       (performData.error && typeof performData.error === "object" && Object.keys(performData.error).length > 0);
     
     if (isFailed) {
-       const msg = performData.message || 
-                   performData.description || 
-                   performData.error_description || 
-                   (performData.error && typeof performData.error === "object" ? (performData.error.message || performData.error.description || JSON.stringify(performData.error)) : "") || 
-                   "Le paiement a été rejeté par l'opérateur (Transaction Failed).";
+       const extractError = (data: any) => {
+         if (!data) return null;
+         if (typeof data.message === 'string' && data.message.length > 0) return data.message;
+         if (typeof data.description === 'string' && data.description.length > 0) return data.description;
+         if (typeof data.error_description === 'string' && data.error_description.length > 0) return data.error_description;
+         if (data.error) {
+           if (typeof data.error === 'string' && data.error.length > 0) return data.error;
+           if (typeof data.error === 'object' && Object.keys(data.error).length > 0) {
+             return data.error.message || data.error.description || JSON.stringify(data.error);
+           }
+         }
+         if (data.response && typeof data.response.message === 'string') return data.response.message;
+         return null;
+       };
+
+       const rawMsg = extractError(performData) || "Le paiement a été rejeté par l'opérateur (Transaction Failed).";
        
-       // Si le message est "Transaction Failed", on ajoute une suggestion
-       let finalMsg = msg;
-       if (msg === "Transaction Failed" || finalMsg.toLowerCase().includes("failed") || finalMsg.toLowerCase().includes("fail")) {
+       let finalMsg = rawMsg;
+       const msgLower = rawMsg.toLowerCase();
+
+       // mapping according to instructions
+       if (msgLower.includes("otp") && (msgLower.includes("exist") || msgLower.includes("invalid") || msgLower.includes("incorrect"))) {
+         finalMsg = "Code OTP incorrect. Vérifiez et réessayez.";
+       } else if (msgLower.includes("timeout") || msgLower.includes("délai")) {
+         finalMsg = "Délai dépassé. Veuillez réessayer dans 60 secondes.";
+       } else if (msgLower.includes("insufficient") || msgLower.includes("insuffisant")) {
+         finalMsg = "Solde insuffisant sur ce numéro.";
+       } else if (msgLower.includes("invalid number") || msgLower.includes("invalide") || msgLower.includes("numéro")) {
+         finalMsg = "Numéro de téléphone invalide.";
+       } else if (msgLower.includes("session") || msgLower.includes("403") || msgLower.includes("401")) {
+         finalMsg = "Session expirée. Veuillez vous reconnecter.";
+       } else if (msgLower.includes("network") || msgLower.includes("réseau") || msgLower.includes("connexion")) {
+         finalMsg = "Problème de connexion. Vérifiez votre réseau.";
+       } else if (msgLower.includes("failed") || msgLower.includes("fail") || msgLower.includes("échoué")) {
          finalMsg = "La transaction a échoué. Causes possibles : code OTP incorrect ou expiré, solde insuffisant, ou opération annulée sur votre téléphone.";
        }
        
-       throw new Error(`Échec: ${finalMsg}`);
+       throw new Error(finalMsg);
     }
 
     return { success: true, data: performData };
@@ -489,7 +583,7 @@ async function startServer() {
   });
 
   app.post("/api/payment/perform", async (req, res) => {
-    const { invoiceId, processorId, phone, otp, trans_id, isTest } = req.body;
+    const { invoiceId, processorId, phone, otp, trans_id, amount, email, isTest } = req.body;
     console.log(`[API Payment Perform] Test: ${isTest}, Invoice: ${invoiceId}`);
     
     try {
@@ -497,7 +591,7 @@ async function startServer() {
         const result = await handleSandboxPaymentPerform(invoiceId);
         return res.json(result);
       } else {
-        const result = await handleProductionPaymentPerform(invoiceId, processorId, phone, otp, trans_id);
+        const result = await handleProductionPaymentPerform(invoiceId, processorId, phone, otp, trans_id, amount, email);
         return res.json(result);
       }
     } catch (error) {

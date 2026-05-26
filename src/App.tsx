@@ -68,6 +68,7 @@ import {
   AlertCircle,
   CreditCard,
   Search,
+  ArrowRight,
   TrendingDown,
   Trash2,
   QrCode,
@@ -136,6 +137,20 @@ const playNotificationSound = () => {
 // --- Utilities moved to shared.ts ---
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const extractErrorMsg = (data: any, defaultMsg: string): string => {
+  if (!data) return defaultMsg;
+  if (typeof data === 'string' && data.length > 0) return data;
+  if (data.error) {
+    if (typeof data.error === 'string' && data.error.length > 0) return data.error;
+    if (typeof data.error === 'object' && Object.keys(data.error).length > 0) {
+      return data.error.message || data.error.description || JSON.stringify(data.error);
+    }
+  }
+  if (typeof data.message === 'string' && data.message.length > 0) return data.message;
+  if (data.response && typeof data.response.message === 'string') return data.response.message;
+  return defaultMsg;
+};
 
 const generateInvoice = (order: Order, profile: UserProfile) => {
   const doc = new jsPDF();
@@ -3060,6 +3075,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const [paymentOtp, setPaymentOtp] = useState('');
   const [paymentInvoiceId, setPaymentInvoiceId] = useState('');
   const [paymentProcessorId, setPaymentProcessorId] = useState('');
+  const [paymentTransId, setPaymentTransId] = useState('');
   const [showMapForOrder, setShowMapForOrder] = useState<Order | null>(null);
   const [pharmacySearch, setPharmacySearch] = useState('');
   const [showManualEntryModal, setShowManualEntryModal] = useState(false);
@@ -3390,7 +3406,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
             prompt: "Tu es un assistant pharmacien au Burkina Faso. Voici une liste de médicaments dictée ou saisie manuellement par un patient. Extrait les noms des médicaments, les dosages et les posologies. Tente aussi d'identifier si un hôpital ou un médecin est mentionné. Réponds en français au format JSON structuré : { \"articles\": [ { \"nom_article\": \"...\", \"dosage\": \"...\", \"posologie\": \"...\" } ], \"etablissement\": \"nom de l'hôpital ou du médecin si trouvé, sinon vide\" }. Sois très rapide et précis."
           });
 
-          if (!data.success) throw new Error(data.error);
+          if (!data.success) throw new Error(extractErrorMsg(data, "Erreur lors de l'analyse automatique."));
           
           let parsed;
           try {
@@ -3594,7 +3610,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
             prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Identifie également l'établissement de santé ou le médecin figurant sur l'en-tête. Réponds en français au format JSON structuré : { \"articles\": [ { \"nom_article\": \"...\", \"dosage\": \"...\", \"posologie\": \"...\" } ], \"etablissement\": \"nom de l'hôpital ou du médecin si trouvé, sinon vide\" }. Sois très rapide et précis."
           });
 
-          if (!data.success) throw new Error(data.error);
+          if (!data.success) throw new Error(extractErrorMsg(data, "Erreur lors de l'analyse OCR."));
           
           if (data.text) {
             let parsed;
@@ -3750,6 +3766,137 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     }
   };
 
+  const performDirectPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
+    if (!showPaymentModal) return;
+    if (!paymentPhone || !paymentOtp) {
+      toast.error("Veuillez remplir tous les champs.");
+      return;
+    }
+    
+    setIsProcessingPayment(true);
+    setPaymentStep('processing');
+    setPaymentStatusMessage("Initialisation de la transaction...");
+    
+    try {
+      const isTestMode = settings?.paymentConfig?.testMode || false;
+      
+      // 1. Init (Create Invoice but NO get-otp call for Orange/Telecel)
+      const initResponse = await fetch(getApiUrl('/api/payment/init'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: showPaymentModal.totalAmount,
+          phone: paymentPhone,
+          email: profile.email,
+          method: method,
+          isTest: isTestMode
+        })
+      });
+
+      const initData = await initResponse.json();
+      if (!initData.success) throw new Error(extractErrorMsg(initData, "Échec de l'initialisation du paiement."));
+
+      setPaymentInvoiceId(initData.invoiceId);
+      if (initData.processorId) setPaymentProcessorId(initData.processorId);
+      if (initData.transId) setPaymentTransId(initData.transId);
+
+      // 2. Perform immediately with the user's OTP
+      setPaymentStatusMessage("Validation du code et paiement...");
+      const performResponse = await fetch(getApiUrl('/api/payment/perform'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceId: initData.invoiceId,
+          processorId: initData.processorId,
+          trans_id: initData.transId,
+          phone: paymentPhone,
+          otp: paymentOtp,
+          method: method,
+          isTest: isTestMode
+        })
+      });
+
+      const performData = await performResponse.json();
+      if (!performData.success) throw new Error(extractErrorMsg(performData, "Le paiement a échoué."));
+      
+      // Handle Success
+      setPaymentStep('success');
+      toast.success("Paiement validé avec succès !");
+      
+      // Finalize order record
+      await finalizePaidOrder(method, initData.invoiceId, true);
+      
+    } catch (error) {
+      console.error("Erreur de paiement:", error);
+      toast.error(error instanceof Error ? error.message : "Erreur lors du paiement.");
+      setPaymentStep('method'); // Go back to input
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  const finalizePaidOrder = async (method: string, invoiceId: string, isAutomatic: boolean) => {
+    try {
+      const order = showPaymentModal;
+      if (!order) return;
+      
+      const medicationTotal = order.medicationTotal || 0;
+      const deliveryFee = order.deliveryFee || 0;
+      const serviceFee = order.serviceFee !== undefined ? order.serviceFee : (settings?.serviceFee || 0);
+      
+      const pharmacyCommission = settings?.commissionPercentage || 10;
+      const deliveryCommission = settings?.deliveryCommissionPercentage || 15;
+      
+      const platformMedFee = Math.round(medicationTotal * (pharmacyCommission / 100));
+      const platformDeliveryFee = Math.round(deliveryFee * (deliveryCommission / 100));
+      
+      const pharmacyAmount = medicationTotal - platformMedFee;
+      const deliveryAmount = deliveryFee - platformDeliveryFee;
+      const totalPlatformFee = platformMedFee + platformDeliveryFee + serviceFee;
+      
+      const totalToPay = order.totalAmount || (medicationTotal + deliveryFee + serviceFee);
+
+      const deliveryPin = generateCode();
+
+      const orderUpdate: any = {
+        status: 'paid',
+        paymentMethod: method,
+        paymentPhone: paymentPhone,
+        paymentStatus: 'completed',
+        sappayInvoiceId: invoiceId,
+        medicationTotal,
+        deliveryFee,
+        serviceFee,
+        totalAmount: totalToPay,
+        pharmacyAmount: pharmacyAmount,
+        deliveryAmount: deliveryAmount,
+        platformFee: totalPlatformFee,
+        updatedAt: serverTimestamp(),
+        deliveryCode: deliveryPin,
+        paymentConfirmedAt: serverTimestamp(),
+        history: arrayUnion({
+          status: 'paid',
+          timestamp: new Date().toISOString(),
+          label: `Paiement automatique ${method.toUpperCase()} (OTP) validé avec succès.`
+        })
+      };
+
+      await updateDoc(doc(db, 'orders', order.id), orderUpdate);
+
+      if (order.prescriptionId) {
+        await updateDoc(doc(db, 'prescriptions', order.prescriptionId), {
+          status: 'paid',
+          lockedBy: null,
+          lockedAt: null
+        });
+      }
+
+      setTimeout(() => setShowPaymentModal(null), 2000);
+    } catch (e) {
+      console.error("Error finalizing order:", e);
+    }
+  };
+
   const initPayment = async (method: 'orange' | 'moov' | 'telecel' | 'coris') => {
     if (!showPaymentModal) return;
     if (!paymentPhone) {
@@ -3786,13 +3933,17 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       });
 
       const data = await response.json();
-      if (!data.success) throw new Error(data.error);
+      if (!data.success) throw new Error(extractErrorMsg(data, "Échec de l'envoi du code."));
 
       if (data.otpRequired) {
         setPaymentStatusMessage("Code de confirmation envoyé par SMS...");
+      } else {
+        setPaymentStatusMessage("Facture générée. Saisissez votre code OTP...");
       }
 
       setPaymentInvoiceId(data.invoiceId);
+      if (data.transId) setPaymentTransId(data.transId);
+      
       // Store processorId if returned for perform step
       if (data.processorId) {
         setPaymentProcessorId(data.processorId);
@@ -3848,9 +3999,12 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           body: JSON.stringify({
             invoiceId: paymentInvoiceId,
             processorId: paymentProcessorId,
+            trans_id: paymentTransId,
             phone: paymentPhone,
             otp: paymentOtp,
             method: method,
+            amount: showPaymentModal.totalAmount.toString(),
+            email: profile.email || "client@e-recharge.app",
             isTest: isTestMode
           })
         });
@@ -3860,7 +4014,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           apiSuccess = true;
           apiData = data.data;
         } else {
-          throw new Error(data.error || "Le paiement a été rejeté. Vérifiez votre solde ou le code saisi.");
+          throw new Error(extractErrorMsg(data, "Le paiement a été rejeté. Vérifiez votre solde ou le code saisi."));
         }
       } else {
         // Mode USSD: Toujours considéré comme "à vérifier manuellement"
@@ -4673,7 +4827,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                   <>
                     <p className="text-left text-sm font-bold text-slate-700 mb-2">Mobile Money (Burkina Faso)</p>
                     <div className="grid grid-cols-2 gap-3">
-                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.orange) && (
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.orange !== false) && (
                         <button 
                           onClick={() => setSelectedPaymentMethod('orange')}
                           className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-orange-500 hover:bg-orange-50 transition-all gap-2"
@@ -4684,7 +4838,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                           <span className="text-xs font-bold text-slate-700">Orange Money</span>
                         </button>
                       )}
-                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.moov) && (
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.moov !== false) && (
                         <button 
                           onClick={() => setSelectedPaymentMethod('moov')}
                           className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2"
@@ -4695,18 +4849,18 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                           <span className="text-xs font-bold text-slate-700">Moov Money</span>
                         </button>
                       )}
-                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.telecel) && (
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.telecel !== false) && (
                         <button 
                           onClick={() => setSelectedPaymentMethod('telecel')}
                           className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-red-600 hover:bg-red-50 transition-all gap-2"
                         >
                           <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden p-1 border border-slate-100">
-                             <img src="/payments/telecel.png" alt="Telecel" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = '<span class="text-red-600 font-black text-[12px]">TELECEL</span>'; }} />
+                             <img src="/payments/telecel-1.png" alt="Telecel" referrerPolicy="no-referrer" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = "/payments/telecel.png"; }} />
                           </div>
                           <span className="text-xs font-bold text-slate-700">Telecel Money</span>
                         </button>
                       )}
-                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.coris) && (
+                      {(!settings?.paymentConfig?.enabledProcessors || settings.paymentConfig.enabledProcessors.coris !== false) && (
                         <button 
                           onClick={() => setSelectedPaymentMethod('coris')}
                           className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-sky-600 hover:bg-sky-50 transition-all gap-2"
@@ -4742,247 +4896,152 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                       </div>
                     </div>
                     
-                    {paymentStep === 'method' && !mmMode && (
-                      <div className="space-y-3">
-                        <p className="text-sm text-slate-600 font-medium">Comment souhaitez-vous payer ?</p>
-                        <div className={`grid ${selectedPaymentMethod === 'coris' ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
-                          {selectedPaymentMethod !== 'coris' && (
-                            <button onClick={() => setMmMode('ussd')} className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-slate-100 hover:border-primary hover:bg-emerald-50 transition-all gap-2 text-center text-slate-700">
-                              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                                <PhoneCall size={20} />
-                              </div>
-                              <span className="text-xs font-bold leading-tight mt-1">Code USSD<br/><span className="text-[10px] font-normal text-slate-500">Appel direct</span></span>
-                            </button>
-                          )}
-                          <button onClick={() => setMmMode('otp')} className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-slate-100 hover:border-primary hover:bg-emerald-50 transition-all gap-2 text-center text-slate-700">
-                            <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                              <Smartphone size={20} />
-                            </div>
-                            <span className="text-xs font-bold leading-tight mt-1">Direct / OTP<br/><span className="text-[10px] font-normal text-slate-500">Code SMS</span></span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {paymentStep === 'method' && mmMode === 'otp' && (
-                      <div className="space-y-4 animate-in fade-in">
-                        {selectedPaymentMethod === 'orange' && (
-                          <div className="p-4 bg-orange-50 border border-orange-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
-                            <Info className="text-orange-500 shrink-0" size={18} />
-                            <div className="flex flex-col gap-1">
-                              <p className="text-[11px] text-orange-800 leading-tight font-bold">
-                                Instructions Orange Money :
-                              </p>
-                              <p className="text-[10px] text-orange-700 leading-relaxed font-medium">
-                                1. Composez <span className="font-black text-slate-900">*144*4*6*{showPaymentModal.totalAmount}#</span> sur votre mobile.<br/>
-                                2. Validez avec votre code PIN secret pour recevoir l'OTP.<br/>
-                                3. Cliquez sur le bouton ci-dessous puis saisissez le code reçu.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                        {selectedPaymentMethod === 'telecel' && (
-                          <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
-                            <Info className="text-indigo-500 shrink-0" size={18} />
-                            <div className="flex flex-col gap-1">
-                              <p className="text-[11px] text-indigo-800 leading-tight font-bold">
-                                Instructions Telecel Money :
-                              </p>
-                              <p className="text-[10px] text-indigo-700 leading-relaxed font-medium">
-                                1. Composez <span className="font-black text-slate-900">*808*4*4*{showPaymentModal.totalAmount}#</span> sur votre mobile.<br/>
-                                2. Saisissez votre code PIN pour obtenir le code de transaction.<br/>
-                                3. Saisissez ce code ici après avoir cliqué sur le bouton.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                        {selectedPaymentMethod === 'moov' && (
-                          <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
-                            <Info className="text-blue-500 shrink-0" size={18} />
-                            <div className="flex flex-col gap-1">
-                              <p className="text-[11px] text-blue-800 leading-tight font-bold">
-                                Workflow Moov Money :
-                              </p>
-                              <p className="text-[10px] text-blue-700 leading-relaxed font-medium">
-                                En cliquant sur le bouton, un code de confirmation vous sera envoyé par SMS par Moov Africa.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                        {selectedPaymentMethod === 'coris' && (
-                          <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl flex gap-3 mb-2 shadow-sm">
-                            <Info className="text-sky-500 shrink-0" size={18} />
-                            <div className="flex flex-col gap-1">
-                              <p className="text-[11px] text-sky-800 leading-tight font-bold">
-                                Paiement Coris Money :
-                              </p>
-                              <p className="text-[10px] text-sky-700 leading-relaxed font-medium">
-                                Un code de vérification SMS est requis pour valider cette transaction.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Numéro de téléphone {selectedPaymentMethod.toUpperCase()}</label>
-                          <input 
-                            type="tel" 
-                            placeholder="Ex: 0102030405"
-                            value={paymentPhone}
-                            onChange={(e) => setPaymentPhone(e.target.value)}
-                            onFocus={(e) => {
-                              setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
-                            }}
-                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold focus:border-primary outline-none transition-all"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => initPayment(selectedPaymentMethod)}
-                          disabled={isProcessingPayment || !paymentPhone}
-                          className="btn-primary w-full flex items-center justify-center gap-3 py-4"
-                        >
-                          <Smartphone size={20} />
-                          {['orange', 'telecel'].includes(selectedPaymentMethod) ? 'Continuer le paiement' : 'Recevoir le code SMS'}
-                        </button>
-                      </div>
-                    )}
-
-                    {paymentStep === 'method' && mmMode === 'ussd' && (
-                      <div className="space-y-4 animate-in fade-in">
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                          <p className="text-xs text-slate-500 mb-2">Syntaxe USSD (Composez ce code) :</p>
-                          <p className="font-mono font-bold text-slate-900 text-center bg-white py-2 rounded-lg border border-slate-200">
-                            {(() => {
-                              let syntax = "";
-                              let account = "";
-                              if (selectedPaymentMethod === 'orange') {
-                                syntax = settings?.paymentConfig?.ussdSyntaxes?.orange || '*144*4*6*{amount}#';
-                                account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
-                              } else if (selectedPaymentMethod === 'moov') {
-                                syntax = settings?.paymentConfig?.ussdSyntaxes?.moov || '*555*2*1*{amount}#';
-                                account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
-                              } else if (selectedPaymentMethod === 'telecel') {
-                                syntax = settings?.paymentConfig?.ussdSyntaxes?.telecel || '*808*4*4*{amount}#';
-                                account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
-                              }
-                              return syntax
-                                .replace('{amount}', String(showPaymentModal.totalAmount))
-                                .replace('{account}', account);
-                            })()}
-                          </p>
-                          {(() => {
-                            let account = "";
-                            if (selectedPaymentMethod === 'orange') account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
-                            else if (selectedPaymentMethod === 'moov') account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
-                            else if (selectedPaymentMethod === 'telecel') account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
-                            
-                            return account ? (
-                              <p className="text-[10px] text-slate-400 mt-2 text-center">
-                                Compte Marchand : <span className="font-bold text-slate-600">{account}</span>
-                              </p>
-                            ) : null;
-                          })()}
-                        </div>
-                        
-                        {(() => {
-                          let syntax = "";
-                          let account = "";
-                          if (selectedPaymentMethod === 'orange') {
-                            syntax = settings?.paymentConfig?.ussdSyntaxes?.orange || '*144*4*6*{amount}*#';
-                            account = settings?.paymentConfig?.paymentAccounts?.orangeMoney || '';
-                          } else if (selectedPaymentMethod === 'moov') {
-                            syntax = settings?.paymentConfig?.ussdSyntaxes?.moov || '*555*2*1*{amount}#';
-                            account = settings?.paymentConfig?.paymentAccounts?.moovMoney || '';
-                          } else if (selectedPaymentMethod === 'telecel') {
-                            syntax = settings?.paymentConfig?.ussdSyntaxes?.telecel || '*160*2*1*{amount}#';
-                            account = settings?.paymentConfig?.paymentAccounts?.telecelCash || '';
-                          }
-                          const rawCode = syntax
-                            .replace('{amount}', String(showPaymentModal.totalAmount))
-                            .replace('{account}', account);
-                            
-                          const telCode = rawCode.replace(/#/g, '%23');
-                          
-                          return (
-                            <a 
-                              href={`tel:${telCode}`}
-                              className="w-full flex items-center justify-center p-3 rounded-xl border border-primary/20 bg-primary/10 text-primary font-bold hover:bg-primary/20 transition-all gap-2"
+                    {/* Flow: Choosing Mode OR Processing Mode */}
+                    {paymentStep === 'method' && (
+                      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+                        {!mmMode ? (
+                          <div className="grid grid-cols-2 gap-3">
+                            <button 
+                              onClick={() => setMmMode('otp')}
+                              className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:bg-emerald-50 transition-all gap-2"
                             >
-                              <PhoneCall size={18} />
-                              Composer directement
-                            </a>
-                          );
-                        })()}
-
-                        <button 
-                          onClick={() => setPaymentStep('otp')}
-                          className="btn-primary w-full flex items-center justify-center gap-3"
-                        >
-                          <CheckCircle size={20} />
-                          J'ai payé, valider la transaction
-                        </button>
+                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-emerald-600">
+                                <Smartphone size={20} />
+                              </div>
+                              <span className="text-xs font-bold text-slate-700">Code OTP</span>
+                              <span className="text-[9px] text-slate-400">Automatique</span>
+                            </button>
+                            <button 
+                              onClick={() => setMmMode('ussd')}
+                              className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all gap-2"
+                            >
+                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-blue-600">
+                                <Phone size={20} />
+                              </div>
+                              <span className="text-xs font-bold text-slate-700">Saisie USSD</span>
+                              <span className="text-[9px] text-slate-400">Confirmation manuelle</span>
+                            </button>
+                          </div>
+                        ) : mmMode === 'otp' ? (
+                          <div className="space-y-4 animate-in slide-in-from-right-4">
+                            <div className="space-y-1.5 text-left">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Numéro de téléphone</label>
+                              <input 
+                                type="tel" 
+                                placeholder="Ex: 70000000"
+                                value={paymentPhone}
+                                onChange={(e) => setPaymentPhone(e.target.value)}
+                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold focus:border-primary outline-none transition-all shadow-inner"
+                              />
+                            </div>
+                            <button 
+                              onClick={() => initPayment(selectedPaymentMethod)}
+                              disabled={isProcessingPayment || !paymentPhone}
+                              className="btn-primary w-full flex items-center justify-center gap-3 py-4"
+                            >
+                              {['moov', 'coris'].includes(selectedPaymentMethod) ? (
+                                <>
+                                  <Smartphone size={20} />
+                                  Déclencher l'envoi SMS
+                                </>
+                              ) : (
+                                <>
+                                  <ArrowRight size={20} />
+                                  Continuer le paiement
+                                </>
+                              )}
+                            </button>
+                            {['orange', 'telecel'].includes(selectedPaymentMethod) && (
+                              <p className="text-[10px] text-slate-500 italic mt-2 text-center">
+                                Note: Préparez votre code OTP en composant {selectedPaymentMethod === 'orange' ? '*144*4*6#' : '*808*4*4#'} sur votre mobile.
+                              </p>
+                            )}
+                            {selectedPaymentMethod === 'coris' && mmMode === 'otp' && (
+                              <p className="text-[10px] text-slate-500 italic mt-2 text-center">
+                                Coris Money : Vous recevrez un SMS avec votre code de confirmation.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-4 animate-in slide-in-from-right-4">
+                            <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl space-y-3">
+                              <p className="text-[11px] text-blue-800 font-bold text-left">Instructions USSD :</p>
+                              <p className="text-[10px] text-blue-700 leading-relaxed font-mono bg-white p-2 rounded-lg border border-blue-100 text-center">
+                                {selectedPaymentMethod === 'orange' ? '*144*4*6*' : selectedPaymentMethod === 'moov' ? '*555*2*1*' : selectedPaymentMethod === 'coris' ? '*550#' : '*808*4*4*'}{showPaymentModal.totalAmount}#
+                              </p>
+                              <p className="text-[10px] text-blue-700 italic text-left">
+                                Une fois le transfert effectué, saisissez la référence de la transaction reçue par SMS.
+                              </p>
+                            </div>
+                            <div className="space-y-1.5 text-left">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Référence Transaction / ID</label>
+                              <input 
+                                type="text" 
+                                placeholder="ID de la transaction"
+                                value={paymentOtp}
+                                onChange={(e) => setPaymentOtp(e.target.value)}
+                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-bold focus:border-primary outline-none transition-all shadow-inner"
+                              />
+                            </div>
+                            <button 
+                              onClick={() => performPayment(selectedPaymentMethod)}
+                              disabled={isProcessingPayment || !paymentOtp}
+                              className="btn-primary w-full py-4 text-center"
+                            >
+                              Confirmer le paiement
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {paymentStep === 'otp' && (
-                      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                        <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
-                          <AlertCircle className="text-blue-500 shrink-0" size={20} />
-                          <div className="flex flex-col">
-                            <p className="text-[11px] text-blue-700 leading-relaxed font-medium">
-                              {selectedPaymentMethod === 'moov' 
-                                ? "Veuillez saisir le code de confirmation reçu par SMS de la part de Moov Money."
-                                : "Un code OTP a été envoyé sur votre téléphone ou généré via USSD. Veuillez le saisir ci-dessous pour valider le paiement."}
+                      <div className="space-y-4 animate-in zoom-in-95 text-left">
+                        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex gap-3 shadow-sm">
+                          <Smartphone className="text-emerald-500" size={18} />
+                          <div className="flex flex-col gap-1">
+                            <p className="text-[11px] text-emerald-800 font-bold">Code de sécurité reçu ?</p>
+                            <p className="text-[10px] text-emerald-700 leading-relaxed font-medium">
+                              Veuillez saisir le code reçu par SMS sur le numéro <span className="font-bold">{paymentPhone}</span>.
                             </p>
-                            {selectedPaymentMethod === 'moov' && (
-                              <p className="text-[10px] text-blue-500 mt-1">Si vous n'avez pas reçu de code, vérifiez votre réseau et réessayez.</p>
-                            )}
                           </div>
                         </div>
-                        <div className="space-y-4">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block text-center">
-                            {mmMode === 'otp' ? 'Saisissez votre code OTP' : 'Référence de transaction'}
-                          </label>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Code de confirmation (OTP)</label>
                           <input 
                             type="text" 
-                            placeholder={mmMode === 'otp' ? "000000" : "ID Transaction"}
+                            placeholder="000000"
                             value={paymentOtp}
                             onChange={(e) => setPaymentOtp(e.target.value)}
-                            onFocus={(e) => {
-                              setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
-                            }}
-                            className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl px-4 py-5 font-mono text-3xl font-black text-center tracking-[0.3em] focus:border-emerald-500 focus:bg-white outline-none transition-all shadow-inner text-slate-800 placeholder:text-slate-300"
+                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-4 py-3 font-mono text-2xl font-black text-center tracking-widest focus:border-primary outline-none transition-all shadow-inner"
                           />
                         </div>
                         <button 
                           onClick={() => performPayment(selectedPaymentMethod)}
                           disabled={isProcessingPayment || !paymentOtp}
-                          className="btn-primary w-full flex items-center justify-center gap-3"
+                          className="btn-primary w-full flex items-center justify-center gap-3 py-4"
                         >
                           <CheckCircle size={20} />
-                          {mmMode === 'otp' ? 'Valider le paiement' : 'Confirmer le paiement'}
+                          Finaliser le paiement
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setPaymentStep('method');
+                            setPaymentInvoiceId('');
+                          }}
+                          className="w-full text-center text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors py-2"
+                        >
+                          Modifier le numéro
                         </button>
                       </div>
                     )}
 
-                    {paymentStep === 'processing' && (
-                      <div className="py-8 flex flex-col items-center justify-center gap-4">
-                        <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
-                        <div className="flex flex-col items-center gap-1 text-center">
-                          <p className="font-bold text-slate-700">Traitement en cours...</p>
-                          <p className="text-xs text-slate-500 font-medium max-w-[240px]">
-                            {paymentStatusMessage || "Veuillez patienter pendant la validation."}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
+                    {/* SUCCESS STATE */}
                     {paymentStep === 'success' && (
-                      <div className="py-8 flex flex-col items-center justify-center gap-4 animate-in zoom-in">
-                        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
-                          <CheckCircle size={32} />
-                        </div>
-                        <p className="font-bold text-emerald-600 text-lg">Paiement réussi !</p>
-                      </div>
+                       <div className="py-10 flex flex-col items-center justify-center text-center gap-4 animate-in zoom-in">
+                          <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center shadow-inner"><CheckCircle size={32} /></div>
+                          <p className="text-lg font-black text-emerald-600 uppercase tracking-widest">Paiement Validé !</p>
+                       </div>
                     )}
                   </div>
                 )}
