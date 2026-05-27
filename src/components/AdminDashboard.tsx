@@ -290,7 +290,13 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
 
   const [newPharmacy, setNewPharmacy] = useState({ name: '', address: '', phone: '', locality: '', cityId: '', groupId: '', licenseNumber: '', lat: '', lng: '', maxConcurrentOrders: 10 });
   const [addingPharmacy, setAddingPharmacy] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
+  const [newUser, setNewUser] = useState({ 
+    name: '', email: '', phone: '', role: 'pharmacist', address: '', 
+    pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', 
+    groupId: '', licenseNumber: '', authorizationNumber: '',
+    compensationPhone: '', compensationRIB: '',
+    guarantorName: '', guarantorPhone: '', guarantorAddress: ''
+  });
   const [addingUser, setAddingUser] = useState(false);
   const [deliveryExtra, setDeliveryExtra] = useState({ idCardFront: '', idCardBack: '', acceptedTerms: false });
   const [viewImage, setViewImage] = useState<string | null>(null);
@@ -753,6 +759,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         walletBalance: 0,
         pharmacistBalance: 0,
         deliveryBalance: 0,
+        compensationPhone: newUser.compensationPhone || '',
+        compensationRIB: newUser.compensationRIB || '',
         createdAt: serverTimestamp()
       };
 
@@ -776,6 +784,13 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
         userData.idCardFront = deliveryExtra.idCardFront;
         userData.idCardBack = deliveryExtra.idCardBack;
         userData.acceptedTerms = deliveryExtra.acceptedTerms;
+        if (newUser.guarantorName || newUser.guarantorPhone || newUser.guarantorAddress) {
+          userData.guarantorInfo = {
+            name: newUser.guarantorName || '',
+            phone: newUser.guarantorPhone || '',
+            address: newUser.guarantorAddress || ''
+          };
+        }
       }
 
       await setDoc(doc(db, 'users', uid), userData);
@@ -783,7 +798,13 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       const roleText = newUser.role === 'pharmacist' ? 'Pharmacien (et sa pharmacie)' : 'Utilisateur';
       await addSystemLog('CREATE_USER_AND_PHARMACY', `Création d'un ${roleText}: ${newUser.name}`);
       
-      setNewUser({ name: '', email: '', phone: '', role: 'pharmacist', address: '', pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', groupId: '', licenseNumber: '', authorizationNumber: '' });
+      setNewUser({ 
+        name: '', email: '', phone: '', role: 'pharmacist', address: '', 
+        pharmacyName: '', locality: '', lat: '', lng: '', cityId: '', 
+        groupId: '', licenseNumber: '', authorizationNumber: '',
+        compensationPhone: '', compensationRIB: '',
+        guarantorName: '', guarantorPhone: '', guarantorAddress: ''
+      });
       setDeliveryExtra({ idCardFront: '', idCardBack: '', acceptedTerms: false });
       toast.success(`${roleText} créé avec succès.`);
     } catch (error) {
@@ -1859,6 +1880,19 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <tr key={user.uid} className="hover:bg-slate-50/50 transition-colors">
                     <td className="p-4">
                       <div className="font-bold text-slate-900">{user.name}</div>
+                      {user.role === 'delivery' && (
+                        <div className="mt-1 flex flex-col gap-1">
+                          {(!user.idCardFront || !user.idCardBack || !user.guarantorInfo?.name) ? (
+                            <span className="px-2 py-0.5 bg-rose-50 text-rose-600 rounded text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 w-fit border border-rose-100">
+                              <AlertCircle size={10} /> Dossier Incomplet
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 w-fit border border-emerald-100">
+                              <CheckCircle size={10} /> Dossier Complet
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {user.role === 'delivery' && (user.idCardFront || user.idCardBack) && (
                         <div className="flex gap-2 mt-2">
                           {user.idCardFront && (
@@ -2011,6 +2045,35 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               </select>
             </div>
 
+            <div className="bg-slate-100/50 p-6 rounded-3xl border border-slate-200 space-y-4">
+              <div className="flex items-center gap-3 mb-2">
+                <CreditCard className="text-primary" size={18} />
+                <h4 className="text-sm font-bold text-slate-900">Infos de Paiement (Compensation - Optionnel)</h4>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">N° Téléphone de Paiement</label>
+                  <input 
+                    type="tel" 
+                    value={newUser.compensationPhone}
+                    onChange={e => setNewUser({...newUser, compensationPhone: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    placeholder="Ex: +226 70 00 00 00"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">RIB Bancaire</label>
+                  <input 
+                    type="text" 
+                    value={newUser.compensationRIB}
+                    onChange={e => setNewUser({...newUser, compensationRIB: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    placeholder="Ex: BF000 00000 0000000000 00"
+                  />
+                </div>
+              </div>
+            </div>
+
             {newUser.role === 'pharmacist' && (
               <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100 space-y-6">
                 <div className="flex items-center gap-3 mb-2">
@@ -2131,7 +2194,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto *</label>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto</label>
                     <div className="relative">
                       {deliveryExtra.idCardFront ? (
                         <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
@@ -2158,7 +2221,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso *</label>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso</label>
                     <div className="relative">
                       {deliveryExtra.idCardBack ? (
                         <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
@@ -2182,6 +2245,35 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                         </label>
                       )}
                     </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <ShieldCheck className="text-primary" size={18} />
+                    <h4 className="text-sm font-bold text-slate-900">Infos Garant (Optionnel)</h4>
+                  </div>
+                  <div className="space-y-4">
+                    <input 
+                      type="text" 
+                      value={newUser.guarantorName}
+                      onChange={e => setNewUser({...newUser, guarantorName: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                      placeholder="Nom du garant"
+                    />
+                    <input 
+                      type="tel" 
+                      value={newUser.guarantorPhone}
+                      onChange={e => setNewUser({...newUser, guarantorPhone: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                      placeholder="Téléphone du garant"
+                    />
+                    <textarea 
+                      value={newUser.guarantorAddress}
+                      onChange={e => setNewUser({...newUser, guarantorAddress: e.target.value})}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none min-h-[80px]"
+                      placeholder="Adresse du garant"
+                    />
                   </div>
                 </div>
 
@@ -2432,8 +2524,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Capacité (Commandes max)</label>
                               <input 
                                 type="number" 
-                                value={newPharmacy.maxConcurrentOrders}
-                                onChange={(e) => setNewPharmacy({...newPharmacy, maxConcurrentOrders: Number(e.target.value)})}
+                                value={newPharmacy.maxConcurrentOrders || ''}
+                                onChange={(e) => setNewPharmacy({...newPharmacy, maxConcurrentOrders: parseInt(e.target.value) || 0})}
                                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500/20 transition-all outline-none"
                                 placeholder="Capacité de traitement"
                                 min="1"
@@ -4004,8 +4096,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Commission Pharmacie (%)</label>
                   <input 
                     type="number" 
-                    value={editSettings.commissionPercentage || 10}
-                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: Number(e.target.value)})}
+                    value={editSettings.commissionPercentage ?? 10}
+                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   />
                   <p className="text-[10px] text-slate-400">Pourcentage prélevé sur les ventes de médicaments.</p>
@@ -4014,8 +4106,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Commission Livraison (%)</label>
                   <input 
                     type="number" 
-                    value={editSettings.deliveryCommissionPercentage || 15}
-                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: Number(e.target.value)})}
+                    value={editSettings.deliveryCommissionPercentage ?? 15}
+                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   />
                   <p className="text-[10px] text-slate-400">Pourcentage prélevé sur les frais de livraison.</p>
@@ -4024,8 +4116,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Frais de Service Fixe (CFA)</label>
                   <input 
                     type="number" 
-                    value={editSettings.serviceFee || 0}
-                    onChange={(e) => setEditSettings({...editSettings, serviceFee: Number(e.target.value)})}
+                    value={editSettings.serviceFee ?? 0}
+                    onChange={(e) => setEditSettings({...editSettings, serviceFee: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   />
                   <p className="text-[10px] text-slate-400">Frais fixes ajoutés à chaque commande (Gains plateforme).</p>
@@ -4048,8 +4140,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tarif Journée (CFA)</label>
                   <input 
                     type="number" 
-                    value={editSettings.dayDeliveryFee}
-                    onChange={(e) => setEditSettings({...editSettings, dayDeliveryFee: parseInt(e.target.value)})}
+                    value={editSettings.dayDeliveryFee ?? 0}
+                    onChange={(e) => setEditSettings({...editSettings, dayDeliveryFee: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   />
                 </div>
@@ -4057,8 +4149,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tarif Nuit (CFA)</label>
                   <input 
                     type="number" 
-                    value={editSettings.nightDeliveryFee}
-                    onChange={(e) => setEditSettings({...editSettings, nightDeliveryFee: parseInt(e.target.value)})}
+                    value={editSettings.nightDeliveryFee ?? 0}
+                    onChange={(e) => setEditSettings({...editSettings, nightDeliveryFee: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   />
                 </div>
@@ -4072,15 +4164,15 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                     min="0"
                     max="50"
                     step="1"
-                    value={editSettings.commissionPercentage || 10}
-                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value)})}
+                    value={editSettings.commissionPercentage ?? 10}
+                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
                     className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-primary"
                   />
                   <input 
                     type="number"
                     min="0"
                     max="100"
-                    value={editSettings.commissionPercentage || 10}
+                    value={editSettings.commissionPercentage ?? 10}
                     onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
                     className="w-20 text-center font-bold text-primary bg-primary/5 py-2 rounded-xl border-none focus:ring-2 focus:ring-primary/20"
                   />
@@ -4099,15 +4191,15 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                     min="0"
                     max="50"
                     step="1"
-                    value={editSettings.deliveryCommissionPercentage || 10}
-                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value)})}
+                    value={editSettings.deliveryCommissionPercentage ?? 10}
+                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
                     className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
                   <input 
                     type="number"
                     min="0"
                     max="100"
-                    value={editSettings.deliveryCommissionPercentage || 10}
+                    value={editSettings.deliveryCommissionPercentage ?? 10}
                     onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
                     className="w-20 text-center font-bold text-blue-600 bg-blue-50 py-2 rounded-xl border-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -4122,8 +4214,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Début Nuit (Heure)</label>
                   <select 
-                    value={editSettings.nightStartHour}
-                    onChange={(e) => setEditSettings({...editSettings, nightStartHour: parseInt(e.target.value)})}
+                    value={editSettings.nightStartHour ?? 0}
+                    onChange={(e) => setEditSettings({...editSettings, nightStartHour: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   >
                     {Array.from({length: 24}).map((_, i) => (
@@ -4134,8 +4226,8 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Fin Nuit (Heure)</label>
                   <select 
-                    value={editSettings.nightEndHour}
-                    onChange={(e) => setEditSettings({...editSettings, nightEndHour: parseInt(e.target.value)})}
+                    value={editSettings.nightEndHour ?? 0}
+                    onChange={(e) => setEditSettings({...editSettings, nightEndHour: parseInt(e.target.value) || 0})}
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
                   >
                     {Array.from({length: 24}).map((_, i) => (
@@ -5000,6 +5092,62 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, address: e.target.value})}
               className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
             />
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <CreditCard className="text-primary" size={18} />
+              <h4 className="text-sm font-bold text-slate-900">Infos de Paiement (Compensation)</h4>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400">N° Téléphone de Paiement</label>
+                <input 
+                  type="tel" 
+                  value={editingDeliveryUser.compensationPhone || ''}
+                  onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, compensationPhone: e.target.value})}
+                  className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400">RIB Bancaire</label>
+                <input 
+                  type="text" 
+                  value={editingDeliveryUser.compensationRIB || ''}
+                  onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, compensationRIB: e.target.value})}
+                  className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="text-primary" size={18} />
+              <h4 className="text-sm font-bold text-slate-900">Infos Garant (Optionnel)</h4>
+            </div>
+            <div className="space-y-3">
+              <input 
+                type="text" 
+                value={editingDeliveryUser.guarantorInfo?.name || ''}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: { ...editingDeliveryUser.guarantorInfo || {}, name: e.target.value }})}
+                className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                placeholder="Nom du garant"
+              />
+              <input 
+                type="tel" 
+                value={editingDeliveryUser.guarantorInfo?.phone || ''}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: { ...editingDeliveryUser.guarantorInfo || {}, phone: e.target.value }})}
+                className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                placeholder="Téléphone du garant"
+              />
+              <textarea 
+                value={editingDeliveryUser.guarantorInfo?.address || ''}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: { ...editingDeliveryUser.guarantorInfo || {}, address: e.target.value }})}
+                className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+                placeholder="Adresse du garant"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

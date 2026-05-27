@@ -952,6 +952,12 @@ export default function App() {
             if (docSnap.exists()) {
               const data = docSnap.data() as UserProfile;
               
+              // Handle suspended/blocked users
+              if (data.status === 'suspended' || data.status === 'blocked') {
+                // If the user isn't a super-admin, we should notify them but not necessarily sign them out here
+                // to allow them to see the suspended screen.
+              }
+
               // Force super-admin role for the specific emails
               if (isSuperAdminEmail(firebaseUser.email) && data.role !== 'super-admin') {
                 updateDoc(docRef, { role: 'super-admin', status: 'active' }).catch(console.error);
@@ -1289,6 +1295,46 @@ export default function App() {
     return <RoleSelectionView onSelect={handleRoleSelection} isAdmin={isSuperAdminEmail(user.email)} />;
   }
 
+  if (profile?.status === 'suspended' && !isSuperAdminEmail(user?.email)) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
+        <div className="w-24 h-24 bg-amber-100 rounded-3xl flex items-center justify-center text-amber-500 mb-8">
+          <AlertCircle size={48} />
+        </div>
+        <h1 className="text-4xl font-bold text-slate-900 mb-4">Compte Suspendu</h1>
+        <p className="text-slate-500 max-w-md text-lg mb-8">
+          Votre compte a été temporairement suspendu par l'administrateur. Veuillez contacter le support pour plus d'informations.
+        </p>
+        <button 
+          onClick={handleLogout}
+          className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 transition-colors"
+        >
+          Se déconnecter
+        </button>
+      </div>
+    );
+  }
+
+  if (profile?.status === 'blocked' && !isSuperAdminEmail(user?.email)) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
+        <div className="w-24 h-24 bg-red-100 rounded-3xl flex items-center justify-center text-red-500 mb-8">
+          <X size={48} />
+        </div>
+        <h1 className="text-4xl font-bold text-slate-900 mb-4">Compte Bloqué</h1>
+        <p className="text-slate-500 max-w-md text-lg mb-8">
+          Votre accès à la plateforme a été bloqué définitivement pour non-respect des règles d'utilisation.
+        </p>
+        <button 
+          onClick={handleLogout}
+          className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 transition-colors"
+        >
+          Se déconnecter
+        </button>
+      </div>
+    );
+  }
+
   if (profile.status === 'pending' && !isSuperAdminEmail(user?.email)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
@@ -1356,6 +1402,11 @@ export default function App() {
       </div>
 
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50 gpu-accelerated" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
+        {activeRole === 'delivery' && profile && (!profile.idCardFront || !profile.idCardBack || !profile.guarantorInfo?.name) && (
+          <div className="bg-rose-50 text-rose-700 px-4 py-2 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wider border-b border-rose-100">
+            <AlertCircle size={14} /> Attention : Votre dossier est incomplet (ID ou Garant manquant).
+          </div>
+        )}
         <AnimatePresence>
           {announcements.filter(ann => {
             if (!activeRole) return false;
@@ -2152,7 +2203,12 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
     authNumber: '',
     phone: '',
     address: '',
-    pharmacyName: ''
+    pharmacyName: '',
+    compensationPhone: '',
+    compensationRIB: '',
+    guarantorName: '',
+    guarantorPhone: '',
+    guarantorAddress: ''
   });
   const [deliveryExtra, setDeliveryExtra] = useState({
     idCardFront: '',
@@ -2175,6 +2231,24 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
   const handleConfirm = () => {
     // Super Admin bypasses validation
     if (isAdmin) {
+      if (selectedRole === 'delivery') {
+        onSelect(selectedRole!, {
+          authorizationNumber: formData.authNumber || 'SUPER-ADMIN',
+          phone: formData.phone || '00000000',
+          address: formData.address || 'SUPER-ADMIN-HQ',
+          pharmacyName: formData.pharmacyName || 'Pharmacie Super Admin',
+          compensationPhone: formData.compensationPhone || '',
+          compensationRIB: formData.compensationRIB || '',
+          idCardFront: deliveryExtra.idCardFront || '',
+          idCardBack: deliveryExtra.idCardBack || '',
+          guarantorInfo: {
+            name: formData.guarantorName || '',
+            phone: formData.guarantorPhone || '',
+            address: formData.guarantorAddress || ''
+          }
+        });
+        return;
+      }
       onSelect(selectedRole!, {
         authorizationNumber: formData.authNumber || 'SUPER-ADMIN',
         phone: formData.phone || '00000000',
@@ -2215,11 +2289,18 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
         phone: formData.phone,
         address: formData.address,
         pharmacyName: formData.pharmacyName,
+        compensationPhone: formData.compensationPhone,
+        compensationRIB: formData.compensationRIB,
         ...(selectedRole === 'delivery' && {
           idCardFront: deliveryExtra.idCardFront,
           idCardBack: deliveryExtra.idCardBack,
           cguAccepted: deliveryExtra.cguAccepted,
-          cguAcceptedAt: new Date().toISOString()
+          cguAcceptedAt: new Date().toISOString(),
+          guarantorInfo: {
+            name: formData.guarantorName,
+            phone: formData.guarantorPhone,
+            address: formData.guarantorAddress
+          }
         })
       });
     }
@@ -2325,6 +2406,31 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
               {selectedRole === 'pharmacist' ? "Détails de l'officine" : "Confirmation"}
             </h3>
             
+            {(selectedRole === 'pharmacist' || selectedRole === 'delivery') && (
+              <div className="bg-slate-100/50 p-4 rounded-2xl border border-slate-200 mb-6 space-y-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <CreditCard className="text-primary" size={16} />
+                  <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Paiement (Optionnel)</h4>
+                </div>
+                <div className="space-y-3">
+                  <input 
+                    type="tel" 
+                    value={formData.compensationPhone}
+                    onChange={(e) => setFormData({...formData, compensationPhone: e.target.value})}
+                    className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    placeholder="Téléphone de paiement (OM/Moov)"
+                  />
+                  <input 
+                    type="text" 
+                    value={formData.compensationRIB}
+                    onChange={(e) => setFormData({...formData, compensationRIB: e.target.value})}
+                    className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    placeholder="RIB Bancaire"
+                  />
+                </div>
+              </div>
+            )}
+
             {selectedRole === 'pharmacist' && (
               <div className="space-y-4 mb-6">
                 <div className="space-y-1.5">
@@ -2394,13 +2500,13 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
             {selectedRole === 'delivery' && (
               <div className="space-y-5 mb-6 text-left">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <h4 className="font-bold text-xs text-slate-900">Documents Requis</h4>
-                  <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-widest">Livreur</span>
+                  <h4 className="font-bold text-xs text-slate-900">Dossier Livreur (Optionnel pour l'instant)</h4>
+                  <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-widest">Vérification</span>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto *</label>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto</label>
                     <div className="relative">
                       {deliveryExtra.idCardFront ? (
                         <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
@@ -2427,7 +2533,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso *</label>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso</label>
                     <div className="relative">
                       {deliveryExtra.idCardBack ? (
                         <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
@@ -2451,6 +2557,35 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                         </label>
                       )}
                     </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ShieldCheck className="text-primary" size={16} />
+                    <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Informations Garant (Optionnel)</h4>
+                  </div>
+                  <div className="space-y-3">
+                    <input 
+                      type="text" 
+                      value={formData.guarantorName}
+                      onChange={(e) => setFormData({...formData, guarantorName: e.target.value})}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                      placeholder="Nom complet du garant"
+                    />
+                    <input 
+                      type="tel" 
+                      value={formData.guarantorPhone}
+                      onChange={(e) => setFormData({...formData, guarantorPhone: e.target.value})}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                      placeholder="Téléphone du garant"
+                    />
+                    <textarea 
+                      value={formData.guarantorAddress}
+                      onChange={(e) => setFormData({...formData, guarantorAddress: e.target.value})}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:ring-2 focus:ring-primary/20 transition-all outline-none min-h-[60px]"
+                      placeholder="Adresse du garant"
+                    />
                   </div>
                 </div>
 
@@ -5307,14 +5442,16 @@ function WithdrawalModal({
 }) {
   const [amount, setAmount] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState('mobile_money');
-  const [paymentDetails, setPaymentDetails] = useState(profile.phone || '');
+  const [paymentDetails, setPaymentDetails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (paymentMethod === 'mobile_money' && profile.phone) {
-      setPaymentDetails(profile.phone);
+    if (paymentMethod === 'mobile_money') {
+      setPaymentDetails(profile.compensationPhone || profile.phone || '');
+    } else if (paymentMethod === 'bank_transfer') {
+      setPaymentDetails(profile.compensationRIB || '');
     }
-  }, [paymentMethod, profile.phone]);
+  }, [paymentMethod, profile.compensationPhone, profile.compensationRIB, profile.phone]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -6783,6 +6920,42 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
                     )}
                   </div>
                 </div>
+
+                <div className="space-y-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Mobile Money de Compensation (Optionnel)</label>
+                  <div className="relative">
+                    <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    <input 
+                      type="tel"
+                      value={profile.compensationPhone || ''}
+                      onChange={async (e) => {
+                        try {
+                          await updateDoc(doc(db, 'users', profile.uid), { compensationPhone: e.target.value });
+                        } catch (err) {}
+                      }}
+                      placeholder="Ex: +226 70 00 00 00"
+                      className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500 transition-all font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest">RIB Bancaire (Optionnel)</label>
+                  <div className="relative">
+                    <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    <input 
+                      type="text"
+                      value={profile.compensationRIB || ''}
+                      onChange={async (e) => {
+                        try {
+                          await updateDoc(doc(db, 'users', profile.uid), { compensationRIB: e.target.value });
+                        } catch (err) {}
+                      }}
+                      placeholder="Ex: BF000..."
+                      className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500 transition-all font-bold"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="mt-8 pt-8 border-t border-slate-100">
@@ -7801,6 +7974,173 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
                     value={phoneInput}
                     onChange={(e) => setPhoneInput(e.target.value)}
                     className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl pl-12 pr-6 py-4 outline-none focus:border-primary transition-all font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Paiement : Mobile Money (Optionnel)</label>
+                  <div className="relative">
+                    <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="tel" 
+                      placeholder="N° de compensation"
+                      value={profile.compensationPhone || ''}
+                      onChange={async (e) => {
+                        try {
+                          await updateDoc(doc(db, 'users', profile.uid), { compensationPhone: e.target.value });
+                        } catch (err) {}
+                      }}
+                      className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl pl-12 pr-6 py-4 outline-none focus:border-primary transition-all font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Paiement : RIB Bancaire (Optionnel)</label>
+                  <div className="relative">
+                    <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="RIB compensation"
+                      value={profile.compensationRIB || ''}
+                      onChange={async (e) => {
+                        try {
+                          await updateDoc(doc(db, 'users', profile.uid), { compensationRIB: e.target.value });
+                        } catch (err) {}
+                      }}
+                      className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl pl-12 pr-6 py-4 outline-none focus:border-primary transition-all font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 space-y-6">
+                <div className="flex items-center gap-3">
+                  <FileText className="text-primary" size={20} />
+                  <h4 className="font-bold text-slate-900">Dossier Livreur</h4>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Recto</label>
+                    <div className="relative">
+                      {profile.idCardFront ? (
+                        <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm group">
+                          <img src={profile.idCardFront} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <label className="cursor-pointer p-2 bg-white/20 backdrop-blur-md rounded-full text-white">
+                              <Camera size={20} />
+                              <input type="file" accept="image/*" capture="environment" className="hidden" 
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const base64 = await compressImage(file);
+                                    await updateDoc(doc(db, 'users', profile.uid), { idCardFront: base64 });
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full aspect-[3/2] bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all">
+                          <Camera size={20} />
+                          <span className="text-[9px] font-bold mt-1 uppercase tracking-tighter">Photo</span>
+                          <input type="file" accept="image/*" capture="environment" className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const base64 = await compressImage(file);
+                                await updateDoc(doc(db, 'users', profile.uid), { idCardFront: base64 });
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">CNI Verso</label>
+                    <div className="relative">
+                      {profile.idCardBack ? (
+                        <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm group">
+                          <img src={profile.idCardBack} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <label className="cursor-pointer p-2 bg-white/20 backdrop-blur-md rounded-full text-white">
+                              <Camera size={20} />
+                              <input type="file" accept="image/*" capture="environment" className="hidden" 
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const base64 = await compressImage(file);
+                                    await updateDoc(doc(db, 'users', profile.uid), { idCardBack: base64 });
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full aspect-[3/2] bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-primary hover:text-primary transition-all">
+                          <Camera size={20} />
+                          <span className="text-[9px] font-bold mt-1 uppercase tracking-tighter">Photo</span>
+                          <input type="file" accept="image/*" capture="environment" className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const base64 = await compressImage(file);
+                                await updateDoc(doc(db, 'users', profile.uid), { idCardBack: base64 });
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Informations Garant</label>
+                  <input 
+                    type="text" 
+                    placeholder="Nom du garant"
+                    value={profile.guarantorInfo?.name || ''}
+                    onChange={async (e) => {
+                      try {
+                        await updateDoc(doc(db, 'users', profile.uid), { 
+                          guarantorInfo: { ...profile.guarantorInfo || { phone: '', address: '' }, name: e.target.value } 
+                        });
+                      } catch (err) {}
+                    }}
+                    className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                  />
+                  <input 
+                    type="tel" 
+                    placeholder="Téléphone du garant"
+                    value={profile.guarantorInfo?.phone || ''}
+                    onChange={async (e) => {
+                      try {
+                        await updateDoc(doc(db, 'users', profile.uid), { 
+                          guarantorInfo: { ...profile.guarantorInfo || { name: '', address: '' }, phone: e.target.value } 
+                        });
+                      } catch (err) {}
+                    }}
+                    className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                  />
+                  <textarea 
+                    placeholder="Adresse du garant"
+                    value={profile.guarantorInfo?.address || ''}
+                    onChange={async (e) => {
+                      try {
+                        await updateDoc(doc(db, 'users', profile.uid), { 
+                          guarantorInfo: { ...profile.guarantorInfo || { name: '', phone: '' }, address: e.target.value } 
+                        });
+                      } catch (err) {}
+                    }}
+                    className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-primary/20 min-h-[60px]"
                   />
                 </div>
               </div>

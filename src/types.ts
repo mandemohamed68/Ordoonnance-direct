@@ -16,6 +16,13 @@ export interface UserProfile {
   groupId?: string;
   idCardFront?: string;
   idCardBack?: string;
+  compensationPhone?: string;
+  compensationRIB?: string;
+  guarantorInfo?: {
+    name: string;
+    phone: string;
+    address: string;
+  };
   acceptedTerms?: boolean;
   location?: { lat: number; lng: number };
   lastLocationUpdate?: any;
