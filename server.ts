@@ -53,11 +53,23 @@ async function startServer() {
       console.log(`[SMS] Calling API: aqilasms.com...`);
       let response;
       try {
-        response = await fetch(apiUrl);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        try {
+          response = await fetch(apiUrl, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeout);
+        }
       } catch (err) {
         console.warn(`[SMS] Primary URL failed, trying api.aqilasms.com fallback...`, err);
         apiUrl = `https://api.aqilasms.com/api/v1/send?user=${process.env.SMS_API_USER}&hash=${process.env.SMS_API_HASH}&to=${to}&message=${encodeURIComponent(message)}&sender=${process.env.SMS_SENDER_ID || 'SanteDirect'}`;
-        response = await fetch(apiUrl);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        try {
+          response = await fetch(apiUrl, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeout);
+        }
       }
       const resultText = await response.text();
       console.log(`[SMS] Response Status: ${response.status} ${response.statusText}`);
@@ -338,7 +350,7 @@ async function startServer() {
           email: email || "client@ordonnancedirect.app",
           country: 1 // BF
         },
-        amount: String(amount),
+        amount: parseFloat(String(amount)).toFixed(2),
         note: `Ordonnance Direct - ${method.toUpperCase()}`
       })
     });

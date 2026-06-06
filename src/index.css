@@ -17,9 +17,20 @@
 }
 
 @layer base {
+  body, #root, .app-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-content {
+    flex: 1;
+    padding-top: 0;
+    margin-top: 0;
+  }
+
   body {
     @apply bg-slate-50 text-slate-900 antialiased selection:bg-primary/20 selection:text-primary;
-    min-height: 100vh;
     min-height: -webkit-fill-available;
     /* --- Android APK Fluidity Optimizations --- */
     overscroll-behavior-y: none;
@@ -132,3 +143,28 @@
 .custom-popup .leaflet-popup-tip {
   @apply shadow-none;
 }
+
+/* --- Mobile APK & WebView Performance Boosters --- */
+@media (max-width: 800px) {
+  /* Disable expensive backdrop-blurs on mobile devices to prevent GPU thrashing and crashes */
+  * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  
+  /* Fallback opaque colors for glass elements so they remain readable/gorgeous */
+  .glass-card {
+    background-color: rgba(255, 255, 255, 0.95) !important;
+  }
+  
+  /* Prevent scroll bounce issues inside Android/Capacitor webviews */
+  body {
+    overscroll-behavior-y: contain !important;
+  }
+  
+  /* Smooth scroll but avoid layout thrashing */
+  html {
+    scroll-behavior: auto !important;
+  }
+}
+

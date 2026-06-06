@@ -2461,7 +2461,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               {/* Pharmacy Modal */}
               <AnimatePresence>
                 {showPharmacyModal && (
-                  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/75">
                     <motion.div 
                       initial={{ scale: 0.95, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
@@ -2935,7 +2935,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                           {getPrescriptionStatusLabel(prescription.status).toUpperCase()}
                         </span>
                       </td>
-                      <td className="p-4 text-slate-500 text-sm">{formatDate(prescription.createdAt, 'date')}</td>
+                      <td className="p-4 text-slate-500 text-sm">{formatDate(prescription.createdAt, 'dateTime')}</td>
                     </tr>
                   );
                 })}
@@ -4696,7 +4696,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4"
     >
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
@@ -4768,7 +4768,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70"
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -4846,7 +4846,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70"
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -4924,7 +4924,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70"
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -5044,7 +5044,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70"
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -5130,20 +5130,20 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               <input 
                 type="text" 
                 value={editingDeliveryUser.guarantorInfo?.name || ''}
-                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: { ...editingDeliveryUser.guarantorInfo || {}, name: e.target.value }})}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: Object.assign({ name: '', phone: '', address: '' }, editingDeliveryUser.guarantorInfo, { name: e.target.value })})}
                 className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
                 placeholder="Nom du garant"
               />
               <input 
                 type="tel" 
                 value={editingDeliveryUser.guarantorInfo?.phone || ''}
-                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: { ...editingDeliveryUser.guarantorInfo || {}, phone: e.target.value }})}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: Object.assign({ name: '', phone: '', address: '' }, editingDeliveryUser.guarantorInfo, { phone: e.target.value })})}
                 className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
                 placeholder="Téléphone du garant"
               />
               <textarea 
                 value={editingDeliveryUser.guarantorInfo?.address || ''}
-                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: { ...editingDeliveryUser.guarantorInfo || {}, address: e.target.value }})}
+                onChange={(e) => setEditingDeliveryUser({...editingDeliveryUser, guarantorInfo: Object.assign({ name: '', phone: '', address: '' }, editingDeliveryUser.guarantorInfo, { address: e.target.value })})}
                 className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20 min-h-[60px]"
                 placeholder="Adresse du garant"
               />

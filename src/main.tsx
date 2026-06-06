@@ -18,7 +18,7 @@ try {
     <StrictMode>
       <ErrorBoundary>
         <App />
-        <Toaster position="top-right" richColors />
+        <Toaster position="top-right" richColors duration={3000} toastOptions={{ duration: 3000 }} />
       </ErrorBoundary>
     </StrictMode>
   );

@@ -28,6 +28,7 @@ import {
   writeBatch
 } from './firebase';
 import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense, lazy } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -40,6 +41,7 @@ import {
   sendPasswordResetEmail,
   updateProfile
 } from 'firebase/auth';
+import { VirtualListItem } from './components/VirtualListItem';
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 const ReportsView = lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
 const MapComponent = lazy(() => import('./components/MapComponent'));
@@ -97,7 +99,7 @@ import {
   CheckCircle2,
   Home,
   Info,
-  Mail, PhoneCall
+  Mail, PhoneCall, Volume2, VolumeX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -116,13 +118,40 @@ import { getApiUrl } from './config';
 
 // --- Global Helpers ---
 let globalIsFirstLoad = true;
-setTimeout(() => { globalIsFirstLoad = false; }, 3000);
+// Remove the forced timeout that might be blocking sound
+// setTimeout(() => { globalIsFirstLoad = false; }, 3000);
 
-const playNotificationSound = () => {
-  if (globalIsFirstLoad) return;
+const playNotificationSound = (settings: Settings | null, userSoundEnabled: boolean = true) => {
+  // Check sound settings only
+  if (settings && settings.soundEnabled === false) return;
+  if (userSoundEnabled === false) return;
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContext) {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.08); // E5
+      osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.16); // G5
+      
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    }
+  } catch (error) {
+    console.warn('[Sound] Web Audio API context error:', error);
+  }
   try {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-    audio.volume = 0.6;
+    audio.volume = 0.4;
     const promise = audio.play();
     if (promise !== undefined) {
       promise.catch(e => console.log('Audio autoplay blocked or failed:', e));
@@ -457,7 +486,7 @@ const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, cla
   </div>
 ));
 
-function NotificationBell({ userId }: { userId: string }) {
+function NotificationBell({ userId, profile }: { userId: string, profile?: UserProfile | null }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -479,14 +508,14 @@ function NotificationBell({ userId }: { userId: string }) {
       );
       
       if (!isFirstRun.current && hasNewUnread && !snapshot.metadata.hasPendingWrites) {
-        playNotificationSound();
+        playNotificationSound(null, profile?.sound_enabled !== false);
       }
       isFirstRun.current = false;
       
       setNotifications(docs);
     }, (err) => console.error("Error fetching notifications:", err));
     return () => unsubscribe();
-  }, [userId]);
+  }, [userId, profile?.sound_enabled]);
 
   const markAsRead = async (id: string) => {
     try {
@@ -847,7 +876,7 @@ export default function App() {
               description: payload.notification?.body,
               icon: <Bell className="text-primary" />
             });
-            playNotificationSound();
+            playNotificationSound(settings, profile?.sound_enabled !== false);
           });
         }
       } catch (error) {
@@ -929,6 +958,15 @@ export default function App() {
     if (Capacitor.isNativePlatform()) {
       import('@capacitor/status-bar').then(({ StatusBar }) => {
         StatusBar.setBackgroundColor({ color: '#059669' }); // emerald-600
+      });
+      import('@capacitor/app').then(({ App }) => {
+        App.addListener('backButton', ({ canGoBack }) => {
+          if (canGoBack) {
+            window.history.back();
+          } else {
+            App.exitApp();
+          }
+        });
       });
     }
   }, []);
@@ -1080,11 +1118,47 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const unsubCities = onSnapshot(collection(db, 'cities'), (snap) => {
-      setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+      if (snap.empty) {
+        const defaultCities: City[] = [
+          {
+            id: 'ouagadougou',
+            name: 'Ouagadougou',
+            onCallStartTime: '19:00',
+            onCallEndTime: '08:00',
+            status: 'active',
+            location: { lat: 12.3714, lng: -1.5197 }
+          },
+          {
+            id: 'bobo_dioulasso',
+            name: 'Bobo-Dioulasso',
+            onCallStartTime: '19:00',
+            onCallEndTime: '08:00',
+            status: 'active',
+            location: { lat: 11.1714, lng: -4.2973 }
+          }
+        ];
+        setCities(defaultCities);
+        defaultCities.forEach(city => {
+          setDoc(doc(db, 'cities', city.id), city).catch(err => console.error("Error auto-seeding city:", err));
+        });
+      } else {
+        setCities(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as City)));
+      }
     });
     const unsubRotation = onSnapshot(doc(db, 'on_call_rotation', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         setRotation({ id: docSnap.id, ...docSnap.data() } as OnCallRotation);
+      } else {
+        const defaultRotation: OnCallRotation = {
+          id: 'global',
+          startDate: new Date().toISOString().split('T')[0],
+          endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          currentGroup: 1,
+          baseMondayDate: new Date().toISOString().split('T')[0],
+          baseGroup: 1
+        };
+        setDoc(doc(db, 'on_call_rotation', 'global'), defaultRotation).catch(console.error);
+        setRotation(defaultRotation);
       }
     });
     return () => {
@@ -1376,7 +1450,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans selection:bg-primary/20 selection:text-primary relative overflow-x-hidden">
+    <div className="h-screen h-[100dvh] flex flex-col bg-slate-50 font-sans selection:bg-primary/20 selection:text-primary relative overflow-hidden md:min-h-screen md:h-auto md:overflow-visible">
       {/* Background Magic Touch */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <motion.div 
@@ -1401,7 +1475,7 @@ export default function App() {
         />
       </div>
 
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-2xl border-b border-slate-100/50 gpu-accelerated" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-100/50 gpu-accelerated" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
         {activeRole === 'delivery' && profile && (!profile.idCardFront || !profile.idCardBack || !profile.guarantorInfo?.name) && (
           <div className="bg-rose-50 text-rose-700 px-4 py-2 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wider border-b border-rose-100">
             <AlertCircle size={14} /> Attention : Votre dossier est incomplet (ID ou Garant manquant).
@@ -1490,7 +1564,34 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2">
-              <NotificationBell userId={profile?.uid || ''} />
+              <NotificationBell userId={profile?.uid || ''} profile={profile} />
+              
+              {profile && (
+                <button
+                  onClick={async () => {
+                    const currentSound = profile.sound_enabled !== false;
+                    try {
+                      await updateDoc(doc(db, 'users', profile.uid), {
+                        sound_enabled: !currentSound
+                      });
+                      toast.success(!currentSound ? "Sons activés 🔊" : "Sons coupés 🔇", { duration: 3000 });
+                      if (!currentSound) {
+                        playNotificationSound(settings, true);
+                      }
+                    } catch (err) {
+                      console.error("Error toggling sound:", err);
+                    }
+                  }}
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center border transition-all ${
+                    (profile.sound_enabled !== false)
+                      ? "bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100/50"
+                      : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                  }`}
+                  title={profile.sound_enabled !== false ? "Couper le son" : "Activer le son"}
+                >
+                  {profile.sound_enabled !== false ? <Volume2 size={18} /> : <VolumeX size={18} />}
+                </button>
+              )}
               
               <button 
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -1592,7 +1693,7 @@ export default function App() {
         </AnimatePresence>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-0 relative z-10 gpu-accelerated content-contain">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-0 relative z-10 gpu-accelerated overflow-y-auto min-h-0 md:overflow-visible md:h-auto">
         {(activeRole === 'patient') && (
           <ErrorBoundary>
             <PatientDashboard 
@@ -1642,12 +1743,55 @@ export default function App() {
             </button>
           </div>
         )}
+
+        <footer className="max-w-7xl w-full mx-auto px-4 py-8 border-t border-slate-200 mt-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-primary rounded-lg flex items-center justify-center text-white">
+                  <LogoIcon size={14} />
+                </div>
+                <span className="font-bold">Ordonnance Direct</span>
+              </div>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                La première plateforme de télé-exécution d'ordonnances au Burkina Faso. 
+                Qualité, rapidité et sécurité pour votre santé.
+              </p>
+            </div>
+            <div>
+              <h5 className="font-bold mb-4">Support & Aide</h5>
+              <ul className="space-y-2 text-sm text-slate-500">
+                <li><button onClick={() => setInfoPage('how_it_works')} className="hover:text-primary transition-colors text-left">Comment ça marche ?</button></li>
+                <li><button onClick={() => setInfoPage('pharmacies')} className="hover:text-primary transition-colors text-left">Pharmacies partenaires</button></li>
+                <li><button onClick={() => setInfoPage('delivery')} className="hover:text-primary transition-colors text-left">Devenir livreur</button></li>
+                <li><button onClick={() => setInfoPage('contact')} className="hover:text-primary transition-colors text-left">Contactez-nous</button></li>
+              </ul>
+            </div>
+            <div>
+              <h5 className="font-bold mb-4">Urgence</h5>
+              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                <p className="text-xs text-rose-600 font-bold uppercase mb-2">SOS Santé Burkina</p>
+                <a href="tel:112" className="text-2xl font-bold text-rose-700">112 / 17 / 18</a>
+              </div>
+            </div>
+          </div>
+          <div className="mt-12 pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="text-xs text-slate-400">© 2026 Ordonnance Direct par NME TECHNOLOGIE Group. Tous droits réservés.</p>
+            <div className="flex gap-6 text-xs text-slate-400">
+              {(isSuperAdminEmail(user?.email) || profile?.role === 'admin') && (
+                <button onClick={() => setShowResetConfirm(true)} className="text-rose-400 hover:text-rose-600 font-bold">Réinitialiser les données (Test)</button>
+              )}
+              <button onClick={() => setInfoPage('legal')} className="hover:text-slate-600">Mentions légales</button>
+              <button onClick={() => setInfoPage('privacy')} className="hover:text-slate-600">Confidentialité</button>
+            </div>
+          </div>
+        </footer>
       </main>
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
-        {prescriptionToDelete && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {prescriptionToDelete && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -1678,7 +1822,8 @@ export default function App() {
                 </button>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
@@ -1771,53 +1916,12 @@ export default function App() {
         </>
       )}
 
-      <footer className="max-w-7xl mx-auto px-4 py-8 border-t border-slate-200 mt-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-primary rounded-lg flex items-center justify-center text-white">
-                <LogoIcon size={14} />
-              </div>
-              <span className="font-bold">Ordonnance Direct</span>
-            </div>
-            <p className="text-sm text-slate-500 leading-relaxed">
-              La première plateforme de télé-exécution d'ordonnances au Burkina Faso. 
-              Qualité, rapidité et sécurité pour votre santé.
-            </p>
-          </div>
-          <div>
-            <h5 className="font-bold mb-4">Support & Aide</h5>
-            <ul className="space-y-2 text-sm text-slate-500">
-              <li><button onClick={() => setInfoPage('how_it_works')} className="hover:text-primary transition-colors text-left">Comment ça marche ?</button></li>
-              <li><button onClick={() => setInfoPage('pharmacies')} className="hover:text-primary transition-colors text-left">Pharmacies partenaires</button></li>
-              <li><button onClick={() => setInfoPage('delivery')} className="hover:text-primary transition-colors text-left">Devenir livreur</button></li>
-              <li><button onClick={() => setInfoPage('contact')} className="hover:text-primary transition-colors text-left">Contactez-nous</button></li>
-            </ul>
-          </div>
-          <div>
-            <h5 className="font-bold mb-4">Urgence</h5>
-            <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
-              <p className="text-xs text-rose-600 font-bold uppercase mb-2">SOS Santé Burkina</p>
-              <a href="tel:112" className="text-2xl font-bold text-rose-700">112 / 17 / 18</a>
-            </div>
-          </div>
-        </div>
-        <div className="mt-12 pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-slate-400">© 2026 Ordonnance Direct par NME TECHNOLOGIE Group. Tous droits réservés.</p>
-          <div className="flex gap-6 text-xs text-slate-400">
-            {(isSuperAdminEmail(user?.email) || profile?.role === 'admin') && (
-              <button onClick={() => setShowResetConfirm(true)} className="text-rose-400 hover:text-rose-600 font-bold">Réinitialiser les données (Test)</button>
-            )}
-            <button onClick={() => setInfoPage('legal')} className="hover:text-slate-600">Mentions légales</button>
-            <button onClick={() => setInfoPage('privacy')} className="hover:text-slate-600">Confidentialité</button>
-          </div>
-        </div>
-      </footer>
+
 
       {/* Info Pages Modal */}
       <AnimatePresence>
-        {infoPage && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {infoPage && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1921,14 +2025,15 @@ export default function App() {
               )}
 
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
       {/* Reset Confirmation Modal */}
       <AnimatePresence>
-        {showResetConfirm && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {showResetConfirm && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -1960,7 +2065,8 @@ export default function App() {
                 </button>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
     </div>
@@ -2060,7 +2166,7 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
-        className="bg-white/5 backdrop-blur-2xl p-10 sm:p-16 rounded-[3.5rem] shadow-[0_32px_64px_-15px_rgba(0,0,0,0.5)] max-w-xl w-full text-center relative z-10 border border-white/10"
+        className="bg-emerald-950/40 p-10 sm:p-16 rounded-[3.5rem] shadow-[0_32px_64px_-15px_rgba(0,0,0,0.5)] max-w-xl w-full text-center relative z-10 border border-emerald-800/20"
       >
         <motion.div 
           initial={{ scale: 0.5, opacity: 0 }}
@@ -2313,8 +2419,8 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary/5 rounded-full translate-y-1/2 -translate-x-1/2 blur-3xl"></div>
 
       <AnimatePresence>
-        {showCGU && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+        {showCGU && createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -2344,7 +2450,8 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                 </button>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
@@ -2625,13 +2732,14 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
 }
 
 function ImageViewerModal({ imageUrl, onClose }: { imageUrl: string, onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm z-[300] flex items-center justify-center p-4" onClick={onClose}>
-      <button onClick={onClose} className="absolute top-4 right-4 text-white hover:text-slate-300 bg-slate-800/50 rounded-full p-2">
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-950/95 z-[300] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 text-white hover:text-slate-300 bg-slate-800/50 rounded-full p-2 z-[310]">
         <X size={24} />
       </button>
-      <img src={imageUrl} alt="Prescription Full" className="max-w-full max-h-[90vh] object-contain rounded-xl" onClick={(e) => e.stopPropagation()} />
-    </div>
+      <img src={imageUrl} alt="Prescription Full" className="max-w-[95vw] max-h-[95vh] sm:max-w-full sm:max-h-[90vh] object-contain rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()} />
+    </div>,
+    document.body
   );
 }
 
@@ -2733,7 +2841,7 @@ const PatientPrescriptionCard = React.memo(({
             <>
               <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500" loading="lazy" />
               <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
-                <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                <div className="w-8 h-8 bg-white/40 rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
                   <Search className="text-white" size={16} />
                 </div>
               </div>
@@ -2751,7 +2859,7 @@ const PatientPrescriptionCard = React.memo(({
             <div className="flex justify-between items-start">
               <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-black uppercase tracking-tighter">#{p.id.slice(-4).toUpperCase()}</span>
               <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}</span>
+                <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}</span>
                 {canDelete && (
                   <button 
                     onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
@@ -2788,6 +2896,16 @@ const PatientPrescriptionCard = React.memo(({
         </div>
       </div>
 
+      {(p.status === 'rejected' || p.status === 'rejected_by_limit') && (
+        <div className="bg-rose-50 border border-rose-100 p-3 rounded-2xl flex items-start gap-2.5 mt-1">
+          <AlertCircle className="text-rose-500 shrink-0 mt-0.5 animate-pulse" size={16} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black text-rose-800 uppercase tracking-wider">Motif du rejet :</p>
+            <p className="text-xs font-bold text-rose-600 mt-0.5 break-words">{p.rejectionReason || "Motif non spécifié."}</p>
+          </div>
+        </div>
+      )}
+
       {!p.extractedData && (p.status === 'draft' || p.status === 'analyzed') && (
         <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
@@ -2805,7 +2923,7 @@ const PatientPrescriptionCard = React.memo(({
             {(() => {
               try {
                 const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                if (!jsonStr) return <p className="text-[10px] text-slate-400 italic">Données en attente</p>;
+                if (!jsonStr) return <p className="text-[10px] text-slate-600 font-medium whitespace-pre-wrap">{p.extractedData || 'Données en attente'}</p>;
                 const parsed = JSON.parse(jsonStr);
                 const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
                 const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
@@ -3002,6 +3120,20 @@ const PatientOrderCard = React.memo(({
           </div>
 
           <div className="space-y-4">
+            {o.status === 'quote_rejected' && (
+              <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-black text-rose-950">Devis refusé</p>
+                    <p className="text-xs text-rose-700 font-medium leading-relaxed">Vous avez rejeté ce devis. Votre ordonnance a été remise en recherche.</p>
+                  </div>
+                  <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center shrink-0">
+                    <X size={20} />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {o.status === 'completed' && (
               <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex flex-col gap-3">
                 <div className="flex items-center justify-between">
@@ -3139,7 +3271,7 @@ const PatientOrderCard = React.memo(({
             {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
               <div className="bg-slate-900 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center border border-white/10 backdrop-blur-md">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center border border-white/10">
                     <QrCode size={24} className="text-primary" />
                   </div>
                   <div>
@@ -3376,13 +3508,16 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       limit(20)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      const hasChange = snapshot.docChanges().some(change => change.type === 'added' || change.type === 'modified');
+      if (!isFirstRunPatientPrescriptions.current && hasChange && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound(settings, profile?.sound_enabled !== false);
+      }
       isFirstRunPatientPrescriptions.current = false;
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription));
-      // Client-side sort as fallback if order is weird, but query should handle it
       setPrescriptions(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'prescriptions'));
     return () => unsubscribe();
-  }, [profile.uid]);
+  }, [profile.uid, settings, profile?.sound_enabled]);
 
   const isFirstRunPatientOrders = useRef(true);
   useEffect(() => {
@@ -3396,25 +3531,19 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
       // Play sound for new orders or important updates (excluding initial load)
       const hasSignficantChange = snapshot.docChanges().some(change => {
         if (change.type === 'added') return true;
-        if (change.type === 'modified') {
-          const oldData = change.doc.data();
-          const newData = change.doc.data(); // This is the same in snapshot.docChanges()
-          // In practice, we'd need to compare if we had the previous state
-          // For now, let's play sound on any modification if not local
-          return true;
-        }
+        if (change.type === 'modified') return true;
         return false;
       });
 
       if (!isFirstRunPatientOrders.current && hasSignficantChange && !snapshot.metadata.hasPendingWrites) {
-        playNotificationSound();
+        playNotificationSound(settings, profile?.sound_enabled !== false);
       }
       isFirstRunPatientOrders.current = false;
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
       setOrders(docs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
-  }, [profile.uid]);
+  }, [profile.uid, settings, profile?.sound_enabled]);
 
   useEffect(() => {
     const q = query(collection(db, 'pharmacies'), limit(100));
@@ -3501,8 +3630,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         patientLocation: location,
         landmark: landmark || "Renseigné via GPS Localisation",
         facadePhoto: facadePhoto || null,
-        extractedData: "",
-        status: 'draft',
+        extractedData: manualEntryText,
+        status: 'analyzed',
         createdAt: serverTimestamp(),
         distance: Math.floor(Math.random() * 5) + 1,
         quoteCount: 0
@@ -3567,10 +3696,10 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
           const errorMessage = error.message || "Erreur lors de l'analyse automatique.";
 
           await updateDoc(docRef, {
-            extractedData: JSON.stringify([{ nom_article: "Analyse en attente", dosage: "", posologie: "Traitement manuel par un pharmacien" }]),
+            extractedData: JSON.stringify([{ nom_article: "Saisie : " + manualEntryText, dosage: "", posologie: "Traitement manuel par un pharmacien" }]),
             status: 'analyzed'
           });
-          toast.info(`${errorMessage}. Veuillez choisir votre mode d'envoi.`);
+          toast.info(`${errorMessage}. Contenu saisi transmis directement aux pharmacies.`);
         }
       })();
     } catch (err) {
@@ -3691,6 +3820,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
     }
 
     setUploading(true);
+    await new Promise(resolve => setTimeout(resolve, 50)); // Allow UI to update
     try {
       if (finalCityId !== profile.cityId) {
         await updateDoc(doc(db, 'users', profile.uid), { cityId: finalCityId }).catch(console.error);
@@ -3742,7 +3872,22 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         try {
           const data = await analyzeWithGemini({
             image: base64.split(',')[1],
-            prompt: "Tu es un assistant pharmacien au Burkina Faso. Extrait les noms des médicaments, les dosages et les posologies de cette ordonnance. Identifie également l'établissement de santé ou le médecin figurant sur l'en-tête. Réponds en français au format JSON structuré : { \"articles\": [ { \"nom_article\": \"...\", \"dosage\": \"...\", \"posologie\": \"...\" } ], \"etablissement\": \"nom de l'hôpital ou du médecin si trouvé, sinon vide\" }. Sois très rapide et précis."
+            prompt: `Tu es un assistant pharmacien expert au Burkina Faso. Analyse cette image qui est une ordonnance médicale.
+
+Directives:
+1. Extrait les noms des médicaments, les dosages et les posologies.
+2. Identifie l\'établissement de santé ou le médecin figurant sur l\'en-tête.
+3. Même si l\'image est légèrement floue ou sombre, FAIS DE TON MIEUX pour extraire les informations.
+4. Si le document N'EST PAS une ordonnance médicale, retourne articles: [], etablissement: 'Document non reconnu'.
+
+Réponds UNIQUEMENT via un format JSON strict, sans texte explicatif avant ou après.
+Format JSON attendu (strict):
+{
+  "articles": [
+    { "nom_article": "...", "dosage": "...", "posologie": "..." }
+  ],
+  "etablissement": "..."
+}`
           });
 
           if (!data.success) throw new Error(extractErrorMsg(data, "Erreur lors de l'analyse OCR."));
@@ -4367,13 +4512,14 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   };
 
   return (
+    <>
     <PullToRefresh onRefresh={async () => {
       // Refreshing logic - most data is real-time via onSnapshot, 
       // but we can force a small delay or re-fetch static settings if needed
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="relative space-y-4 pb-8 pt-1 transition-all">
+      <div className="relative space-y-4 pb-8 pt-16 md:pt-1 transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
         {/* Background Decorative Element */}
         <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
@@ -4382,7 +4528,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         <div className="bg-emerald-600 rounded-[2rem] p-4 relative overflow-hidden shadow-xl shadow-emerald-600/10">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
         <div className="relative flex items-center gap-4 text-white">
-          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
+          <div className="w-10 h-10 bg-white/25 border border-white/10 rounded-xl flex items-center justify-center">
             <Plus size={20} className="text-white" />
           </div>
           <div>
@@ -4434,61 +4580,71 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
         <div className="hidden md:block w-64 flex-shrink-0">
           <div className="sticky top-24 space-y-2 p-3 bg-white rounded-[2.5rem] border border-emerald-100 shadow-xl shadow-emerald-500/5">
             {[
-              { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { id: 'orders', label: 'Commandes', icon: Package, color: 'text-sky-600', bg: 'bg-sky-50' },
-              { id: 'history', label: 'Historique', icon: Clock, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+              { id: 'prescriptions', label: 'Ordonnances', icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50', count: prescriptions.length },
+              { id: 'orders', label: 'Commandes', icon: Package, color: 'text-sky-600', bg: 'bg-sky-50', count: orders.filter(o => o.status !== 'completed').length },
+              { id: 'history', label: 'Historique', icon: Clock, color: 'text-indigo-600', bg: 'bg-indigo-50', count: orders.filter(o => o.status === 'completed').length },
               { id: 'pharmacies', label: 'Pharmacies', icon: MapPin, color: 'text-amber-600', bg: 'bg-amber-50' },
             ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
-                className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
+                className={`w-full flex items-center justify-between gap-4 px-6 py-4 rounded-2xl font-bold transition-all duration-300 ${
                   activeTab === tab.id 
                     ? `${tab.bg} ${tab.color} shadow-sm` 
                     : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <tab.icon size={20} />
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Mobile Bottom Navigation (Android Native Feel) */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-[200] px-4 pt-2 bg-white/80 backdrop-blur-xl border-t border-slate-100 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.5rem)' }}>
-          <div className="flex items-center justify-around">
-            {[
-              { id: 'prescriptions', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500', iconColor: 'text-emerald-500' },
-              { id: 'orders', label: 'En cours', icon: Package, activeColor: 'bg-sky-500', iconColor: 'text-sky-500' },
-              { id: 'history', label: 'Historique', icon: Clock, activeColor: 'bg-indigo-500', iconColor: 'text-indigo-500' },
-              { id: 'pharmacies', label: 'Santé', icon: MapPin, activeColor: 'bg-amber-500', iconColor: 'text-amber-500' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
-                className="flex flex-col items-center gap-1 min-w-[64px] relative py-2"
-              >
-                <div className={`p-2 rounded-xl transition-all duration-300 ${
-                  activeTab === tab.id 
-                    ? `${tab.activeColor} text-white shadow-lg` 
-                    : `text-slate-400`
-                }`}>
-                  <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
-                </div>
-                <span className={`text-[10px] font-bold ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400'}`}>
+                <div className="flex items-center gap-4">
+                  <tab.icon size={20} />
                   {tab.label}
-                </span>
-                {activeTab === tab.id && (
-                  <motion.div 
-                    layoutId="activeTabUnderline"
-                    className={`absolute -top-2 w-1 h-1 rounded-full ${tab.iconColor.replace('text-', 'bg-')}`} 
-                  />
+                </div>
+                {tab.count !== undefined && (
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${activeTab === tab.id ? 'bg-white/50' : 'bg-slate-100'}`}>
+                    {tab.count}
+                  </span>
                 )}
               </button>
             ))}
           </div>
         </div>
+
+        {/* Mobile Top Navigation */}
+        {createPortal(
+          <div className="md:hidden fixed top-14 left-0 right-0 z-[49] px-4 py-1.5 bg-white border-b border-slate-100 shadow-sm">
+            <div className="flex items-center justify-around">
+              {[
+                { id: 'prescriptions', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500', iconColor: 'text-emerald-500' },
+                { id: 'orders', label: 'En cours', icon: Package, activeColor: 'bg-sky-500', iconColor: 'text-sky-500' },
+                { id: 'history', label: 'Historique', icon: Clock, activeColor: 'bg-indigo-500', iconColor: 'text-indigo-500' },
+                { id: 'pharmacies', label: 'Santé', icon: MapPin, activeColor: 'bg-amber-500', iconColor: 'text-amber-500' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
+                  className="flex flex-col items-center gap-1 min-w-[64px] relative py-1"
+                >
+                  <div className={`p-1.5 rounded-xl transition-all duration-300 ${
+                    activeTab === tab.id 
+                      ? `${tab.activeColor} text-white shadow-lg` 
+                      : `text-slate-400`
+                  }`}>
+                    <tab.icon size={18} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                  </div>
+                  <span className={`text-[9px] font-bold ${activeTab === tab.id ? 'text-slate-900' : 'text-slate-400'}`}>
+                    {tab.label}
+                  </span>
+                  {activeTab === tab.id && (
+                    <motion.div 
+                      layoutId="activeTabUnderline"
+                      className={`absolute -bottom-1 w-1 h-1 rounded-full ${tab.iconColor.replace('text-', 'bg-')}`} 
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )}
 
         <div className="flex-1 min-w-0 pb-32 md:pb-0">
           <div key={activeTab} className="space-y-6">
@@ -4628,9 +4784,9 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" capture="environment" className="hidden" />
             </div>
 
-            {showManualEntryModal && (
-              <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-                <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative">
+            {showManualEntryModal && createPortal(
+              <div className="fixed inset-0 bg-slate-900/70 z-[9999] flex items-start sm:items-center justify-center p-4 overflow-y-auto pt-16 sm:pt-4 backdrop-blur-sm">
+                <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative my-auto sm:my-0">
                   <button onClick={() => setShowManualEntryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-2">
                     <X size={20} />
                   </button>
@@ -4661,7 +4817,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                     {uploading ? "Envoi en cours..." : "Demander des devis"}
                   </button>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
             {prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed')).length === 0 ? (
@@ -4695,15 +4852,16 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
                 {prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed')).map(p => (
-                  <PatientPrescriptionCard 
-                    key={p.id} 
-                    p={p} 
-                    orders={orders} 
-                    onViewImage={setViewImage} 
-                    onRequestQuote={handleRequestQuote} 
-                    onShowPartialSelect={(p) => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
-                    onDelete={onDeletePrescription}
-                  />
+                  <VirtualListItem key={p.id} estimatedHeight={260}>
+                    <PatientPrescriptionCard 
+                      p={p} 
+                      orders={orders} 
+                      onViewImage={setViewImage} 
+                      onRequestQuote={handleRequestQuote} 
+                      onShowPartialSelect={(p) => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
+                      onDelete={onDeletePrescription}
+                    />
+                  </VirtualListItem>
                 ))}
               </div>
             )}
@@ -4739,17 +4897,18 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                   ) : (
                     <div className="grid grid-cols-1 gap-6">
                       {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').map(o => (
-                         <PatientOrderCard 
-                            key={o.id} 
-                            o={o} 
-                            settings={settings} 
-                            profile={profile} 
-                            onChat={setActiveChatOrderId} 
-                            onViewImage={setViewImage} 
-                            onApproveQuote={handleApproveQuote} 
-                            onSelectDeliveryMethod={handleSelectDeliveryMethod} 
-                            onShowMap={setShowMapForOrder} 
-                         />
+                         <VirtualListItem key={o.id} estimatedHeight={320}>
+                           <PatientOrderCard 
+                              o={o} 
+                              settings={settings} 
+                              profile={profile} 
+                              onChat={setActiveChatOrderId} 
+                              onViewImage={setViewImage} 
+                              onApproveQuote={handleApproveQuote} 
+                              onSelectDeliveryMethod={handleSelectDeliveryMethod} 
+                              onShowMap={setShowMapForOrder} 
+                           />
+                         </VirtualListItem>
                       ))}
                     </div>
                   )}
@@ -4771,18 +4930,19 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').map(o => (
-                         <PatientOrderCard 
-                            key={o.id} 
-                            o={o} 
-                            settings={settings} 
-                            profile={profile} 
-                            onChat={setActiveChatOrderId} 
-                            onViewImage={setViewImage} 
-                            onApproveQuote={handleApproveQuote} 
-                            onSelectDeliveryMethod={handleSelectDeliveryMethod} 
-                            onShowMap={setShowMapForOrder}
-                            compact={true}
-                         />
+                         <VirtualListItem key={o.id} estimatedHeight={180}>
+                           <PatientOrderCard 
+                              o={o} 
+                              settings={settings} 
+                              profile={profile} 
+                              onChat={setActiveChatOrderId} 
+                              onViewImage={setViewImage} 
+                              onApproveQuote={handleApproveQuote} 
+                              onSelectDeliveryMethod={handleSelectDeliveryMethod} 
+                              onShowMap={setShowMapForOrder}
+                              compact={true}
+                           />
+                         </VirtualListItem>
                       ))}
                     </div>
                   )}
@@ -4913,8 +5073,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
       {/* Payment Modal */}
       <AnimatePresence>
-        {showPaymentModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4">
+        {showPaymentModal && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-start sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
@@ -4932,7 +5092,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 <X size={20} />
               </button>
               {isProcessingPayment && (
-                <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
+                <div className="absolute inset-0 bg-white/95 z-10 flex flex-col items-center justify-center">
                   <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
                   <p className="font-bold text-slate-700">Traitement du paiement...</p>
                   <p className="text-xs text-slate-500 mt-2">Veuillez patienter.</p>
@@ -5200,14 +5360,15 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 )}
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
       {/* Delivery Confirmation Modal */}
       <AnimatePresence>
-        {showDeliveryConfirm && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {showDeliveryConfirm && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -5239,7 +5400,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 </button>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
@@ -5290,8 +5452,8 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
 
       {/* Partial Selection Modal */}
       <AnimatePresence>
-        {showPartialSelect && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {showPartialSelect && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -5307,7 +5469,7 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                     const jsonStr = showPartialSelect.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
                     if (!jsonStr) return <p className="text-slate-400 italic">Aucun médicament détecté.</p>;
                     const parsed = JSON.parse(jsonStr);
-                    const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+                    const meds = Array.isArray(parsed) ? parsed : (parsed.articles || parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
                     
                     if (!meds || meds.length === 0) {
                       return <p className="text-slate-400 italic">Aucun médicament détecté ou format non reconnu.</p>;
@@ -5357,14 +5519,15 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 </button>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
       {/* Map Modal for Patient */}
       <AnimatePresence>
-        {showMapForOrder && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {showMapForOrder && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -5412,22 +5575,24 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
                 </div>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
     </div>
-    {activeChatOrderId && (
-      <Suspense fallback={null}>
-        <OrderChat 
-          orderId={activeChatOrderId} 
-          userId={profile.uid} 
-          userName={profile.name} 
-          userRole={profile.role}
-          onClose={() => setActiveChatOrderId(null)} 
-        />
-      </Suspense>
-    )}
   </PullToRefresh>
+  {activeChatOrderId && (
+    <Suspense fallback={null}>
+      <OrderChat 
+        orderId={activeChatOrderId} 
+        userId={profile.uid} 
+        userName={profile.name} 
+        userRole={profile.role}
+        onClose={() => setActiveChatOrderId(null)} 
+      />
+    </Suspense>
+  )}
+  </>
   );
 });
 
@@ -5504,8 +5669,8 @@ function WithdrawalModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -5570,26 +5735,135 @@ function WithdrawalModal({
           </div>
         </form>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 const PharmacistPrescriptionCard = React.memo(({ 
   p, 
   onStartQuote, 
-  onReject 
+  onReject,
+  onViewImage
 }: { 
   p: Prescription, 
   onStartQuote: (p: Prescription) => Promise<void> | void, 
-  onReject: (id: string, status: string) => Promise<void> | void 
+  onReject: (id: string, status: 'validated' | 'rejected', reason?: string) => Promise<void> | void,
+  onViewImage: (url: string) => void
 }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [showRejectionModal, setShowRejectionModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('Ordonnance illisible ou endommagée');
+  const [otherReason, setOtherReason] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  
+  const rejectionOptions = [
+    "Ordonnance illisible ou endommagée",
+    "Médicaments non disponibles en stock",
+    "Ordonnance périmée",
+    "Quantité de médicaments non conforme",
+    "Signature ou cachet du médecin manquant",
+    "Contenu de l'ordonnance non clair",
+    "Ordonnance déjà traitée",
+    "Autre"
+  ];
   
   return (
     <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all p-5 flex flex-col gap-4">
+      {showRejectionModal && createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md space-y-6 shadow-2xl border border-slate-50 relative overflow-visible">
+            <div>
+              <h3 className="font-extrabold text-2xl text-slate-900 leading-tight">Motif du rejet</h3>
+              <p className="text-sm text-slate-500 mt-1">Veuillez indiquer pourquoi vous rejetez cette ordonnance.</p>
+            </div>
+
+            <div className="relative">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-2">Sélectionnez une raison</label>
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="w-full p-4 rounded-2xl border border-slate-200 bg-slate-50 text-left font-extrabold text-slate-800 flex justify-between items-center hover:bg-slate-100/50 transition-all focus:ring-2 focus:ring-rose-500/20 active:scale-[0.99]"
+              >
+                <span className="truncate">{rejectionReason}</span>
+                <ChevronDown size={20} className={`text-slate-400 transition-transform duration-300 shrink-0 ml-2 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {isDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-[40]" 
+                    onClick={() => setIsDropdownOpen(false)} 
+                  />
+                  <div className="absolute top-full left-0 w-full bg-white mt-2 rounded-2xl shadow-xl border border-slate-100 z-[50] max-h-60 overflow-y-auto py-2 animate-in fade-in slide-in-from-top-2 duration-200 scrollbar-thin">
+                    {rejectionOptions.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          setRejectionReason(opt);
+                          setIsDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-5 py-3 text-sm font-bold transition-colors flex items-center justify-between ${
+                          rejectionReason === opt 
+                            ? 'bg-rose-50 text-rose-600' 
+                            : 'text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="truncate">{opt}</span>
+                        {rejectionReason === opt && <CheckCircle2 size={16} className="text-rose-600 shrink-0 ml-2" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {rejectionReason === 'Autre' && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Description personnalisée</label>
+                <input 
+                  value={otherReason} 
+                  onChange={(e) => setOtherReason(e.target.value)}
+                  className="w-full p-4 bg-slate-50 border border-slate-200 focus:border-rose-500 outline-none rounded-2xl font-bold transition-all focus:ring-2 focus:ring-rose-500/20"
+                  placeholder="Expliquez la raison en détails..."
+                />
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button 
+                onClick={() => {
+                  setShowRejectionModal(false);
+                  setIsDropdownOpen(false);
+                }} 
+                className="flex-1 py-4 border border-slate-200 rounded-2xl font-extrabold text-slate-600 hover:bg-slate-50 active:scale-[0.98] transition-all"
+              >
+                Annuler
+              </button>
+              <button 
+                disabled={isLoading || (rejectionReason === 'Autre' && !otherReason.trim())}
+                onClick={async () => {
+                  setIsLoading(true);
+                  try {
+                    await onReject(p.id, 'rejected', rejectionReason === 'Autre' ? otherReason : rejectionReason);
+                    setShowRejectionModal(false);
+                    setIsDropdownOpen(false);
+                  } finally { setIsLoading(false); }
+                }}
+                className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-4 rounded-2xl font-extrabold active:scale-[0.98] transition-all shadow-lg shadow-rose-500/10 disabled:opacity-50 disabled:pointer-events-none"
+              >
+                {isLoading ? 'Action...' : 'Confirmer le rejet'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       <div className="flex gap-4">
         <div 
           className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
+          onClick={() => onViewImage(p.imageUrl)}
         >
           <img src={p.imageUrl} alt="Ordo" className="w-full h-full object-cover" loading="lazy" />
         </div>
@@ -5598,7 +5872,7 @@ const PharmacistPrescriptionCard = React.memo(({
             <p className="text-xs font-black text-slate-900 leading-none truncate">#{p.id.slice(-6).toUpperCase()}</p>
             <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400">
               <Clock size={10} />
-              {p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'short') : 'Récents'}
+              {p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}
             </div>
           </div>
           
@@ -5633,7 +5907,7 @@ const PharmacistPrescriptionCard = React.memo(({
               {(() => {
                 try {
                   const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                  if (!jsonStr) return <p className="italic text-slate-400">Non structuré</p>;
+                  if (!jsonStr) return <p className="text-slate-600 text-xs italic truncate">{p.extractedData || 'Non structuré'}</p>;
                   const parsed = JSON.parse(jsonStr);
                   const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
                   
@@ -5674,10 +5948,7 @@ const PharmacistPrescriptionCard = React.memo(({
           {isLoading ? '...' : 'Devis'}
         </button>
         <button 
-          onClick={async () => {
-             setIsLoading(true);
-             try { await onReject(p.id, 'rejected'); } finally { setIsLoading(false); }
-          }}
+          onClick={() => setShowRejectionModal(true)}
           disabled={isLoading}
           className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
           title="Rejeter"
@@ -5985,10 +6256,10 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
         return dateB - dateA;
       });
 
-      // Play sound for new prescriptions (excluding initial load)
-      const hasNew = snapshot.docChanges().some(change => change.type === 'added');
-      if (!isFirstRunPharmacistPrescriptions.current && hasNew && !snapshot.metadata.hasPendingWrites) {
-        playNotificationSound();
+      // Play sound for new prescriptions or modified state (excluding initial load)
+      const hasChange = snapshot.docChanges().some(change => change.type === 'added' || change.type === 'modified');
+      if (!isFirstRunPharmacistPrescriptions.current && hasChange && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound(settings, profile?.sound_enabled !== false);
       }
       isFirstRunPharmacistPrescriptions.current = false;
 
@@ -6046,7 +6317,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       setPrescriptions(filtered);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'prescriptions'));
     return () => unsubscribe();
-  }, [profile.uid, settings, myPharmacy]);
+  }, [profile.uid, settings, myPharmacy, profile?.sound_enabled, cities, rotation]);
 
   const isFirstRunPharmacistOrders = useRef(true);
   useEffect(() => {
@@ -6060,9 +6331,9 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       const allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
       
       // Play sound for new orders/updates (excluding initial load)
-      const hasNew = snapshot.docChanges().some(change => change.type === 'added');
-      if (!isFirstRunPharmacistOrders.current && hasNew && !snapshot.metadata.hasPendingWrites) {
-        playNotificationSound();
+      const hasChange = snapshot.docChanges().some(change => change.type === 'added' || change.type === 'modified');
+      if (!isFirstRunPharmacistOrders.current && hasChange && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound(settings, profile?.sound_enabled !== false);
       }
       isFirstRunPharmacistOrders.current = false;
 
@@ -6092,7 +6363,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       setTotalEarned(totalGainsSum);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
-  }, [profile.uid]);
+  }, [profile.uid, settings, profile?.sound_enabled]);
 
   const handleStartQuote = async (p: Prescription) => {
     if ((myPharmacy?.currentActiveOrders || 0) >= (myPharmacy?.maxConcurrentOrders || 10)) {
@@ -6226,7 +6497,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
     }
   };
 
-  const handleValidatePrescription = async (id: string, status: 'validated' | 'rejected') => {
+  const handleValidatePrescription = async (id: string, status: 'validated' | 'rejected', rejectionReason?: string) => {
     try {
       if (status === 'rejected') {
         const pRef = doc(db, 'prescriptions', id);
@@ -6240,7 +6511,9 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
             rejectedBy: newRejectedBy,
             rejectionCount: newRejectionCount,
             lockedBy: null,
-            lockedAt: null
+            lockedAt: null,
+            rejectionReason: rejectionReason || 'Non spécifié',
+            status: 'rejected'
           };
 
           if (newRejectionCount >= 5) {
@@ -6269,11 +6542,12 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
   const isMyGroupOnCall = profile.groupId === currentGroup.toString();
 
   return (
+    <>
     <PullToRefresh onRefresh={async () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="relative space-y-4 pb-8 pt-1 transition-all">
+      <div className="relative space-y-4 pb-8 pt-16 md:pt-1 transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
       
       {/* Role Header (Android Style) */}
@@ -6413,34 +6687,43 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
           </div>
         </div>
 
-        {/* Mobile Bottom Navigation (Android Native Feel) */}
-        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.25rem)' }}>
-          <div className="flex items-center justify-around">
-            {[
-              { id: 'pending', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500' },
-              { id: 'active', label: 'Commandes', icon: Package, activeColor: 'bg-sky-500' },
-              { id: 'history', label: 'Archives', icon: Clock, activeColor: 'bg-indigo-500' },
-              { id: 'profile', label: 'Profil', icon: User, activeColor: 'bg-slate-500' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
-                className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
-              >
-                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
-                  activeTab === tab.id 
-                    ? `${tab.activeColor} text-white shadow-lg` 
-                    : `text-slate-500`
-                }`}>
-                  <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
-                </div>
-                <span className={`text-[9px] font-black uppercase tracking-tight ${activeTab === tab.id ? 'text-white' : 'text-slate-500'}`}>
-                  {tab.label}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Mobile Top Navigation */}
+        {createPortal(
+          <div className="md:hidden fixed top-14 left-0 right-0 z-[49] px-3 py-1 bg-slate-900/95 backdrop-blur-2xl border-b border-white/5 shadow-md">
+            <div className="flex items-center justify-around">
+              {[
+                { id: 'pending', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500' },
+                { id: 'active', label: 'Commandes', icon: Package, activeColor: 'bg-sky-500' },
+                { id: 'history', label: 'Archives', icon: Clock, activeColor: 'bg-indigo-500' },
+                { id: 'profile', label: 'Profil', icon: User, activeColor: 'bg-slate-500' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
+                  className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90 py-1"
+                >
+                  <div className={`p-1.5 rounded-xl transition-all duration-300 ${
+                    activeTab === tab.id 
+                      ? `${tab.activeColor} text-white shadow-lg` 
+                      : `text-slate-500`
+                  }`}>
+                    <tab.icon size={18} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                  </div>
+                  <span className={`text-[9px] font-black uppercase tracking-tight ${activeTab === tab.id ? 'text-white' : 'text-slate-500'}`}>
+                    {tab.label}
+                  </span>
+                  {activeTab === tab.id && (
+                    <motion.div 
+                      layoutId="activeTabGlowPharmacist"
+                      className="absolute -bottom-1 w-6 h-[2px] rounded-full bg-white/40" 
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )}
 
         <div className="flex-1 min-w-0">
           <div key={activeTab}>
@@ -6458,12 +6741,14 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
               </div>
             ) : (
               prescriptions.map(p => (
-                <PharmacistPrescriptionCard 
-                  key={p.id} 
-                  p={p} 
-                  onStartQuote={handleStartQuote} 
-                  onReject={handleValidatePrescription} 
-                />
+                <VirtualListItem key={p.id} estimatedHeight={220}>
+                  <PharmacistPrescriptionCard 
+                    p={p} 
+                    onStartQuote={handleStartQuote} 
+                    onReject={handleValidatePrescription} 
+                    onViewImage={setViewImage}
+                  />
+                </VirtualListItem>
               ))
             )}
                   </div>
@@ -6484,38 +6769,39 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
               </div>
             ) : (
               orders.map(o => (
-                <PharmacistOrderCard 
-                  key={o.id} 
-                  o={o} 
-                  profile={profile} 
-                  onChat={setActiveChatOrderId} 
-                  onViewImage={setViewImage} 
-                  onHandover={setShowHandoverVerify} 
-                  onUpdateStatus={async (order) => {
-                    try {
-                      const nextStatus = order.status === 'paid' ? 'preparing' : 'ready';
-                      await updateDoc(doc(db, 'orders', order.id), { 
-                        status: nextStatus, 
-                        updatedAt: serverTimestamp(),
-                        history: arrayUnion({
-                          status: nextStatus,
-                          timestamp: new Date().toISOString(),
-                          label: nextStatus === 'preparing' ? 'Préparation commencée' : 'Commande prête'
-                        })
-                      });
+                <VirtualListItem key={o.id} estimatedHeight={260}>
+                  <PharmacistOrderCard 
+                    o={o} 
+                    profile={profile} 
+                    onChat={setActiveChatOrderId} 
+                    onViewImage={setViewImage} 
+                    onHandover={setShowHandoverVerify} 
+                    onUpdateStatus={async (order) => {
+                      try {
+                        const nextStatus = order.status === 'paid' ? 'preparing' : 'ready';
+                        await updateDoc(doc(db, 'orders', order.id), { 
+                          status: nextStatus, 
+                          updatedAt: serverTimestamp(),
+                          history: arrayUnion({
+                            status: nextStatus,
+                            timestamp: new Date().toISOString(),
+                            label: nextStatus === 'preparing' ? 'Préparation commencée' : 'Commande prête'
+                          })
+                        });
 
-                      if (nextStatus === 'ready' && order.deliveryMethod === 'delivery') {
-                        await notifyDeliveryDrivers(
-                          "Nouvelle mission de livraison",
-                          `Une commande est prête pour livraison à ${order.pharmacyName || 'la pharmacie'}.`,
-                          order.id
-                        );
+                        if (nextStatus === 'ready' && order.deliveryMethod === 'delivery') {
+                          await notifyDeliveryDrivers(
+                            "Nouvelle mission de livraison",
+                            `Une commande est prête pour livraison à ${order.pharmacyName || 'la pharmacie'}.`,
+                            order.id
+                          );
+                        }
+                      } catch (err) {
+                        handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`);
                       }
-                    } catch (err) {
-                      handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`);
-                    }
-                  }} 
-                />
+                    }} 
+                  />
+                </VirtualListItem>
               ))
             )}
                   </div>
@@ -6523,8 +6809,8 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
               )}
 
         {/* Quote Modal */}
-        {selectedPrescription && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] flex items-center justify-center p-2 md:p-4">
+        {selectedPrescription && createPortal(
+          <div className="fixed inset-0 bg-slate-900/75 z-[300] flex items-center justify-center p-2 md:p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -6715,7 +7001,8 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
                 </button>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
 
               {activeTab === 'history' && (
@@ -6732,56 +7019,58 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
               </div>
             ) : (
               historyOrders.map(o => (
-                <div key={o.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity">
-                  <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
-                    <div>
-                      <span className="font-bold text-sm block">#{o.id.slice(-6).toUpperCase()}</span>
-                      <span className="text-[10px] text-slate-500">{o.updatedAt ? formatDate(o.updatedAt, 'date') : 'Date inconnue'}</span>
+                <VirtualListItem key={o.id} estimatedHeight={180}>
+                  <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
+                      <div>
+                        <span className="font-bold text-sm block">#{o.id.slice(-6).toUpperCase()}</span>
+                        <span className="text-[10px] text-slate-500">{o.updatedAt ? formatDate(o.updatedAt, 'dateTime') : 'Date inconnue'}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">TERMINÉE</span>
+                        <span className="text-xs font-black text-emerald-600">+{o.pharmacyAmount?.toLocaleString()} FCFA</span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">TERMINÉE</span>
-                      <span className="text-xs font-black text-emerald-600">+{o.pharmacyAmount?.toLocaleString()} FCFA</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex-1 flex flex-col gap-4">
-                    <div className="flex gap-4">
-                      {o.prescriptionImageUrl && (
-                        <div 
-                          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer"
-                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                        >
-                          <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
-                        </div>
-                      )}
-                      {o.facadePhoto && (
-                        <div 
-                          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-emerald-200 shrink-0 cursor-pointer relative"
-                          onClick={() => setViewImage(o.facadePhoto!)}
-                        >
-                          <img src={o.facadePhoto} className="w-full h-full object-cover" />
-                          <div className="absolute top-0 right-0 bg-emerald-500 text-white p-0.5 rounded-bl-lg">
-                            <Home size={8} />
-                          </div>
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
-                        <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1">
-                          <Hospital size={10} className="shrink-0" />
-                          <p className="truncate">{o.hospitalLocation}</p>
-                        </div>
-                        {o.landmark && (
-                          <div className="flex items-center gap-1 text-[9px] text-amber-600 mb-1 font-medium italic truncate">
-                             <MapPin size={10} className="shrink-0" />
-                             {o.landmark}
+                    
+                    <div className="flex-1 flex flex-col gap-4">
+                      <div className="flex gap-4">
+                        {o.prescriptionImageUrl && (
+                          <div 
+                            className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer"
+                            onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                          >
+                            <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
                           </div>
                         )}
-                        <p className="text-xs text-slate-700 font-medium truncate">{o.items?.length || 0} article(s)</p>
+                        {o.facadePhoto && (
+                          <div 
+                            className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-emerald-200 shrink-0 cursor-pointer relative"
+                            onClick={() => setViewImage(o.facadePhoto!)}
+                          >
+                            <img src={o.facadePhoto} className="w-full h-full object-cover" />
+                            <div className="absolute top-0 right-0 bg-emerald-500 text-white p-0.5 rounded-bl-lg">
+                              <Home size={8} />
+                            </div>
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
+                          <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1">
+                            <Hospital size={10} className="shrink-0" />
+                            <p className="truncate">{o.hospitalLocation}</p>
+                          </div>
+                          {o.landmark && (
+                            <div className="flex items-center gap-1 text-[9px] text-amber-600 mb-1 font-medium italic truncate">
+                               <MapPin size={10} className="shrink-0" />
+                               {o.landmark}
+                            </div>
+                          )}
+                          <p className="text-xs text-slate-700 font-medium truncate">{o.items?.length || 0} article(s)</p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
+                </VirtualListItem>
               ))
             )}
                   </div>
@@ -7006,8 +7295,8 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
 
       {/* Handover Verify Modal */}
       <AnimatePresence>
-        {showHandoverVerify && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        {showHandoverVerify && createPortal(
+          <div className="fixed inset-0 bg-slate-900/65 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -7148,21 +7437,24 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
                         toast.error("Erreur lors de la validation.", { id: toastId });
                       } finally {
                         setIsVerifyingHandover(false);
+                        }
+                      } else {
+                        toast.error("Code de retrait incorrect.");
                       }
-                    } else {
-                      toast.error("Code de retrait incorrect.");
-                    }
-                  }}
-                  disabled={isVerifyingHandover || pickupCodeInput.length !== 6}
-                  className="w-full bg-amber-500 text-white py-4 rounded-2xl font-bold hover:bg-amber-600 transition-all disabled:opacity-50"
-                >
-                  {isVerifyingHandover ? "Vérification..." : "Confirmer la Remise"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+                    }}
+                    disabled={isVerifyingHandover || pickupCodeInput.length !== 6}
+                    className="w-full bg-amber-500 text-white py-4 rounded-2xl font-bold hover:bg-amber-600 transition-all disabled:opacity-50"
+                  >
+                    {isVerifyingHandover ? "Vérification..." : "Confirmer la Remise"}
+                  </button>
+                </div>
+              </motion.div>
+            </div>,
+            document.body
+          )}
+        </AnimatePresence>
+      
+
       {/* Withdrawal Modal */}
       <AnimatePresence>
         {showWithdrawalModal && (
@@ -7173,7 +7465,9 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
           />
         )}
       </AnimatePresence>
+
     </div>
+    </PullToRefresh>
     {activeChatOrderId && (
       <Suspense fallback={null}>
         <OrderChat 
@@ -7185,9 +7479,10 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
         />
       </Suspense>
     )}
-  </PullToRefresh>
-  );
-});
+    </>
+    );
+  });
+
 
 const MissionCard = React.memo(({ 
   m, 
@@ -7407,6 +7702,146 @@ const DeliveryActiveCard = React.memo(({
 
 // --- Delivery Dashboard ---
 
+const printReceipt = (order: Order) => {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    toast.error("Veuillez autoriser les fenêtres pop-up");
+    return;
+  }
+  
+  const dateStr = order.updatedAt 
+    ? (order.updatedAt.toDate ? order.updatedAt.toDate().toLocaleDateString('fr-FR') : new Date(order.updatedAt).toLocaleDateString('fr-FR'))
+    : new Date().toLocaleDateString('fr-FR');
+  
+  const itemsHtml = order.items && order.items.length > 0 
+    ? order.items.map(item => `
+        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #e2e8f0; font-size: 13px;">
+          <span>${item.name} x${item.quantity}</span>
+          <span>${item.price * item.quantity} FCFA</span>
+        </div>
+      `).join('')
+    : '<div style="font-size: 13px; color: #718096; text-align: center; padding: 8px 0;">Aucun article individuel listé</div>';
+
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>RECU DE LIVRAISON DIRECTE - #${order.id.slice(-6).toUpperCase()}</title>
+        <style>
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+            max-width: 320px;
+            margin: 0 auto;
+            color: #1a202c;
+            background: #fff;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+          }
+          .title {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 5px 0;
+            text-transform: uppercase;
+          }
+          .details-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin: 4px 0;
+          }
+          .divider {
+            border-top: 2px dashed #000;
+            margin: 15px 0;
+          }
+          .total-box {
+            text-align: right;
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 15px;
+          }
+          .footer {
+            text-align: center;
+            font-size: 10px;
+            color: #718096;
+            margin-top: 30px;
+            border-top: 1px solid #000;
+            padding-top: 10px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div style="font-size: 28px; font-weight: bold;">🏥</div>
+          <div class="title">ORDONNANCE DIRECT</div>
+          <div style="font-size: 11px; font-weight: bold; margin-top: 4px;">RECU DE LIVRAISON SÉCURISÉE</div>
+        </div>
+        
+        <div style="font-size: 12px; margin-bottom: 10px; text-align: center; font-weight: bold;">
+          RECU N°: ODR-${order.id.slice(-8).toUpperCase()}
+        </div>
+        
+        <div class="details-row"><strong>Date:</strong> <span>${dateStr}</span></div>
+        <div class="details-row"><strong>Statut:</strong> <span style="text-transform: uppercase;">${order.status}</span></div>
+        
+        <div class="divider"></div>
+        
+        <div style="font-size: 14px; font-weight: bold; margin-bottom: 6px;">PARTIES CONCERNÉES :</div>
+        <div class="details-row"><strong>Client:</strong> <span>${order.patientName || "Anonyme"}</span></div>
+        <div class="details-row"><strong>Tél Client:</strong> <span>${order.patientPhone || "Non spécifié"}</span></div>
+        <div class="details-row"><strong>Livreur:</strong> <span>${order.deliveryPersonName || "Non spécifié"}</span></div>
+        <div class="details-row"><strong>Tél Livreur:</strong> <span>${order.deliveryPersonPhone || "Non spécifié"}</span></div>
+        
+        <div class="divider"></div>
+        
+        <div style="font-size: 14px; font-weight: bold; margin-bottom: 6px;">ITINÉRAIRE & TRAJET :</div>
+        <div style="font-size: 11.5px; margin-bottom: 4px;"><strong>Départ:</strong> ${order.pharmacyName || "Pharmacie"}</div>
+        <div style="font-size: 11.5px; margin-bottom: 8px; color: #4a5568;">(${order.pharmacyLocation || "Adresse Pharmacie"})</div>
+        <div style="font-size: 11.5px; margin-bottom: 4px;"><strong>Arrivée:</strong> ${order.hospitalLocation || "Destination Patient"}</div>
+        <div style="font-size: 11.5px; margin-bottom: 8px; color: #4a5568;">(${order.landmark || "Aucun point de repère fourni"})</div>
+        
+        <div class="divider"></div>
+        
+        <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">MÉDICAMENTS LIVRÉS :</div>
+        ${itemsHtml}
+        
+        <div class="divider"></div>
+        
+        <div class="details-row"><span>Total Panier:</span> <span>${order.medicationTotal || 0} FCFA</span></div>
+        <div class="details-row"><span>Frais de Service:</span> <span>${order.serviceFee || order.platformFee || 0} FCFA</span></div>
+        <div class="details-row"><span>Frais de Livraison:</span> <span>${order.deliveryFee || 0} FCFA</span></div>
+        
+        <div class="total-box">
+          TOTAL PAYÉ: ${order.totalAmount || 0} FCFA
+        </div>
+        <div class="details-row" style="font-size: 11px; margin-top: 5px;">
+          <span>Mode Paiement:</span> 
+          <span style="text-transform: uppercase; font-weight: bold;">${order.paymentMethod ? order.paymentMethod.replace('_', ' ') : 'Mobile Money'}</span>
+        </div>
+        
+        <div class="footer">
+          <p>Merci pour votre confiance !</p>
+          <p>Ordonnance Direct - Votre Santé, Notre Priorité</p>
+          <p>&copy; ${new Date().getFullYear()} Tous droits réservés.</p>
+        </div>
+        
+        <script>
+          window.onload = function() {
+            window.print();
+            window.onafterprint = function() {
+              window.close();
+            };
+          };
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+};
+
 const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: UserProfile, settings: Settings | null, cities: City[] }) => {
   const [missions, setMissions] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'available' | 'active' | 'history' | 'wallet' | 'profile' | 'reports'>('available');
@@ -7418,6 +7853,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
   const [phoneInput, setPhoneInput] = useState(profile.phone || '');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [historyMissions, setHistoryMissions] = useState<Order[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
   const [deliveryPhoto, setDeliveryPhoto] = useState<string | null>(null);
   const [deliverySignature, setDeliverySignature] = useState<string | null>(null);
@@ -7436,10 +7872,10 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       const allMissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order))
         .filter(m => !m.cityId || m.cityId === profile.cityId);
       
-      // Play sound for new missions (excluding initial load)
-      const hasNew = snapshot.docChanges().some(change => change.type === 'added');
-      if (!isFirstRunDeliveryMissions.current && hasNew && !snapshot.metadata.hasPendingWrites) {
-        playNotificationSound();
+      // Play sound for new missions or status updates (excluding initial load)
+      const hasChange = snapshot.docChanges().some(change => change.type === 'added' || change.type === 'modified');
+      if (!isFirstRunDeliveryMissions.current && hasChange && !snapshot.metadata.hasPendingWrites) {
+        playNotificationSound(settings, profile?.sound_enabled !== false);
       }
       isFirstRunDeliveryMissions.current = false;
 
@@ -7453,7 +7889,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       setMissions(allMissions);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'orders'));
     return () => unsubscribe();
-  }, []);
+  }, [profile.uid, profile.cityId, settings, profile?.sound_enabled]);
 
   const availableMissions = missions.filter(m => ['pending_payment', 'paid', 'preparing', 'ready'].includes(m.status) && m.deliveryMethod === 'delivery' && !m.deliveryId && !m.rejectedBy?.includes(profile.uid));
   const activeMissions = missions.filter(m => ['pending_payment', 'paid', 'preparing', 'ready', 'delivering'].includes(m.status) && m.deliveryId === profile.uid);
@@ -7592,6 +8028,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
   const availableGains = totalEarned - totalWithdrawn;
 
   return (
+    <>
     <PullToRefresh onRefresh={async () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
@@ -7619,44 +8056,44 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 mb-8">
-          <div className="bg-slate-900 p-4 sm:p-6 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-8">
+          <div className="bg-emerald-500 p-4 sm:p-5 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
             <div className="relative z-10">
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Gains</p>
-              <h3 className="text-sm sm:text-lg font-bold text-white">{availableGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
+              <p className="text-[8px] font-black text-emerald-100 uppercase tracking-widest mb-1">Gains du jour</p>
+              <h3 className="text-sm font-bold text-white">{dailyGains.toLocaleString()} <span className="text-[8px] text-emerald-100">FCFA</span></h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white/5 rounded-xl flex items-center justify-center text-emerald-400">
-              <CreditCard size={18} />
+            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center text-white">
+              <TrendingUp size={16} />
             </div>
           </div>
-          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+          <div className="bg-slate-900 p-4 sm:p-5 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
+            <div className="relative z-10">
+              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Gains</p>
+              <h3 className="text-sm font-bold text-white">{availableGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
+            </div>
+            <div className="w-8 h-8 bg-white/5 rounded-xl flex items-center justify-center text-emerald-400">
+              <CreditCard size={16} />
+            </div>
+          </div>
+          <div className="bg-white p-4 sm:p-5 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
             <div>
               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Missions</p>
-              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{availableMissions.length}</h3>
+              <h3 className="text-sm font-bold text-slate-900">{availableMissions.length}</h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-              <MapPin size={18} />
+            <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+              <MapPin size={16} />
             </div>
           </div>
-          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+          <div className="bg-white p-4 sm:p-5 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
             <div>
               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
-              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{completedMissionsCount}</h3>
+              <h3 className="text-sm font-bold text-slate-900">{completedMissionsCount}</h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-              <Package size={18} />
+            <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+              <Package size={16} />
             </div>
           </div>
         </div>
-      <div className="bg-primary p-8 rounded-[2.5rem] shadow-xl shadow-primary/20 text-white flex items-center justify-between group">
-        <div>
-          <p className="text-[10px] font-black text-white/60 uppercase tracking-widest mb-2">Missions disponibles</p>
-          <h3 className="text-4xl font-bold">{availableMissions.length}</h3>
-        </div>
-        <div className="w-16 h-16 bg-white/20 rounded-3xl flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-          <Package size={32} />
-        </div>
-      </div>
 
       {/* Navigation Tabs (Desktop Side, Mobile Bottom) */}
       <div className="flex flex-col md:flex-row gap-8">
@@ -7695,39 +8132,42 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
         </div>
 
         {/* Mobile Bottom Navigation (Android Native Feel) */}
-        <div className="md:hidden fixed bottom-1 left-1 right-1 z-[200] px-3 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.25rem)' }}>
-          <div className="flex items-center justify-around">
-            {[
-              { id: 'available', label: 'Mission', icon: MapPin, activeColor: 'bg-emerald-500' },
-              { id: 'active', label: 'En cours', icon: Truck, activeColor: 'bg-sky-500' },
-              { id: 'history', label: 'Missions', icon: Clock, activeColor: 'bg-indigo-500' },
-              { id: 'profile', label: 'Profil', icon: User, activeColor: 'bg-slate-500' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
-                className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
-              >
-                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
-                  activeTab === tab.id 
-                    ? `${tab.activeColor} text-white shadow-lg` 
-                    : `text-slate-500`
-                }`}>
-                  <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
-                </div>
-                <span className={`text-[9px] font-black uppercase tracking-tight ${activeTab === tab.id ? 'text-white' : 'text-slate-500'}`}>
-                  {tab.label}
-                </span>
-                {activeTab === tab.id && (
-                  <motion.div 
-                    layoutId="activeTabGlowDelivery"
-                    className="absolute -top-1 w-8 h-[2px] rounded-full bg-white/30" 
-                  />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
+        {createPortal(
+          <div className="md:hidden fixed bottom-1 left-1 right-1 z-[9999] px-3 pt-1.5 bg-slate-900/95 backdrop-blur-2xl rounded-[1.75rem] shadow-2xl shadow-black/20 border border-white/5 mx-2 mb-2" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.25rem)' }}>
+            <div className="flex items-center justify-around">
+              {[
+                { id: 'available', label: 'Mission', icon: MapPin, activeColor: 'bg-emerald-500' },
+                { id: 'active', label: 'En cours', icon: Truck, activeColor: 'bg-sky-500' },
+                { id: 'history', label: 'Missions', icon: Clock, activeColor: 'bg-indigo-500' },
+                { id: 'profile', label: 'Profil', icon: User, activeColor: 'bg-slate-500' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => React.startTransition(() => setActiveTab(tab.id as any))}
+                  className="flex flex-col items-center gap-1 min-w-[60px] relative transition-transform active:scale-90"
+                >
+                  <div className={`p-2.5 rounded-xl transition-all duration-300 ${
+                    activeTab === tab.id 
+                      ? `${tab.activeColor} text-white shadow-lg` 
+                      : `text-slate-500`
+                  }`}>
+                    <tab.icon size={22} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                  </div>
+                  <span className={`text-[9px] font-black uppercase tracking-tight ${activeTab === tab.id ? 'text-white' : 'text-slate-500'}`}>
+                    {tab.label}
+                  </span>
+                  {activeTab === tab.id && (
+                    <motion.div 
+                      layoutId="activeTabGlowDelivery"
+                      className="absolute -top-1 w-8 h-[2px] rounded-full bg-white/30" 
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )}
 
         <div className="flex-1 min-w-0">
           <div key={activeTab}>
@@ -7820,11 +8260,11 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
             </div>
           ) : (
             historyMissions.map(m => (
-              <div key={m.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity">
+              <div key={m.id} onClick={() => setSelectedOrder(m)} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity cursor-pointer">
                 <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
                   <div>
                     <span className="font-bold text-sm block">#{m.id.slice(-6).toUpperCase()}</span>
-                    <span className="text-[10px] text-slate-500">{m.updatedAt ? formatDate(m.updatedAt, 'date') : 'Date inconnue'}</span>
+                    <span className="text-[10px] text-slate-500">{m.updatedAt ? formatDate(m.updatedAt, 'dateTime') : 'Date inconnue'}</span>
                   </div>
                   <div className="text-right">
                     <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">LIVRÉE</span>
@@ -8172,8 +8612,8 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
 
    {/* Pickup QR Modal */}
    <AnimatePresence>
-     {showPickupQR && (
-       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+     {showPickupQR && createPortal(
+       <div className="fixed inset-0 bg-slate-900/65 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
          <motion.div 
            initial={{ scale: 0.95, opacity: 0, y: 20 }}
            animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -8212,14 +8652,15 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
              Présentez ce QR Code au pharmacien pour valider le retrait de votre commande en officine.
            </p>
          </motion.div>
-       </div>
+       </div>,
+       document.body
      )}
    </AnimatePresence>
 
   {/* Delivery Verify Modal */}
   <AnimatePresence>
-    {showDeliveryVerify && (
-       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+    {showDeliveryVerify && createPortal(
+       <div className="fixed inset-0 bg-slate-900/65 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
          <motion.div 
            initial={{ scale: 0.95, opacity: 0, y: 20 }}
            animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -8415,14 +8856,15 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
             </button>
           </div>
         </motion.div>
-      </div>
+      </div>,
+      document.body
     )}
   </AnimatePresence>
 
   {/* Map Modal */}
   <AnimatePresence>
-    {showMapForOrder && (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+    {showMapForOrder && createPortal(
+      <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
         <motion.div 
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -8475,23 +8917,14 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
             </div>
           </div>
         </motion.div>
-      </div>
+      </div>,
+      document.body
     )}
   </AnimatePresence>
 
-  {/* Withdrawal Modal */}
-      <AnimatePresence>
-        {showWithdrawalModal && (
-          <WithdrawalModal 
-            profile={profile} 
-            availableBalance={availableGains}
-            onClose={() => setShowWithdrawalModal(false)} 
-          />
-        )}
-      </AnimatePresence>
-    </div>
-    {showSignaturePad && (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[210] flex items-center justify-center p-4">
+
+    {showSignaturePad && createPortal(
+      <div className="fixed inset-0 bg-slate-900/75 z-[210] flex items-center justify-center p-4 backdrop-blur-sm">
         <motion.div 
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -8512,19 +8945,149 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
             Annuler
           </button>
         </motion.div>
-      </div>
+      </div>,
+      document.body
     )}
-      {activeChatOrderId && (
-        <Suspense fallback={null}>
-          <OrderChat 
-            orderId={activeChatOrderId} 
-            userId={profile?.uid} 
-            userName={profile?.name} 
-            userRole={profile?.role}
-            onClose={() => setActiveChatOrderId(null)} 
-          />
-        </Suspense>
-      )}
+    </div>
   </PullToRefresh>
+  {activeChatOrderId && (
+    <Suspense fallback={null}>
+      <OrderChat 
+        orderId={activeChatOrderId} 
+        userId={profile?.uid} 
+        userName={profile?.name} 
+        userRole={profile?.role}
+        onClose={() => setActiveChatOrderId(null)} 
+      />
+    </Suspense>
+  )}
+
+  {/* Order Details/Receipt Modal */}
+  {selectedOrder && createPortal(
+    <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-8 overflow-y-auto max-h-[90vh]"
+      >
+        <div className="flex items-center justify-between mb-6 border-b border-slate-100 pb-4">
+          <div>
+            <span className="text-xs font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full">Course #{selectedOrder.id.slice(-6).toUpperCase()}</span>
+            <h3 className="text-2xl font-black text-slate-900 mt-2 text-left">Détails de la course</h3>
+          </div>
+          <button onClick={() => setSelectedOrder(null)} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-6 text-left">
+          {/* Status and Big Earnings Indicator */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-emerald-500 text-white p-5 rounded-3xl relative overflow-hidden">
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/70 block mb-1">Votre gain</span>
+              <span className="text-2xl font-black">+{selectedOrder.deliveryFee || 1500} FCFA</span>
+              <div className="absolute top-1/2 right-4 -translate-y-1/2 opacity-20"><CreditCard size={40} /></div>
+            </div>
+            <div className="bg-slate-900 text-white p-5 rounded-3xl relative overflow-hidden">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1">Statut actuel</span>
+              <span className="text-lg font-black uppercase tracking-tight block mt-1">
+                {selectedOrder.status === 'completed' ? 'Livrée' : 
+                 selectedOrder.status === 'delivering' ? 'En cours' : 
+                 selectedOrder.status === 'ready' ? 'Prête' : 'En attente'}
+              </span>
+              <div className="absolute top-1/2 right-4 -translate-y-1/2 opacity-20"><Truck size={40} /></div>
+            </div>
+          </div>
+
+          {/* Client profile */}
+          <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Patient Destinataire</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-extrabold text-slate-900 text-base">{selectedOrder.patientName || "Client Ordonnance Direct"}</p>
+                <p className="text-xs text-slate-500 mt-1">{selectedOrder.patientPhone || "Pas de numéro"}</p>
+              </div>
+              {selectedOrder.patientPhone && (
+                <a 
+                  href={`tel:${selectedOrder.patientPhone}`}
+                  className="w-11 h-11 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center hover:bg-emerald-100 transition-all shadow-sm shadow-emerald-600/5 animate-pulse"
+                >
+                  <PhoneCall size={20} />
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* Departure and Destination Route details */}
+          <div className="relative border-l-2 border-dashed border-slate-200 pl-6 ml-3 space-y-6">
+            <div className="relative">
+              <span className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-emerald-500 border-4 border-white shadow-md"></span>
+              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Point de départ (Pharmacie)</p>
+              <p className="font-bold text-slate-800">{selectedOrder.pharmacyName || "Pharmacie Partenaire"}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{selectedOrder.pharmacyLocation || "Adresse de retrait"}</p>
+            </div>
+
+            <div className="relative">
+              <span className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-rose-500 border-4 border-white shadow-md"></span>
+              <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Point d'arrivée (Patient)</p>
+              <p className="font-bold text-slate-800">{selectedOrder.hospitalLocation || "Adresse de livraison"}</p>
+              {selectedOrder.landmark && (
+                <p className="text-xs text-slate-500 mt-0.5 bg-rose-50/50 inline-block px-2 py-0.5 rounded border border-rose-100/30">Repère : {selectedOrder.landmark}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Route distance estimation */}
+          <div className="bg-slate-50 p-4 rounded-3xl grid grid-cols-2 gap-4 text-center border border-slate-100">
+            <div>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest font-mono">Distance Estimée</p>
+              <p className="text-base font-extrabold text-slate-800 mt-1 font-mono">~5.2 km</p>
+            </div>
+            <div>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest font-mono">Durée de Course</p>
+              <p className="text-base font-extrabold text-slate-800 mt-1 font-mono">~15-20 min</p>
+            </div>
+          </div>
+
+          {/* Items Summary */}
+          {selectedOrder.items && selectedOrder.items.length > 0 && (
+            <div className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Articles de la commande</p>
+              <div className="max-h-24 overflow-y-auto space-y-2">
+                {selectedOrder.items.map((it, idx) => (
+                  <div key={idx} className="flex justify-between text-xs font-medium text-slate-700">
+                    <span>{it.name} <span className="text-slate-400">x{it.quantity}</span></span>
+                    <span className="font-bold text-slate-900">{it.price * it.quantity} FCFA</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="space-y-3 pt-4 border-t border-slate-100">
+            {selectedOrder.status === 'completed' && (
+              <button 
+                onClick={() => printReceipt(selectedOrder)}
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
+              >
+                <span>🖨️</span> Imprimer le reçu (PDF)
+              </button>
+            )}
+            
+            <button 
+              onClick={() => setSelectedOrder(null)}
+              className="w-full bg-slate-100 text-slate-700 py-4 rounded-2xl font-bold hover:bg-slate-200 transition-all border border-slate-200"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  )}
+  </>
   );
 });

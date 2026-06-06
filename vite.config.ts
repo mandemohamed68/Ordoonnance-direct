@@ -27,8 +27,16 @@ export default defineConfig(({mode}) => {
     },
     build: {
       chunkSizeWarningLimit: 1000,
+      sourcemap: false,
+      minify: 'esbuild',
+      cssMinify: true,
       rollupOptions: {
         output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom'],
+            firebase: ['firebase/app', 'firebase/firestore', 'firebase/auth'],
+            ui: ['lucide-react', 'framer-motion']
+          }
         }
       }
     },

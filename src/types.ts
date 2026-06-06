@@ -32,6 +32,7 @@ export interface UserProfile {
   status?: 'active' | 'suspended' | 'pending' | 'blocked' | 'test' | 'rejected';
   permissions?: string[];
   createdAt?: any;
+  sound_enabled?: boolean;
 }
 
 export interface Pharmacy {
@@ -71,6 +72,7 @@ export interface Prescription {
   cityId?: string;
   landmark?: string;
   facadePhoto?: string;
+  rejectionReason?: string;
 }
 
 export interface OrderItem {
@@ -161,6 +163,7 @@ export interface Settings {
   serviceFee?: number;
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
+  soundEnabled?: boolean;
   googleAuthEnabled?: boolean;
   paymentConfig?: {
     mobileMoneyEnabled: boolean;

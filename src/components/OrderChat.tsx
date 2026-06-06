@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageCircle, X, ChevronRight, Mic, Square } from 'lucide-react';
 import { doc, collection, query, where, onSnapshot, addDoc, updateDoc, serverTimestamp, increment } from 'firebase/firestore';
@@ -143,8 +144,8 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -223,6 +224,7 @@ export function OrderChat({ orderId, userId, userName, userRole, onClose }: Orde
           </button>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
