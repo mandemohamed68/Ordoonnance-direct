@@ -1,1 +1,0 @@
-import{j as o}from"./index-_hbXrSh4.js";import"./ui-B4WX5Ka1.js";import"./vendor-Ci5oGzPn.js";import"./firebase-C4F46_7B.js";var t;(function(r){r.Dark="DARK",r.Light="LIGHT",r.Default="DEFAULT"})(t||(t={}));var a;(function(r){r.None="NONE",r.Slide="SLIDE",r.Fade="FADE"})(a||(a={}));const n=o("StatusBar");export{a as Animation,n as StatusBar,t as Style};

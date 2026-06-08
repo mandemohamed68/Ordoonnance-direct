@@ -681,6 +681,7 @@ export default function App() {
   const [infoPage, setInfoPage] = useState<'how_it_works' | 'pharmacies' | 'delivery' | 'contact' | 'legal' | 'privacy' | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [prescriptionToDelete, setPrescriptionToDelete] = useState<string | null>(null);
+  const [ordersToDelete, setOrdersToDelete] = useState<string[]>([]);
   const [isDeletingPrescription, setIsDeletingPrescription] = useState(false);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [newSupportMessage, setNewSupportMessage] = useState('');
@@ -755,8 +756,9 @@ export default function App() {
     }
   };
 
-  const handleDeletePrescription = (pId: string) => {
+  const handleDeletePrescription = (pId: string, orderIds: string[] = []) => {
     setPrescriptionToDelete(pId);
+    setOrdersToDelete(orderIds);
   };
 
   const confirmDeletePrescription = async () => {
@@ -765,32 +767,11 @@ export default function App() {
     setIsDeletingPrescription(true);
     
     try {
-      // Find associated orders - crucial to include patientId for security rules compliance
-      const q = query(
-        collection(db, 'orders'), 
-        where('prescriptionId', '==', pId),
-        where('patientId', '==', profile?.uid)
-      );
-      const orderDocs = await getDocs(q);
-      
-      // Check if any order is paid or beyond awaits
-      const hasPaidOrder = orderDocs.docs.some(docSnap => {
-        const o = docSnap.data() as Order;
-        return ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(o.status);
-      });
-
-      if (hasPaidOrder) {
-        toast.error("Impossible de supprimer une ordonnance dont la commande est déjà payée ou en cours de traitement.");
-        setPrescriptionToDelete(null);
-        setIsDeletingPrescription(false);
-        return;
-      }
-
       const batch = writeBatch(db);
       
       // 1. Delete associated orders
-      orderDocs.docs.forEach(docSnap => {
-        batch.delete(docSnap.ref);
+      ordersToDelete.forEach(oId => {
+        batch.delete(doc(db, 'orders', oId));
       });
       
       // 2. Delete the prescription
@@ -803,6 +784,7 @@ export default function App() {
     } finally {
       setIsDeletingPrescription(false);
       setPrescriptionToDelete(null);
+      setOrdersToDelete([]);
     }
   };
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -1789,7 +1771,7 @@ export default function App() {
       </main>
 
       {/* Delete Confirmation Modal */}
-      <AnimatePresence>
+      <>
         {prescriptionToDelete && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -1825,7 +1807,7 @@ export default function App() {
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
 
       {/* Support Chat FAB */}
       {settings?.supportChatEnabled !== false && (
@@ -1919,7 +1901,7 @@ export default function App() {
 
 
       {/* Info Pages Modal */}
-      <AnimatePresence>
+      <>
         {infoPage && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -2028,10 +2010,10 @@ export default function App() {
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
 
       {/* Reset Confirmation Modal */}
-      <AnimatePresence>
+      <>
         {showResetConfirm && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -2068,7 +2050,7 @@ export default function App() {
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
     </div>
   );
 }
@@ -2418,7 +2400,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
       <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary/5 rounded-full translate-y-1/2 -translate-x-1/2 blur-3xl"></div>
 
-      <AnimatePresence>
+      <>
         {showCGU && createPortal(
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
             <motion.div 
@@ -2453,7 +2435,7 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
 
       <div className="max-w-6xl w-full relative z-10">
         <motion.div 
@@ -2817,7 +2799,7 @@ const PatientPrescriptionCard = React.memo(({
   onViewImage: (url: string) => void, 
   onRequestQuote: (p: Prescription, type: 'all' | 'partial') => Promise<void> | void, 
   onShowPartialSelect: (p: Prescription) => void,
-  onDelete: (id: string) => void
+  onDelete: (id: string, associatedOrderIds: string[]) => void
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const isCompleted = orders.some(o => o.prescriptionId === p.id && o.status === 'completed');
@@ -2862,11 +2844,17 @@ const PatientPrescriptionCard = React.memo(({
                 <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}</span>
                 {canDelete && (
                   <button 
-                    onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
-                    className="w-6 h-6 rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center transition-all z-10"
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      console.log("Delete clicked", p.id);
+                      const associatedOrderIds = orders.filter(o => o.prescriptionId === p.id).map(o => o.id);
+                      onDelete(p.id, associatedOrderIds); 
+                    }}
+                    className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center transition-all relative z-50 shadow-sm"
                     title="Supprimer l'ordonnance"
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={14} />
                   </button>
                 )}
               </div>
@@ -2944,9 +2932,12 @@ const PatientPrescriptionCard = React.memo(({
       )}
 
       {(p.status === 'draft' || p.status === 'analyzed') && p.extractedData && (
-        <div className="flex gap-3 mt-1">
+        <div className="flex gap-3 mt-1 relative z-50">
           <button 
-            onClick={async () => {
+            type="button"
+            onClick={async (e) => {
+              e.stopPropagation();
+              console.log("Complet clicked", p.id);
               setIsLoading(true);
               try { await onRequestQuote(p, 'all'); } finally { setIsLoading(false); }
             }} 
@@ -2957,7 +2948,12 @@ const PatientPrescriptionCard = React.memo(({
             Complet
           </button>
           <button 
-            onClick={() => onShowPartialSelect(p)} 
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              console.log("Partiel clicked", p.id);
+              onShowPartialSelect(p);
+            }} 
             disabled={isLoading}
             className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
           >
@@ -3319,7 +3315,7 @@ const PatientOrderCard = React.memo(({
 
 // --- Patient Dashboard ---
 
-const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation, onDeletePrescription }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null, onDeletePrescription: (id: string) => void }) => {
+const PatientDashboard = React.memo(({ profile, settings, location, cities, rotation, onDeletePrescription }: { profile: UserProfile, settings: Settings | null, location: { lat: number, lng: number } | null, cities: City[], rotation: OnCallRotation | null, onDeletePrescription: (id: string, orderIds: string[]) => void }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
@@ -4519,7 +4515,7 @@ Format JSON attendu (strict):
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="relative space-y-4 pb-8 pt-16 md:pt-1 transition-all">
+      <div className="relative space-y-4 pb-8 pt-2 md:pt-1 transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
         {/* Background Decorative Element */}
         <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
@@ -4608,9 +4604,9 @@ Format JSON attendu (strict):
           </div>
         </div>
 
-        {/* Mobile Top Navigation */}
+        {/* Mobile Bottom Navigation */}
         {createPortal(
-          <div className="md:hidden fixed top-14 left-0 right-0 z-[49] px-4 py-1.5 bg-white border-b border-slate-100 shadow-sm">
+          <div className="md:hidden fixed bottom-0 left-0 right-0 z-[49] px-4 pt-1.5 bg-white border-t border-slate-100 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05),0_-2px_4px_-1px_rgba(0,0,0,0.03)]" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)' }}>
             <div className="flex items-center justify-around">
               {[
                 { id: 'prescriptions', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500', iconColor: 'text-emerald-500' },
@@ -4785,7 +4781,7 @@ Format JSON attendu (strict):
             </div>
 
             {showManualEntryModal && createPortal(
-              <div className="fixed inset-0 bg-slate-900/70 z-[9999] flex items-start sm:items-center justify-center p-4 overflow-y-auto pt-16 sm:pt-4 backdrop-blur-sm">
+              <div className="fixed inset-0 bg-slate-900/70 z-[9999] flex items-start sm:items-center justify-center p-4 overflow-y-auto pt-4 backdrop-blur-sm">
                 <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative my-auto sm:my-0">
                   <button onClick={() => setShowManualEntryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-2">
                     <X size={20} />
@@ -5072,7 +5068,7 @@ Format JSON attendu (strict):
       </div>
 
       {/* Payment Modal */}
-      <AnimatePresence>
+      <>
         {showPaymentModal && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-start sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
             <motion.div 
@@ -5363,10 +5359,10 @@ Format JSON attendu (strict):
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
 
       {/* Delivery Confirmation Modal */}
-      <AnimatePresence>
+      <>
         {showDeliveryConfirm && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -5403,7 +5399,7 @@ Format JSON attendu (strict):
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
 
       {/* Payment Methods Section (Burkina Context) */}
       <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 relative overflow-hidden">
@@ -5451,7 +5447,7 @@ Format JSON attendu (strict):
       </div>
 
       {/* Partial Selection Modal */}
-      <AnimatePresence>
+      <>
         {showPartialSelect && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -5522,10 +5518,10 @@ Format JSON attendu (strict):
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
 
       {/* Map Modal for Patient */}
-      <AnimatePresence>
+      <>
         {showMapForOrder && createPortal(
           <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -5578,7 +5574,7 @@ Format JSON attendu (strict):
           </div>,
           document.body
         )}
-      </AnimatePresence>
+      </>
     </div>
   </PullToRefresh>
   {activeChatOrderId && (
@@ -6547,7 +6543,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       await new Promise(resolve => setTimeout(resolve, 1000));
       toast.success("Données actualisées");
     }}>
-      <div className="relative space-y-4 pb-8 pt-16 md:pt-1 transition-all">
+      <div className="relative space-y-4 pb-8 pt-2 md:pt-1 transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
       
       {/* Role Header (Android Style) */}
@@ -6687,9 +6683,9 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
           </div>
         </div>
 
-        {/* Mobile Top Navigation */}
+        {/* Mobile Bottom Navigation */}
         {createPortal(
-          <div className="md:hidden fixed top-14 left-0 right-0 z-[49] px-3 py-1 bg-slate-900/95 backdrop-blur-2xl border-b border-white/5 shadow-md">
+          <div className="md:hidden fixed bottom-0 left-0 right-0 z-[49] px-3 pt-1 bg-slate-900/95 backdrop-blur-2xl border-t border-white/10 shadow-[0_-8px_16px_-2px_rgba(0,0,0,0.3)]" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}>
             <div className="flex items-center justify-around">
               {[
                 { id: 'pending', label: 'Ordos', icon: FileText, activeColor: 'bg-emerald-500' },
@@ -6725,7 +6721,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
           document.body
         )}
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pb-32 md:pb-0">
           <div key={activeTab}>
               {activeTab === 'pending' && (
                 <>
@@ -7294,7 +7290,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       </div>
 
       {/* Handover Verify Modal */}
-      <AnimatePresence>
+      <>
         {showHandoverVerify && createPortal(
           <div className="fixed inset-0 bg-slate-900/65 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
             <motion.div 
@@ -7452,7 +7448,7 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
             </div>,
             document.body
           )}
-        </AnimatePresence>
+        </>
       
 
       {/* Withdrawal Modal */}
@@ -8169,7 +8165,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
           document.body
         )}
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pb-36 md:pb-0">
           <div key={activeTab}>
               {activeTab === 'available' && (
                 <>
@@ -8611,7 +8607,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       </div>
 
    {/* Pickup QR Modal */}
-   <AnimatePresence>
+   <>
      {showPickupQR && createPortal(
        <div className="fixed inset-0 bg-slate-900/65 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
          <motion.div 
@@ -8655,10 +8651,10 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
        </div>,
        document.body
      )}
-   </AnimatePresence>
+   </>
 
   {/* Delivery Verify Modal */}
-  <AnimatePresence>
+  <>
     {showDeliveryVerify && createPortal(
        <div className="fixed inset-0 bg-slate-900/65 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
          <motion.div 
@@ -8859,10 +8855,10 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       </div>,
       document.body
     )}
-  </AnimatePresence>
+  </>
 
   {/* Map Modal */}
-  <AnimatePresence>
+  <>
     {showMapForOrder && createPortal(
       <div className="fixed inset-0 bg-slate-900/75 z-[200] flex items-center justify-center p-4 backdrop-blur-sm">
         <motion.div 
@@ -8920,7 +8916,7 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
       </div>,
       document.body
     )}
-  </AnimatePresence>
+  </>
 
 
     {showSignaturePad && createPortal(
