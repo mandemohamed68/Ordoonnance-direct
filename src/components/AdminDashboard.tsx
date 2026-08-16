@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, Megaphone,
+  Settings as SettingsIcon, Truck, AlertCircle, CheckCircle, CheckCircle2, Megaphone, Globe, Phone,
   Users, Activity, FileText, Package, ShieldCheck, Trash2, Search,
   TrendingUp, DollarSign, BarChart3, Lock, CreditCard, Terminal, UserCog, Power, X, Download, MessageSquare, Database,
-  Plus, MapPin, Percent, Navigation, Camera
+  Plus, MapPin, Percent, Navigation, Camera, Upload
 } from 'lucide-react';
 import { doc, setDoc, deleteDoc, collection, query, onSnapshot, updateDoc, serverTimestamp, orderBy, increment, addDoc, getDocs, writeBatch, where, getDoc, limit, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase';
@@ -19,6 +19,7 @@ import { PHARMACIES_OUAGA } from '../data/pharmacies_ouaga';
 
 import { getApiUrl } from '../config';
 import { PullToRefresh } from './PullToRefresh';
+import { PaginatedList } from './PaginatedTable';
 
 const calculateDeliveryFee = (settings: Settings | null) => {
   if (!settings) return 0;
@@ -2726,79 +2727,64 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               />
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-4 font-bold">ID</th>
-                  <th className="p-4 font-bold">Patient</th>
-                  <th className="p-4 font-bold">Pharmacie</th>
-                  <th className="p-4 font-bold">Statut</th>
-                  <th className="p-4 font-bold">Montant</th>
-                  <th className="p-4 font-bold">Date</th>
-                  <th className="p-4 font-bold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {orders
-                  .filter(o => o.status !== 'completed')
-                  .filter(o => {
-                    const patient = users.find(u => u.uid === o.patientId);
-                    return o.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           patient?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           o.pharmacyName?.toLowerCase().includes(searchTerm.toLowerCase());
-                  })
-                  .map((order) => {
-                  const patient = users.find(u => u.uid === order.patientId);
-                  return (
-                    <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-mono text-xs text-slate-500">{order.id.slice(0, 8)}...</td>
-                      <td className="p-4 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
-                      <td className="p-4 text-slate-600 text-sm">{order.pharmacyName}</td>
-                      <td className="p-4">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                          order.status === 'delivering' ? 'bg-blue-100 text-blue-700' :
-                          order.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
-                          order.status === 'ready' ? 'bg-emerald-100 text-emerald-700' :
-                          order.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
-                          order.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' :
-                          'bg-slate-100 text-slate-700'
-                        }`}>
-                          {order.status === 'pending_quote' ? 'Attente Devis' :
-                           order.status === 'pending_payment' ? 'Attente Paiement' :
-                           order.status === 'paid' ? 'Payé - À préparer' :
-                           order.status === 'preparing' ? 'En préparation' :
-                           order.status === 'ready' ? 'Prêt' :
-                           order.status === 'delivering' ? 'En livraison' :
-                           order.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="p-4 font-bold text-slate-900">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
-                      <td className="p-4 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
-                      <td className="p-4 text-right">
-                        <button 
-                          onClick={() => setActiveChatOrderId(order.id)}
-                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all relative"
-                          title="Ouvrir le chat tripartite"
-                        >
-                          <MessageSquare size={18} />
-                          {order.unreadCounts?.admin > 0 && (
-                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white">
-                              {order.unreadCounts.admin}
-                            </span>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {orders.filter(o => o.status !== 'completed').length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-slate-500 font-medium">Aucune commande active trouvée.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="p-4 sm:p-6">
+            <PaginatedList
+              items={orders
+                .filter(o => o.status !== 'completed')
+                .filter(o => {
+                  const patient = users.find(u => u.uid === o.patientId);
+                  return o.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         patient?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         o.pharmacyName?.toLowerCase().includes(searchTerm.toLowerCase());
+                })
+              }
+              pageSize={10}
+              headers={["ID", "Patient", "Pharmacie", "Statut", "Montant", "Date", "Actions"]}
+              renderRow={(order) => {
+                const patient = users.find(u => u.uid === order.patientId);
+                return (
+                  <>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500">#{order.id.slice(0, 8)}</td>
+                    <td className="px-4 py-3 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
+                    <td className="px-4 py-3 text-slate-600 text-xs">{order.pharmacyName || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                        order.status === 'delivering' ? 'bg-blue-100 text-blue-700' :
+                        order.status === 'preparing' ? 'bg-indigo-100 text-indigo-700' :
+                        order.status === 'ready' ? 'bg-emerald-100 text-emerald-700' :
+                        order.status === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                        order.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {order.status === 'pending_quote' ? 'Attente Devis' :
+                         order.status === 'pending_payment' ? 'Attente Paiement' :
+                         order.status === 'paid' ? 'Payé - À préparer' :
+                         order.status === 'preparing' ? 'En préparation' :
+                         order.status === 'ready' ? 'Prêt' :
+                         order.status === 'delivering' ? 'En livraison' :
+                         order.status.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-bold text-slate-900">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
+                    <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(order.createdAt, 'date')}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button 
+                        onClick={() => setActiveChatOrderId(order.id)}
+                        className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all relative"
+                        title="Ouvrir le chat tripartite"
+                      >
+                        <MessageSquare size={16} />
+                        {order.unreadCounts?.admin > 0 && (
+                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[9px] flex items-center justify-center rounded-full">
+                            {order.unreadCounts.admin}
+                          </span>
+                        )}
+                      </button>
+                    </td>
+                  </>
+                );
+              }}
+            />
           </div>
         </div>
       </motion.div>
@@ -2829,47 +2815,33 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               />
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-4 font-bold">ID</th>
-                  <th className="p-4 font-bold">Patient</th>
-                  <th className="p-4 font-bold">Pharmacie</th>
-                  <th className="p-4 font-bold">Livreur</th>
-                  <th className="p-4 font-bold">Montant</th>
-                  <th className="p-4 font-bold">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {orders
-                  .filter(o => o.status === 'completed')
-                  .filter(o => {
-                    const patient = users.find(u => u.uid === o.patientId);
-                    return o.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           patient?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           o.pharmacyName?.toLowerCase().includes(searchTerm.toLowerCase());
-                  })
-                  .map((order) => {
-                  const patient = users.find(u => u.uid === order.patientId);
-                  return (
-                    <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-mono text-xs text-slate-500">{order.id.slice(0, 8)}...</td>
-                      <td className="p-4 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
-                      <td className="p-4 text-slate-600 text-sm">{order.pharmacyName}</td>
-                      <td className="p-4 text-slate-600 text-sm">{order.deliveryPersonName || '-'}</td>
-                      <td className="p-4 font-bold text-emerald-600">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
-                      <td className="p-4 text-slate-500 text-sm">{formatDate(order.createdAt, 'date')}</td>
-                    </tr>
-                  );
-                })}
-                {orders.filter(o => o.status === 'completed').length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-slate-500 font-medium">Aucun historique trouvé.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="p-4 sm:p-6">
+            <PaginatedList
+              items={orders
+                .filter(o => o.status === 'completed')
+                .filter(o => {
+                  const patient = users.find(u => u.uid === o.patientId);
+                  return o.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         patient?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         o.pharmacyName?.toLowerCase().includes(searchTerm.toLowerCase());
+                })
+              }
+              pageSize={10}
+              headers={["ID", "Patient", "Pharmacie", "Livreur", "Montant", "Date"]}
+              renderRow={(order) => {
+                const patient = users.find(u => u.uid === order.patientId);
+                return (
+                  <>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500">#{order.id.slice(0, 8)}</td>
+                    <td className="px-4 py-3 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
+                    <td className="px-4 py-3 text-slate-600 text-xs">{order.pharmacyName || '-'}</td>
+                    <td className="px-4 py-3 text-slate-600 text-xs">{order.deliveryPersonName || '-'}</td>
+                    <td className="px-4 py-3 font-bold text-emerald-600">{order.totalAmount ? `${order.totalAmount.toLocaleString()} CFA` : '-'}</td>
+                    <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(order.createdAt, 'date')}</td>
+                  </>
+                );
+              }}
+            />
           </div>
         </div>
       </motion.div>
@@ -2900,52 +2872,37 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               />
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-xs uppercase tracking-widest text-slate-400">
-                  <th className="p-4 font-bold">ID</th>
-                  <th className="p-4 font-bold">Patient</th>
-                  <th className="p-4 font-bold font-sans tracking-tight">Statut</th>
-                  <th className="p-4 font-bold">Date</th>
-                  <th className="p-4 font-bold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {prescriptions
-                  .filter(p => {
-                    const patient = users.find(u => u.uid === p.patientId);
-                    return p.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           patient?.name.toLowerCase().includes(searchTerm.toLowerCase());
-                  })
-                  .map((prescription) => {
-                  const patient = users.find(u => u.uid === prescription.patientId);
-                  return (
-                    <tr key={prescription.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-mono text-xs text-slate-500">{prescription.id.slice(0, 8)}...</td>
-                      <td className="p-4 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
-                      <td className="p-4">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                          prescription.status === 'validated' ? 'bg-emerald-100 text-emerald-700' :
-                          prescription.status === 'rejected' ? 'bg-rose-100 text-rose-700' :
-                          prescription.status === 'draft' ? 'bg-slate-100 text-slate-700' :
-                          prescription.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
-                          'bg-amber-100 text-amber-700'
-                        }`}>
-                          {getPrescriptionStatusLabel(prescription.status).toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="p-4 text-slate-500 text-sm">{formatDate(prescription.createdAt, 'dateTime')}</td>
-                    </tr>
-                  );
-                })}
-                {prescriptions.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="p-6 text-center text-slate-500 font-medium">Aucune ordonnance trouvée.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="p-4 sm:p-6">
+            <PaginatedList
+              items={prescriptions.filter(p => {
+                const patient = users.find(u => u.uid === p.patientId);
+                return p.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                       patient?.name.toLowerCase().includes(searchTerm.toLowerCase());
+              })}
+              pageSize={10}
+              headers={["ID", "Patient", "Statut", "Date"]}
+              renderRow={(prescription) => {
+                const patient = users.find(u => u.uid === prescription.patientId);
+                return (
+                  <>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500">#{prescription.id.slice(0, 8)}</td>
+                    <td className="px-4 py-3 font-bold text-slate-900">{patient?.name || 'Inconnu'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                        prescription.status === 'validated' ? 'bg-emerald-100 text-emerald-700' :
+                        prescription.status === 'rejected' ? 'bg-rose-100 text-rose-700' :
+                        prescription.status === 'draft' ? 'bg-slate-100 text-slate-700' :
+                        prescription.status === 'submitted' ? 'bg-blue-100 text-blue-700' :
+                        'bg-amber-100 text-amber-700'
+                      }`}>
+                        {getPrescriptionStatusLabel(prescription.status).toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(prescription.createdAt, 'dateTime')}</td>
+                  </>
+                );
+              }}
+            />
           </div>
         </div>
       </motion.div>
@@ -3200,7 +3157,7 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                     <strong>Note de sécurité :</strong> Les clés de paiement (SAPPAY_CLIENT_ID, SAPPAY_PASSWORD, etc.) ne peuvent pas être modifiées directement dans cette interface web car le serveur backend s'exécute de manière isolée pour des raisons de strictes de sécurité bancaire.
                   </p>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Veuillez injecter ces 4 paramètres exactement dans le menu <strong>Secrets (Environnement)</strong> situé dans le panneau Paramètres (Settings ⚙️) de Google AI Studio puis relancez le backend :
+                    Veuillez injecter ces 4 paramètres exactement dans le menu <strong>Secrets (Environnement)</strong> situé dans le panneau Paramètres (Settings) de Google AI Studio puis relancez le backend :
                   </p>
                   <ul className="text-[10px] space-y-1 bg-white p-3 rounded-xl border border-slate-200 font-mono text-slate-700 mt-2">
                     <li className="flex items-center gap-2">
@@ -3588,71 +3545,52 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-slate-500 text-sm">
-                  <th className="p-3 font-medium">Date</th>
-                  <th className="p-3 font-medium">Utilisateur</th>
-                  <th className="p-3 font-medium">Rôle</th>
-                  <th className="p-3 font-medium">Type</th>
-                  <th className="p-3 font-medium">Montant</th>
-                  <th className="p-3 font-medium">Description</th>
-                  <th className="p-3 font-medium">Détails</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...transactions]
-                  .sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime())
-                  .map((t) => (
-                  <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                    <td className="p-3 text-sm text-slate-500">
-                      {formatDate(t.createdAt)}
-                    </td>
-                    <td className="p-3 font-bold text-slate-900">{t.userName}</td>
-                    <td className="p-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                        t.userRole === 'patient' ? 'bg-blue-100 text-blue-600' :
-                        t.userRole === 'pharmacist' ? 'bg-emerald-100 text-emerald-600' :
-                        t.userRole === 'delivery' ? 'bg-amber-100 text-amber-600' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {t.userRole}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                        t.type === 'credit' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                      }`}>
-                        {t.type === 'credit' ? 'Crédit' : 'Débit'}
-                      </span>
-                    </td>
-                    <td className={`p-3 font-black ${t.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {t.type === 'credit' ? '+' : '-'}{t.amount.toLocaleString()} FCFA
-                    </td>
-                    <td className="p-3 text-sm text-slate-600">{t.description}</td>
-                    <td className="p-3">
-                      {t.metadata ? (
-                        <div className="flex flex-wrap gap-1">
-                          {Object.entries(t.metadata).map(([key, value]) => (
-                            <span key={key} className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
-                              {key}: {String(value)}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-slate-300 italic">Aucun</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {transactions.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-slate-400 font-medium">Aucune transaction enregistrée.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="p-4 sm:p-6">
+            <PaginatedList
+              items={[...transactions].sort((a, b) => parseDate(b.createdAt).getTime() - parseDate(a.createdAt).getTime())}
+              pageSize={10}
+              headers={["Date", "Utilisateur", "Rôle", "Type", "Montant", "Description", "Détails"]}
+              renderRow={(t) => (
+                <>
+                  <td className="px-4 py-3 text-xs text-slate-500">{formatDate(t.createdAt)}</td>
+                  <td className="px-4 py-3 font-bold text-slate-900">{t.userName}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      t.userRole === 'patient' ? 'bg-blue-100 text-blue-600' :
+                      t.userRole === 'pharmacist' ? 'bg-emerald-100 text-emerald-600' :
+                      t.userRole === 'delivery' ? 'bg-amber-100 text-amber-600' :
+                      'bg-slate-100 text-slate-600'
+                    }`}>
+                      {t.userRole}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      t.type === 'credit' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+                    }`}>
+                      {t.type === 'credit' ? 'Crédit' : 'Débit'}
+                    </span>
+                  </td>
+                  <td className={`px-4 py-3 font-black text-xs ${t.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {t.type === 'credit' ? '+' : '-'}{t.amount.toLocaleString()} FCFA
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-600">{t.description}</td>
+                  <td className="px-4 py-3">
+                    {t.metadata ? (
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(t.metadata).map(([key, value]) => (
+                          <span key={key} className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
+                            {key}: {String(value)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-slate-300 italic">Aucun</span>
+                    )}
+                  </td>
+                </>
+              )}
+            />
           </div>
         </div>
         </>
@@ -3976,642 +3914,749 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
     )}
 
       {activeTab === 'settings' && editSettings && (
-        <>
-          <div className="space-y-8 max-w-2xl">
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-600">
-                <SettingsIcon size={24} />
+        <div className="space-y-8 max-w-4xl">
+          {/* Top Backoffice Header & Save Button Bar */}
+          <div className="sticky top-4 z-20 bg-slate-900 text-white p-5 rounded-3xl shadow-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider">
+                <SettingsIcon size={12} /> Backoffice & Administration
               </div>
-              <h3 className="text-xl font-bold">Informations Générales</h3>
+              <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">Paramétrage Général de la Plateforme</h2>
+              <p className="text-xs text-slate-300">Contrôle centralisé du branding, des infos, tarifs, paiements et règles pour Web & Mobile.</p>
+            </div>
+            <button 
+              onClick={handleSaveSettings}
+              disabled={saving}
+              className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/20 shrink-0 flex items-center gap-2 active:scale-95 disabled:opacity-50"
+            >
+              {saving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-slate-950/30 border-t-slate-950 rounded-full animate-spin"></div>
+                  <span>Sauvegarde...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={16} />
+                  <span>Enregistrer Tout</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Quick Sub-Navigation Shortcuts Bar */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <button 
+              type="button"
+              onClick={() => document.getElementById('section-tarification')?.scrollIntoView({ behavior: 'smooth' })} 
+              className="px-4 py-2.5 bg-sky-600 text-white rounded-2xl text-xs font-bold shrink-0 flex items-center gap-2 shadow-md shadow-sky-600/20 hover:bg-sky-500 transition-all active:scale-95"
+            >
+              <Truck size={14} />
+              <span>🛵 Menu Tarification Moto Express</span>
+            </button>
+            <button 
+              type="button"
+              onClick={() => document.getElementById('section-branding')?.scrollIntoView({ behavior: 'smooth' })} 
+              className="px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-2xl text-xs font-bold shrink-0 flex items-center gap-2 hover:bg-slate-50 transition-all active:scale-95"
+            >
+              <Globe size={14} />
+              <span>🖼️ Logo & Branding</span>
+            </button>
+            <button 
+              type="button"
+              onClick={() => document.getElementById('section-commissions')?.scrollIntoView({ behavior: 'smooth' })} 
+              className="px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-2xl text-xs font-bold shrink-0 flex items-center gap-2 hover:bg-slate-50 transition-all active:scale-95"
+            >
+              <Percent size={14} />
+              <span>💰 Commissions</span>
+            </button>
+          </div>
+
+          {/* 1. Branding & Identité Visuelle */}
+          <div id="section-branding" className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 shrink-0 border border-emerald-100">
+                <Globe size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Identité & Branding (Web & Mobile)</h3>
+                <p className="text-xs text-slate-500">Personnalisez le nom, le slogan, le logo et le pays d'opération.</p>
+              </div>
             </div>
 
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-6 bg-primary/5 rounded-[2rem] border border-primary/10">
-                <div>
-                  <h4 className="font-bold text-slate-900">Activer le Chat de Support</h4>
-                  <p className="text-xs text-slate-500">Permettre aux utilisateurs de contacter le support via le chat intégré.</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer"
-                    checked={editSettings.supportChatEnabled !== false}
-                    onChange={(e) => setEditSettings({...editSettings, supportChatEnabled: e.target.checked})}
-                  />
-                  <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-primary"></div>
-                </label>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom de l'application</label>
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Nom de la Plateforme</label>
                 <input 
                   type="text" 
                   value={editSettings.appName || 'Ordonnance Direct'}
                   onChange={(e) => setEditSettings({...editSettings, appName: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  placeholder="Ordonnance Direct"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Support</label>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Slogan / Tagline</label>
+                <input 
+                  type="text" 
+                  value={editSettings.appTagline || ''}
+                  onChange={(e) => setEditSettings({...editSettings, appTagline: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  placeholder="Plateforme Nationale de Télé-exécution d'Ordonnances"
+                />
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Logo de l'Application (URL ou Téléversement)</label>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <input 
-                    type="email" 
-                    value={editSettings.supportEmail || ''}
-                    onChange={(e) => setEditSettings({...editSettings, supportEmail: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                    placeholder="support@exemple.com"
+                    type="text" 
+                    value={editSettings.appLogoUrl || ''}
+                    onChange={(e) => setEditSettings({...editSettings, appLogoUrl: e.target.value})}
+                    className="flex-1 bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                    placeholder="https://... ou téléversez votre fichier image"
                   />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Téléphone Support</label>
-                  <input 
-                    type="tel" 
-                    value={editSettings.supportPhone || ''}
-                    onChange={(e) => setEditSettings({...editSettings, supportPhone: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                    placeholder="+226 XX XX XX XX"
-                  />
+                  <label className="cursor-pointer bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all shrink-0 shadow-sm active:scale-95">
+                    <Upload size={16} />
+                    <span>Choisir un fichier</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 3 * 1024 * 1024) {
+                            toast.error("L'image ne doit pas dépasser 3 Mo");
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setEditSettings({...editSettings, appLogoUrl: reader.result as string});
+                            toast.success("Logo chargé avec succès ! Cliquez sur 'Enregistrer Tout' pour appliquer.");
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+                  <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 p-1 flex items-center justify-center shrink-0 shadow-inner">
+                    <img 
+                      src={editSettings.appLogoUrl || "/logoOD.png"} 
+                      alt="Logo preview" 
+                      className="max-h-full max-w-full object-contain rounded-xl"
+                      onError={(e) => { e.currentTarget.src = "/logoOD.png"; }}
+                    />
+                  </div>
                 </div>
               </div>
+
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Devise</label>
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Pays d'Opération</label>
+                <input 
+                  type="text" 
+                  value={editSettings.countryName || 'Burkina Faso'}
+                  onChange={(e) => setEditSettings({...editSettings, countryName: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  placeholder="Burkina Faso"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Devise Principale</label>
                 <input 
                   type="text" 
                   value={editSettings.currency || 'FCFA'}
                   onChange={(e) => setEditSettings({...editSettings, currency: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
                   placeholder="FCFA"
                 />
               </div>
-            </div>
-          </div>
 
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-600">
-                <Lock size={24} />
-              </div>
-              <h3 className="text-xl font-bold">Configuration Serveur (Secrets)</h3>
-            </div>
+              <div className="space-y-4 sm:col-span-2 border-t border-slate-100 pt-6">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Palette de Couleurs & Thème de Saison</label>
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
+                    Branding Dynamique
+                  </span>
+                </div>
+                <select 
+                  value={editSettings.themeType || 'default'}
+                  onChange={(e) => setEditSettings({...editSettings, themeType: e.target.value as any})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                >
+                  <option value="default">Standard (Émeraude Médical / Defaut)</option>
+                  <option value="christmas">Fête de Noël 🎄 (Rouge festif & Vert Sapin)</option>
+                  <option value="new-year">Nouvel An / Saint-Sylvestre ✨ (Or étincelant & Ardoise)</option>
+                  <option value="valentine">Saint-Valentin 💖 (Rose Romantique)</option>
+                  <option value="ocean">Bleu Médical / Océan Pro 🌊</option>
+                  <option value="royal">Violet Royal 👑 (Premium)</option>
+                  <option value="orange">Orange Chaleureux / Soleil d'Afrique 🍊</option>
+                  <option value="rainy">Saison des Pluies 🌧️ (Bleu Océan)</option>
+                  <option value="harmattan">Harmattan / Tempête Dorée 🌪️ (Sable Chaud)</option>
+                  <option value="ramadan">Ramadan & Aïd 🌙 (Vert Émeraude & Or)</option>
+                  <option value="burkina">Fête Nationale 🇧🇫 (Patriotique Rouge & Vert)</option>
+                  <option value="spring">Pâques / Printemps 🌸 (Pétales de Cerisiers)</option>
+                  <option value="custom">🎨 Personnalisé (Saisir vos propres codes couleurs)</option>
+                </select>
 
-            <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Les identifiants sensibles pour les SMS et les Paiements Sappay doivent être configurés dans le menu <strong>Settings (Secrets)</strong> de AI Studio pour des raisons de sécurité.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 bg-white rounded-xl border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">IA & SMS (Sappay)</p>
-                  <ul className="text-xs text-slate-500 space-y-1 font-mono">
-                    <li>GEMINI_API_KEY</li>
-                    <li>SMS_API_USER</li>
-                    <li>SMS_API_HASH</li>
-                    <li>SMS_SENDER_ID</li>
-                  </ul>
-                </div>
-                <div className="p-4 bg-white rounded-xl border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Paiements (Sappay)</p>
-                  <ul className="text-xs text-slate-500 space-y-1 font-mono">
-                    <li>SAPPAY_CLIENT_ID</li>
-                    <li>SAPPAY_CLIENT_SECRET</li>
-                    <li>SAPPAY_USERNAME</li>
-                    <li>SAPPAY_PASSWORD</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Effet Graphique d'Animation d'Arrière-Plan</label>
+                    <select 
+                      value={editSettings.effectType || 'auto'}
+                      onChange={(e) => setEditSettings({...editSettings, effectType: e.target.value as any})}
+                      className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                    >
+                      <option value="auto">Automatique (selon le thème sélectionné)</option>
+                      <option value="snow">Flocons de Neige Cristallins ❄️ (Noël & Hiver)</option>
+                      <option value="fireworks">Étoiles & Feux d'Artifice Cliquables ✨ (Nouvel An & Célébration)</option>
+                      <option value="hearts">Pluie de Cœurs Flottants 💖 (Saint-Valentin)</option>
+                      <option value="rain">Gouttes de Pluie & Ondulations 🌧️ (Saison des Pluies)</option>
+                      <option value="harmattan">Tempête Dorée d'Harmattan 🌪️ (Vent de Sable Chaud)</option>
+                      <option value="ramadan">Lunes & Étoiles d'Or Islamiques 🌙 (Ramadan / Aïd)</option>
+                      <option value="burkina">Confettis & Étoiles Patriotiques 🇧🇫 (Fête Nationale)</option>
+                      <option value="sakura">Pétales de Cerisiers en Fleur 🌸 (Printemps)</option>
+                      <option value="sparkles">Particules Lumineuses & Étincelles ✨ (Universel)</option>
+                      <option value="none">Désactivé (Aucune animation de fond)</option>
+                    </select>
+                  </div>
 
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600">
-                <Percent size={24} />
-              </div>
-              <h3 className="text-xl font-bold">Frais de Service & Commissions</h3>
-            </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Intensité des Effets</label>
+                    <select 
+                      value={editSettings.effectsIntensity || 'medium'}
+                      onChange={(e) => setEditSettings({...editSettings, effectsIntensity: e.target.value as any})}
+                      className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                    >
+                      <option value="low">Subtil (Léger & Discret)</option>
+                      <option value="medium">Standard (Équilibré & Élégant)</option>
+                      <option value="high">Spectaculaire (Festif & Dense)</option>
+                    </select>
+                  </div>
+                </div>
 
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Commission Pharmacie (%)</label>
+                <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <input 
-                    type="number" 
-                    value={editSettings.commissionPercentage ?? 10}
-                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
+                    type="checkbox" 
+                    id="decorationsEnabled"
+                    checked={editSettings.decorationsEnabled || false}
+                    onChange={(e) => setEditSettings({...editSettings, decorationsEnabled: e.target.checked})}
+                    className="w-5 h-5 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500 focus:ring-opacity-20 cursor-pointer"
                   />
-                  <p className="text-[10px] text-slate-400">Pourcentage prélevé sur les ventes de médicaments.</p>
+                  <label htmlFor="decorationsEnabled" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
+                    Activer les ornements graphiques de tête (ex: boules de Noël suspendues, bannières du Nouvel An, lunes et étoiles)
+                  </label>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Commission Livraison (%)</label>
-                  <input 
-                    type="number" 
-                    value={editSettings.deliveryCommissionPercentage ?? 15}
-                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                  <p className="text-[10px] text-slate-400">Pourcentage prélevé sur les frais de livraison.</p>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Frais de Service Fixe (CFA)</label>
-                  <input 
-                    type="number" 
-                    value={editSettings.serviceFee ?? 0}
-                    onChange={(e) => setEditSettings({...editSettings, serviceFee: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                  <p className="text-[10px] text-slate-400">Frais fixes ajoutés à chaque commande (Gains plateforme).</p>
-                </div>
-              </div>
-            </div>
-          </div>
 
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
-                <Truck size={24} />
-              </div>
-              <h3 className="text-xl font-bold">Tarifs de Livraison</h3>
-            </div>
-
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tarif Journée (CFA)</label>
-                  <input 
-                    type="number" 
-                    value={editSettings.dayDeliveryFee ?? 0}
-                    onChange={(e) => setEditSettings({...editSettings, dayDeliveryFee: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tarif Nuit (CFA)</label>
-                  <input 
-                    type="number" 
-                    value={editSettings.nightDeliveryFee ?? 0}
-                    onChange={(e) => setEditSettings({...editSettings, nightDeliveryFee: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Commission Pharmacie (%)</label>
-                <div className="flex items-center gap-4">
-                  <input 
-                    type="range" 
-                    min="0"
-                    max="50"
-                    step="1"
-                    value={editSettings.commissionPercentage ?? 10}
-                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
-                    className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-primary"
-                  />
-                  <input 
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={editSettings.commissionPercentage ?? 10}
-                    onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
-                    className="w-20 text-center font-bold text-primary bg-primary/5 py-2 rounded-xl border-none focus:ring-2 focus:ring-primary/20"
-                  />
-                  <span className="font-bold text-primary">%</span>
-                </div>
-                <p className="text-[10px] text-slate-400 italic ml-1">
-                  Ce pourcentage sera appliqué sur le montant total des médicaments pour chaque commande.
+                <p className="text-[11px] text-slate-500 leading-relaxed bg-amber-50/70 border border-amber-200/60 p-3.5 rounded-2xl text-amber-900">
+                  💡 <strong>Astuce :</strong> Les effets graphiques s'affichent en temps réel sur toute la plateforme. En mode <em>Feux d'Artifice</em>, cliquez n'importe où sur l'écran pour déclencher une explosion pyrotechnique multicolore !
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Commission Livraison (%)</label>
-                <div className="flex items-center gap-4">
-                  <input 
-                    type="range" 
-                    min="0"
-                    max="50"
-                    step="1"
-                    value={editSettings.deliveryCommissionPercentage ?? 10}
-                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
-                    className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                  />
-                  <input 
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={editSettings.deliveryCommissionPercentage ?? 10}
-                    onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
-                    className="w-20 text-center font-bold text-blue-600 bg-blue-50 py-2 rounded-xl border-none focus:ring-2 focus:ring-blue-500/20"
-                  />
-                  <span className="font-bold text-blue-600">%</span>
-                </div>
-                <p className="text-[10px] text-slate-400 italic ml-1">
-                  Ce pourcentage sera appliqué sur les frais de livraison pour chaque commande.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Début Nuit (Heure)</label>
-                  <select 
-                    value={editSettings.nightStartHour ?? 0}
-                    onChange={(e) => setEditSettings({...editSettings, nightStartHour: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  >
-                    {Array.from({length: 24}).map((_, i) => (
-                      <option key={i} value={i}>{i}h00</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Fin Nuit (Heure)</label>
-                  <select 
-                    value={editSettings.nightEndHour ?? 0}
-                    onChange={(e) => setEditSettings({...editSettings, nightEndHour: parseInt(e.target.value) || 0})}
-                    className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                  >
-                    {Array.from({length: 24}).map((_, i) => (
-                      <option key={i} value={i}>{i}h00</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex gap-3">
-                <AlertCircle className="text-amber-500 shrink-0" size={20} />
-                <p className="text-xs text-amber-700 leading-relaxed">
-                  Le tarif de nuit est appliqué automatiquement en fonction de l'heure actuelle au Burkina Faso pour compenser les risques accrus.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-600">
-                <CreditCard size={24} />
-              </div>
-              <h3 className="text-xl font-bold">Configuration des Paiements</h3>
-            </div>
-
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div>
-                  <p className="font-bold text-sm">Activer Mobile Money</p>
-                  <p className="text-xs text-slate-500">Orange, Moov, Telecel</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer"
-                    checked={editSettings.paymentConfig?.mobileMoneyEnabled ?? true}
-                    onChange={(e) => setEditSettings({
-                      ...editSettings, 
-                      paymentConfig: {
-                        ...(editSettings.paymentConfig || { cardEnabled: true, cashEnabled: false, ussdEnabled: true, testMode: false }), 
-                        mobileMoneyEnabled: e.target.checked
-                      }
-                    })}
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
-                </label>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div>
-                  <p className="font-bold text-sm">Mode Sandbox (Test)</p>
-                  <p className="text-xs text-slate-500">Utiliser pour tester l'intégration sans frais réels</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer"
-                    checked={editSettings.paymentConfig?.testMode ?? false}
-                    onChange={(e) => setEditSettings({
-                      ...editSettings, 
-                      paymentConfig: {
-                        ...(editSettings.paymentConfig || { mobileMoneyEnabled: true, cardEnabled: true, cashEnabled: false, ussdEnabled: false }), 
-                        testMode: e.target.checked
-                      }
-                    })}
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
-                </label>
-              </div>
-
-              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
-                <h4 className="text-sm font-bold text-slate-900">Opérateurs Mobile Money (Sappay)</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                   {['orange', 'moov', 'telecel', 'coris'].map(op => (
-                     <label key={op} className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
-                       <input 
-                         type="checkbox" 
-                         className="w-4 h-4 text-primary rounded border-slate-300 focus:ring-primary"
-                         checked={editSettings.paymentConfig?.enabledProcessors?.[op as any] ?? true}
-                         onChange={(e) => setEditSettings({
-                           ...editSettings,
-                           paymentConfig: {
-                             ...editSettings.paymentConfig!,
-                             enabledProcessors: {
-                               ...(editSettings.paymentConfig?.enabledProcessors || { orange: true, moov: true, telecel: true, coris: true }),
-                               [op]: e.target.checked
-                             }
-                           }
-                         })}
-                       />
-                       <span className="text-xs font-bold capitalize text-slate-700">{op} Money</span>
-                     </label>
-                   ))}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div>
-                  <p className="font-bold text-sm">Activer Paiement USSD</p>
-                  <p className="text-xs text-slate-500">Saisie manuelle du code USSD par le client</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer"
-                    checked={editSettings.paymentConfig?.ussdEnabled ?? false}
-                    onChange={(e) => setEditSettings({
-                      ...editSettings, 
-                      paymentConfig: {
-                        ...(editSettings.paymentConfig || { mobileMoneyEnabled: true, cardEnabled: true, cashEnabled: false, testMode: false }), 
-                        ussdEnabled: e.target.checked
-                      }
-                    })}
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                </label>
-              </div>
-
-              {editSettings.paymentConfig?.ussdEnabled && (
-                <div className="space-y-4 p-6 bg-indigo-50/30 rounded-3xl border border-indigo-100 animate-in fade-in slide-in-from-top-4">
-                  <h4 className="text-sm font-bold text-indigo-900 mb-2">Syntaxes USSD de Paiement</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Orange</label>
+              {(editSettings.themeType === 'custom') && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:col-span-2 bg-slate-50/50 p-5 rounded-3xl border border-dashed border-slate-200">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest ml-1">Couleur Primaire (Hex, ex: #2563eb)</label>
+                    <div className="flex gap-2">
                       <input 
-                        type="text"
-                        value={editSettings.paymentConfig?.ussdSyntaxes?.orange || ''}
-                        onChange={(e) => setEditSettings({
-                          ...editSettings,
-                          paymentConfig: {
-                            ...editSettings.paymentConfig!,
-                            ussdSyntaxes: { ...(editSettings.paymentConfig?.ussdSyntaxes || { orange: '', moov: '', telecel: '' }), orange: e.target.value }
-                          }
-                        })}
-                        placeholder="*144*4*6*..."
-                        className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-indigo-500/20"
+                        type="color" 
+                        value={editSettings.primaryColor || '#059669'}
+                        onChange={(e) => setEditSettings({...editSettings, primaryColor: e.target.value})}
+                        className="w-12 h-12 rounded-xl border border-slate-200 cursor-pointer shrink-0"
                       />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Moov</label>
                       <input 
-                        type="text"
-                        value={editSettings.paymentConfig?.ussdSyntaxes?.moov || ''}
-                        onChange={(e) => setEditSettings({
-                          ...editSettings,
-                          paymentConfig: {
-                            ...editSettings.paymentConfig!,
-                            ussdSyntaxes: { ...(editSettings.paymentConfig?.ussdSyntaxes || { orange: '', moov: '', telecel: '' }), moov: e.target.value }
-                          }
-                        })}
-                        placeholder="*555*2*1*..."
-                        className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-indigo-500/20"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Telecel</label>
-                      <input 
-                        type="text"
-                        value={editSettings.paymentConfig?.ussdSyntaxes?.telecel || ''}
-                        onChange={(e) => setEditSettings({
-                          ...editSettings,
-                          paymentConfig: {
-                            ...editSettings.paymentConfig!,
-                            ussdSyntaxes: { ...(editSettings.paymentConfig?.ussdSyntaxes || { orange: '', moov: '', telecel: '' }), telecel: e.target.value }
-                          }
-                        })}
-                        placeholder="*444*..."
-                        className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-indigo-500/20"
+                        type="text" 
+                        value={editSettings.primaryColor || '#059669'}
+                        onChange={(e) => setEditSettings({...editSettings, primaryColor: e.target.value})}
+                        placeholder="#059669"
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 font-bold text-sm"
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] text-indigo-600 italic">Utilisez {`{amount}`} pour le montant et {`{account}`} pour le numéro de compte marchand.</p>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest ml-1">Couleur Secondaire (Hex, ex: #10b981)</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="color" 
+                        value={editSettings.secondaryColor || '#10b981'}
+                        onChange={(e) => setEditSettings({...editSettings, secondaryColor: e.target.value})}
+                        className="w-12 h-12 rounded-xl border border-slate-200 cursor-pointer shrink-0"
+                      />
+                      <input 
+                        type="text" 
+                        value={editSettings.secondaryColor || '#10b981'}
+                        onChange={(e) => setEditSettings({...editSettings, secondaryColor: e.target.value})}
+                        placeholder="#10b981"
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 font-bold text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
+            </div>
+          </div>
 
-              <div className="space-y-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-sm font-bold text-slate-900 mb-2">Comptes Marchands (Paiements Clients)</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-orange-600 uppercase tracking-widest">Orange Money</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.orangeMoney || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), orangeMoney: e.target.value }
-                        }
-                      })}
-                      placeholder="Numéro Marchand"
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-orange-500/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Moov Money</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.moovMoney || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), moovMoney: e.target.value }
-                        }
-                      })}
-                      placeholder="Numéro Marchand"
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-red-600 uppercase tracking-widest">Telecel Cash</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.telecelCash || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), telecelCash: e.target.value }
-                        }
-                      })}
-                      placeholder="Numéro Marchand"
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-red-500/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-sky-600 uppercase tracking-widest">Coris Money</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.corisMoney || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), corisMoney: e.target.value }
-                        }
-                      })}
-                      placeholder="ID Coris Money"
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-sky-500/20"
-                    />
-                  </div>
-                </div>
+          {/* 2. Coordonnées & Support Clients */}
+          <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 shrink-0 border border-blue-100">
+                <Phone size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Coordonnées, Urgence & Support Backoffice</h3>
+                <p className="text-xs text-slate-500">Adresses et numéros officiels diffusés sur le web et l'application mobile.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Email Support</label>
+                <input 
+                  type="email" 
+                  value={editSettings.supportEmail || ''}
+                  onChange={(e) => setEditSettings({...editSettings, supportEmail: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  placeholder="support@ordonnance-direct.bf"
+                />
               </div>
 
-              <div className="space-y-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-sm font-bold text-slate-900 mb-2">Compte Bancaire (Virements)</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nom de la Banque</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.bankName || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), bankName: e.target.value }
-                        }
-                      })}
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nom du Compte</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.bankAccountName || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), bankAccountName: e.target.value }
-                        }
-                      })}
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Numéro de Compte</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.bankAccountNumber || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), bankAccountNumber: e.target.value }
-                        }
-                      })}
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">IBAN / RIB</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.paymentAccounts?.bankIBAN || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          paymentAccounts: { ...(editSettings.paymentConfig?.paymentAccounts || {}), bankIBAN: e.target.value }
-                        }
-                      })}
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Téléphone Support / WhatsApp</label>
+                <input 
+                  type="tel" 
+                  value={editSettings.supportPhone || ''}
+                  onChange={(e) => setEditSettings({...editSettings, supportPhone: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  placeholder="+226 70 00 00 00"
+                />
               </div>
 
-              <div className="space-y-4 p-6 bg-blue-50/30 rounded-3xl border border-blue-100">
-                <h4 className="text-sm font-bold text-blue-900 mb-2">Syntaxes USSD de Retrait (Admin)</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Orange</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.withdrawalUssdSyntaxes?.orange || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          withdrawalUssdSyntaxes: { ...(editSettings.paymentConfig?.withdrawalUssdSyntaxes || { orange: '', moov: '', telecel: '' }), orange: e.target.value }
-                        }
-                      })}
-                      placeholder="*144*..."
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Moov</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.withdrawalUssdSyntaxes?.moov || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          withdrawalUssdSyntaxes: { ...(editSettings.paymentConfig?.withdrawalUssdSyntaxes || { orange: '', moov: '', telecel: '' }), moov: e.target.value }
-                        }
-                      })}
-                      placeholder="*555*..."
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Telecel</label>
-                    <input 
-                      type="text"
-                      value={editSettings.paymentConfig?.withdrawalUssdSyntaxes?.telecel || ''}
-                      onChange={(e) => setEditSettings({
-                        ...editSettings,
-                        paymentConfig: {
-                          ...editSettings.paymentConfig!,
-                          withdrawalUssdSyntaxes: { ...(editSettings.paymentConfig?.withdrawalUssdSyntaxes || { orange: '', moov: '', telecel: '' }), telecel: e.target.value }
-                        }
-                      })}
-                      placeholder="*444*..."
-                      className="w-full bg-white border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Urgence Santé (Ligne Directe)</label>
+                <input 
+                  type="text" 
+                  value={editSettings.emergencyPhone || ''}
+                  onChange={(e) => setEditSettings({...editSettings, emergencyPhone: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  placeholder="15 / +226 25 30 00 00"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-5 bg-blue-50/50 rounded-2xl border border-blue-100">
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm">Activer le Chat de Support Intégré</h4>
+                <p className="text-xs text-slate-500">Permet aux patients, pharmacie et livreurs d'ouvrir une discussion directe.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer"
+                  checked={editSettings.supportChatEnabled !== false}
+                  onChange={(e) => setEditSettings({...editSettings, supportChatEnabled: e.target.checked})}
+                />
+                <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+
+          {/* 3. Bandeau d'Annonce Globale */}
+          <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 shrink-0 border border-amber-100">
+                <Megaphone size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Bandeau d'Annonce Globale</h3>
+                <p className="text-xs text-slate-500">Message prioritaire affiché au sommet des interfaces Web & Mobile.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-5 bg-amber-50/60 rounded-2xl border border-amber-200/60">
+              <div>
+                <h4 className="font-bold text-amber-950 text-sm">Activer le Bandeau d'Annonce</h4>
+                <p className="text-xs text-amber-800/80">Diffuser immédiatement une note d'information à tous les utilisateurs.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer"
+                  checked={editSettings.announcementEnabled ?? false}
+                  onChange={(e) => setEditSettings({...editSettings, announcementEnabled: e.target.checked})}
+                />
+                <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+              </label>
+            </div>
+
+            {editSettings.announcementEnabled && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Texte du Bandeau d'Annonce</label>
+                <textarea 
+                  value={editSettings.announcementText || ''}
+                  onChange={(e) => setEditSettings({...editSettings, announcementText: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-4 font-bold text-sm focus:ring-2 focus:ring-amber-500/20 transition-all h-20 resize-none"
+                  placeholder="Ex: Pharmacie de garde active 24h/24 dans toutes les zones urbaines. Pensez à vérifier vos ordonnances."
+                />
+              </div>
+            )}
+          </div>
+
+          {/* 4. Configuration Serveur & Secrets */}
+          <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shrink-0 border border-indigo-100">
+                <Lock size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Variables & Secrets Serveur</h3>
+                <p className="text-xs text-slate-500">Rappel des clés API gérées de manière sécurisée côté backend.</p>
+              </div>
+            </div>
+
+            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200/60 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                Les clés API confidentielles (IA, SMS Sappay, Passerelle de paiement) sont protégées dans l'environnement serveur et s'appliquent automatiquement à toutes les requêtes mobile & web.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 bg-white rounded-xl border border-slate-200/80">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">IA & SMS (Backend)</p>
+                  <ul className="text-xs text-slate-600 space-y-1 font-mono">
+                    <li>• GEMINI_API_KEY</li>
+                    <li>• SMS_API_USER</li>
+                    <li>• SMS_API_HASH</li>
+                    <li>• SMS_SENDER_ID</li>
+                  </ul>
+                </div>
+                <div className="p-4 bg-white rounded-xl border border-slate-200/80">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Passerelle Sappay (Paiements)</p>
+                  <ul className="text-xs text-slate-600 space-y-1 font-mono">
+                    <li>• SAPPAY_CLIENT_ID</li>
+                    <li>• SAPPAY_CLIENT_SECRET</li>
+                    <li>• SAPPAY_USERNAME</li>
+                    <li>• SAPPAY_PASSWORD</li>
+                  </ul>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center text-red-600">
+          {/* 5. Modèle Économique & Commissions */}
+          <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 shrink-0 border border-emerald-100">
+                <Percent size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Modèle Économique & Commissions</h3>
+                <p className="text-xs text-slate-500">Taux de prélèvement plateforme sur les pharmacies et les livreurs.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Commission Pharmacie (%)</label>
+                <input 
+                  type="number" 
+                  value={editSettings.commissionPercentage ?? 10}
+                  onChange={(e) => setEditSettings({...editSettings, commissionPercentage: parseInt(e.target.value) || 0})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                />
+                <p className="text-[10px] text-slate-400">Pourcentage prélevé sur les ventes de médicaments.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Commission Livreur (%)</label>
+                <input 
+                  type="number" 
+                  value={editSettings.deliveryCommissionPercentage ?? 10}
+                  onChange={(e) => setEditSettings({...editSettings, deliveryCommissionPercentage: parseInt(e.target.value) || 0})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                />
+                <p className="text-[10px] text-slate-400">Pourcentage prélevé sur la course du livreur.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Frais Fixes de Service (CFA)</label>
+                <input 
+                  type="number" 
+                  value={editSettings.serviceFee ?? 0}
+                  onChange={(e) => setEditSettings({...editSettings, serviceFee: parseInt(e.target.value) || 0})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                />
+                <p className="text-[10px] text-slate-400">Frais fixes par commande attribués à la plateforme.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 6. Tarification des Courses Moto Express & Livraisons */}
+          <div id="section-tarification" className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-sky-50 rounded-2xl flex items-center justify-center text-sky-600 shrink-0 border border-sky-100">
+                <Truck size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Tarification & Grille des Courses (Moto Express)</h3>
+                <p className="text-xs text-slate-500">Formule dynamique : Forfait de base + (Km Supplémentaires × Prix/Km) × Majorations</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Tarif Forfait Départ / Prise en Charge (CFA)</label>
+                <input 
+                  type="number" 
+                  value={editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500}
+                  onChange={(e) => {
+                    const baseFee = parseInt(e.target.value) || 0;
+                    setEditSettings({
+                      ...editSettings, 
+                      dayDeliveryFee: baseFee,
+                      motoPricing: {
+                        baseFee,
+                        baseDistanceKm: editSettings.motoPricing?.baseDistanceKm ?? 3,
+                        pricePerKm: editSettings.motoPricing?.pricePerKm ?? 150,
+                        nightMultiplier: editSettings.motoPricing?.nightMultiplier ?? 1.25,
+                        expressMultiplier: editSettings.motoPricing?.expressMultiplier ?? 1.20,
+                        nightStartHour: editSettings.nightStartHour ?? 20,
+                        nightEndHour: editSettings.nightEndHour ?? 6
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                  placeholder="500"
+                />
+                <p className="text-[10px] text-slate-400">Prise en charge forfaitaire initiale.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Distance Minimale Incluse (Km)</label>
+                <input 
+                  type="number" 
+                  step="0.5"
+                  value={editSettings.motoPricing?.baseDistanceKm ?? 3}
+                  onChange={(e) => {
+                    const baseDistanceKm = parseFloat(e.target.value) || 0;
+                    setEditSettings({
+                      ...editSettings, 
+                      motoPricing: {
+                        baseFee: editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500,
+                        baseDistanceKm,
+                        pricePerKm: editSettings.motoPricing?.pricePerKm ?? 150,
+                        nightMultiplier: editSettings.motoPricing?.nightMultiplier ?? 1.25,
+                        expressMultiplier: editSettings.motoPricing?.expressMultiplier ?? 1.20,
+                        nightStartHour: editSettings.nightStartHour ?? 20,
+                        nightEndHour: editSettings.nightEndHour ?? 6
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                  placeholder="3"
+                />
+                <p className="text-[10px] text-slate-400">Kilomètres inclus dans le tarif de départ.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Prix au Km Supplémentaire (CFA/Km)</label>
+                <input 
+                  type="number" 
+                  value={editSettings.motoPricing?.pricePerKm ?? 150}
+                  onChange={(e) => {
+                    const pricePerKm = parseInt(e.target.value) || 0;
+                    setEditSettings({
+                      ...editSettings, 
+                      motoPricing: {
+                        baseFee: editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500,
+                        baseDistanceKm: editSettings.motoPricing?.baseDistanceKm ?? 3,
+                        pricePerKm,
+                        nightMultiplier: editSettings.motoPricing?.nightMultiplier ?? 1.25,
+                        expressMultiplier: editSettings.motoPricing?.expressMultiplier ?? 1.20,
+                        nightStartHour: editSettings.nightStartHour ?? 20,
+                        nightEndHour: editSettings.nightEndHour ?? 6
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                  placeholder="150"
+                />
+                <p className="text-[10px] text-slate-400">Coût par km au-delà de la distance minimale.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Tarif Forfait Nuit Fixe (CFA)</label>
+                <input 
+                  type="number" 
+                  value={editSettings.nightDeliveryFee ?? 2000}
+                  onChange={(e) => setEditSettings({...editSettings, nightDeliveryFee: parseInt(e.target.value) || 0})}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                  placeholder="2000"
+                />
+                <p className="text-[10px] text-slate-400">Appliqué si majoration en % non sélectionnée.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Coeff. Majoration Nuit (%)</label>
+                <input 
+                  type="number" 
+                  step="0.05"
+                  value={editSettings.motoPricing?.nightMultiplier ?? 1.25}
+                  onChange={(e) => {
+                    const nightMultiplier = parseFloat(e.target.value) || 1;
+                    setEditSettings({
+                      ...editSettings, 
+                      motoPricing: {
+                        baseFee: editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500,
+                        baseDistanceKm: editSettings.motoPricing?.baseDistanceKm ?? 3,
+                        pricePerKm: editSettings.motoPricing?.pricePerKm ?? 150,
+                        nightMultiplier,
+                        expressMultiplier: editSettings.motoPricing?.expressMultiplier ?? 1.20,
+                        nightStartHour: editSettings.nightStartHour ?? 20,
+                        nightEndHour: editSettings.nightEndHour ?? 6
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                  placeholder="1.25 (ex: +25%)"
+                />
+                <p className="text-[10px] text-slate-400">1.25 = +25% sur la course globale.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Coeff. Course Express / Prioritaire (%)</label>
+                <input 
+                  type="number" 
+                  step="0.05"
+                  value={editSettings.motoPricing?.expressMultiplier ?? 1.20}
+                  onChange={(e) => {
+                    const expressMultiplier = parseFloat(e.target.value) || 1;
+                    setEditSettings({
+                      ...editSettings, 
+                      motoPricing: {
+                        baseFee: editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500,
+                        baseDistanceKm: editSettings.motoPricing?.baseDistanceKm ?? 3,
+                        pricePerKm: editSettings.motoPricing?.pricePerKm ?? 150,
+                        nightMultiplier: editSettings.motoPricing?.nightMultiplier ?? 1.25,
+                        expressMultiplier,
+                        nightStartHour: editSettings.nightStartHour ?? 20,
+                        nightEndHour: editSettings.nightEndHour ?? 6
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                  placeholder="1.20 (ex: +20%)"
+                />
+                <p className="text-[10px] text-slate-400">1.20 = +20% si option express cochée.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Heure Début Tarif Nuit</label>
+                <select 
+                  value={editSettings.nightStartHour ?? 20}
+                  onChange={(e) => {
+                    const h = parseInt(e.target.value) || 0;
+                    setEditSettings({
+                      ...editSettings, 
+                      nightStartHour: h,
+                      motoPricing: {
+                        baseFee: editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500,
+                        baseDistanceKm: editSettings.motoPricing?.baseDistanceKm ?? 3,
+                        pricePerKm: editSettings.motoPricing?.pricePerKm ?? 150,
+                        nightMultiplier: editSettings.motoPricing?.nightMultiplier ?? 1.25,
+                        expressMultiplier: editSettings.motoPricing?.expressMultiplier ?? 1.20,
+                        nightStartHour: h,
+                        nightEndHour: editSettings.nightEndHour ?? 6
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                >
+                  {Array.from({length: 24}).map((_, i) => (
+                    <option key={i} value={i}>{i}h00</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Heure Fin Tarif Nuit</label>
+                <select 
+                  value={editSettings.nightEndHour ?? 6}
+                  onChange={(e) => {
+                    const h = parseInt(e.target.value) || 0;
+                    setEditSettings({
+                      ...editSettings, 
+                      nightEndHour: h,
+                      motoPricing: {
+                        baseFee: editSettings.motoPricing?.baseFee ?? editSettings.dayDeliveryFee ?? 500,
+                        baseDistanceKm: editSettings.motoPricing?.baseDistanceKm ?? 3,
+                        pricePerKm: editSettings.motoPricing?.pricePerKm ?? 150,
+                        nightMultiplier: editSettings.motoPricing?.nightMultiplier ?? 1.25,
+                        expressMultiplier: editSettings.motoPricing?.expressMultiplier ?? 1.20,
+                        nightStartHour: editSettings.nightStartHour ?? 20,
+                        nightEndHour: h
+                      }
+                    });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-3.5 font-bold text-sm focus:ring-2 focus:ring-sky-500/20 transition-all"
+                >
+                  {Array.from({length: 24}).map((_, i) => (
+                    <option key={i} value={i}>{i}h00</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Simulatation rapide en direct */}
+            <div className="p-5 bg-sky-50/60 rounded-3xl border border-sky-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-sky-950 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Truck size={14} /> Simulation du Calculateur en Direct
+                </h4>
+                <span className="text-[10px] bg-sky-200/60 text-sky-900 font-bold px-2 py-0.5 rounded-full">Test Administrateur</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-bold text-slate-700">
+                <div className="bg-white p-3.5 rounded-2xl border border-sky-100">
+                  <p className="text-[10px] text-slate-400 uppercase">Course Exemple (7.5 km Jour)</p>
+                  <p className="text-sm font-black text-slate-900 mt-1">
+                    {Math.ceil(( (editSettings.motoPricing?.baseFee || 500) + Math.max(0, 7.5 - (editSettings.motoPricing?.baseDistanceKm || 3)) * (editSettings.motoPricing?.pricePerKm || 150) ) / 25) * 25} FCFA
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">500 CFA + 4.5km × 150 CFA</p>
+                </div>
+                <div className="bg-white p-3.5 rounded-2xl border border-sky-100">
+                  <p className="text-[10px] text-slate-400 uppercase">Course Nuit (7.5 km Nuit)</p>
+                  <p className="text-sm font-black text-amber-600 mt-1">
+                    {Math.ceil(( ((editSettings.motoPricing?.baseFee || 500) + Math.max(0, 7.5 - (editSettings.motoPricing?.baseDistanceKm || 3)) * (editSettings.motoPricing?.pricePerKm || 150)) * (editSettings.motoPricing?.nightMultiplier || 1.25) ) / 25) * 25} FCFA
+                  </p>
+                  <p className="text-[10px] text-amber-600/80 mt-0.5">Avec majoration nuit (+{Math.round(((editSettings.motoPricing?.nightMultiplier || 1.25) - 1)*100)}%)</p>
+                </div>
+                <div className="bg-white p-3.5 rounded-2xl border border-sky-100">
+                  <p className="text-[10px] text-slate-400 uppercase">Course Nuit + Express (7.5 km)</p>
+                  <p className="text-sm font-black text-emerald-600 mt-1">
+                    {Math.ceil(( ((editSettings.motoPricing?.baseFee || 500) + Math.max(0, 7.5 - (editSettings.motoPricing?.baseDistanceKm || 3)) * (editSettings.motoPricing?.pricePerKm || 150)) * (editSettings.motoPricing?.nightMultiplier || 1.25) * (editSettings.motoPricing?.expressMultiplier || 1.20) ) / 25) * 25} FCFA
+                  </p>
+                  <p className="text-[10px] text-emerald-600/80 mt-0.5">Majoration Nuit + Option Express</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 7. Mode Maintenance & Sécurité */}
+          <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-sm border border-slate-200/80 space-y-6">
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-100">
+              <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-600 shrink-0 border border-rose-100">
                 <Power size={24} />
               </div>
               <div>
-                <h3 className="text-xl font-bold">Mode Maintenance</h3>
-                <p className="text-sm text-slate-500">Désactiver l'accès public à l'application.</p>
+                <h3 className="text-lg font-black text-slate-900">Mode Maintenance & Restauration</h3>
+                <p className="text-xs text-slate-500">Verrouillage temporaire de la plateforme et opérations système.</p>
               </div>
             </div>
 
             <div className="space-y-6">
-              <div className="flex items-center justify-between p-4 bg-red-50 rounded-2xl border border-red-100">
+              <div className="flex items-center justify-between p-5 bg-rose-50/60 rounded-2xl border border-rose-200/60">
                 <div>
-                  <p className="font-bold text-sm text-red-900">Activer la maintenance</p>
-                  <p className="text-xs text-red-700">Seuls les administrateurs pourront se connecter</p>
+                  <h4 className="font-bold text-rose-950 text-sm">Activer le Mode Maintenance</h4>
+                  <p className="text-xs text-rose-800/80">Bloquer temporairement les accès grand public (Web & Mobile).</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input 
@@ -4620,67 +4665,35 @@ export const AdminDashboard = React.memo(({ profile, settings }: { profile: User
                     checked={editSettings.maintenanceMode || false}
                     onChange={(e) => setEditSettings({...editSettings, maintenanceMode: e.target.checked})}
                   />
-                  <div className="w-11 h-6 bg-red-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-red-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                  <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-600"></div>
                 </label>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase">Message de maintenance</label>
-                <textarea 
-                  value={editSettings.maintenanceMessage || ''}
-                  onChange={(e) => setEditSettings({...editSettings, maintenanceMessage: e.target.value})}
-                  className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold focus:ring-2 focus:ring-red-500/20 transition-all resize-none h-24"
-                  placeholder="Plateforme en maintenance..."
-                />
-              </div>
+              {editSettings.maintenanceMode && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                  <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">Message d'information aux utilisateurs</label>
+                  <textarea 
+                    value={editSettings.maintenanceMessage || ''}
+                    onChange={(e) => setEditSettings({...editSettings, maintenanceMessage: e.target.value})}
+                    className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-4 font-bold text-sm focus:ring-2 focus:ring-rose-500/20 transition-all h-24 resize-none"
+                    placeholder="Plateforme actuellement en maintenance pour mise à jour..."
+                  />
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="bg-rose-50 p-8 rounded-[2.5rem] border border-rose-100 mb-8">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-12 h-12 bg-rose-100 rounded-2xl flex items-center justify-center text-rose-600">
-                <Trash2 size={24} />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-rose-900">Zone de Danger</h3>
-                <p className="text-xs text-rose-600">Actions irréversibles pour la maintenance de la plateforme.</p>
-              </div>
-            </div>
-            
-            <div className="bg-white p-6 rounded-3xl border border-rose-100 flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="flex-1">
-                <h4 className="font-bold text-slate-900">Réinitialisation Complète (Hard Reset)</h4>
-                <p className="text-xs text-slate-500 mt-1">Supprime toutes les commandes, ordonnances, transactions et remet tous les gains à zéro.</p>
-              </div>
-              <button 
-                onClick={handleHardReset}
-                disabled={isResetting}
-                className="px-8 py-4 bg-rose-600 text-white rounded-2xl font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-600/20 disabled:opacity-50 flex items-center gap-2"
-              >
-                {isResetting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Réinitialisation...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={20} />
-                    Hard Reset
-                  </>
-                )}
-              </button>
-            </div>
+          {/* Enregistrer Bottom Button */}
+          <div className="pt-4 pb-12">
+            <button 
+              onClick={handleSaveSettings}
+              disabled={saving}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-wider transition-all shadow-xl shadow-emerald-900/10 flex items-center justify-center gap-2 active:scale-98 disabled:opacity-50"
+            >
+              {saving ? "Enregistrement en cours..." : "Enregistrer l'ensemble de la Configuration Backoffice"}
+            </button>
           </div>
-
-          <button 
-            onClick={handleSaveSettings}
-            disabled={saving}
-            className="w-full bg-primary text-white py-4 rounded-2xl font-bold hover:bg-primary-dark transition-all shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
-          >
-            {saving ? "Enregistrement..." : "Enregistrer tous les paramètres"}
-          </button>
         </div>
-        </>
       )}
             </motion.div>
           </AnimatePresence>

@@ -42,11 +42,13 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { VirtualListItem } from './components/VirtualListItem';
+import { PaginatedList } from './components/PaginatedTable';
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 const ReportsView = lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
 const MapComponent = lazy(() => import('./components/MapComponent'));
 const OrderChat = lazy(() => import('./components/OrderChat').then(m => ({ default: m.OrderChat })));
 const Legal = lazy(() => import('./components/Legal').then(m => ({ default: m.Legal })));
+const ShowcaseLanding = lazy(() => import('./components/ShowcaseLanding').then(m => ({ default: m.ShowcaseLanding })));
 import { getToken, onMessage } from 'firebase/messaging';
 import { UserProfile, Prescription, Order, UserRole, Pharmacy, Settings, Transaction, WithdrawalRequest, City, OnCallRotation, Announcement } from './types';
 import { 
@@ -97,9 +99,12 @@ import {
   Mic,
   FlaskConical,
   CheckCircle2,
+  Lock,
   Home,
   Info,
-  Mail, PhoneCall, Volume2, VolumeX
+  Sparkles,
+  Printer,
+  Mail, PhoneCall, Volume2, VolumeX, Sun, Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -181,59 +186,186 @@ const extractErrorMsg = (data: any, defaultMsg: string): string => {
   return defaultMsg;
 };
 
-const generateInvoice = (order: Order, profile: UserProfile) => {
+const loadImageAsBase64 = (url: string): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width || 300;
+        canvas.height = img.naturalHeight || img.height || 300;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+          return;
+        }
+      } catch (e) {
+        console.warn("Canvas export failed", e);
+      }
+      resolve('');
+    };
+    img.onerror = () => {
+      resolve('');
+    };
+    img.src = url;
+  });
+};
+
+const generateInvoice = async (order: Order, profile: UserProfile) => {
   const doc = new jsPDF();
   
-  // Custom styling elements
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.rect(0, 0, 210, 45, 'F');
-  
-  // Header
-  doc.setFontSize(26);
+  // Try loading logo
+  let logoDataUrl = '';
+  try {
+    logoDataUrl = await loadImageAsBase64('/logoOD.png');
+    if (!logoDataUrl) {
+      logoDataUrl = await loadImageAsBase64('/logo-web.png');
+    }
+  } catch (e) {
+    console.warn("Logo loading error for PDF", e);
+  }
+
+  // 1. Top Decorative Brand Bar
+  doc.setFillColor(5, 150, 105); // Emerald-600
+  doc.rect(0, 0, 210, 4, 'F');
+
+  // Header Background
+  doc.setFillColor(248, 250, 252); // Slate-50
+  doc.rect(0, 4, 210, 44, 'F');
+
+  // 2. Add Logo (Left Side)
+  let textStartX = 14;
+  if (logoDataUrl) {
+    try {
+      // Draw a white rounded box behind logo for contrast
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(14, 8, 30, 30, 3, 3, 'FD');
+      doc.addImage(logoDataUrl, 'PNG', 16, 10, 26, 26);
+      textStartX = 48;
+    } catch (e) {
+      console.warn("Could not render logo in jsPDF", e);
+      textStartX = 14;
+    }
+  }
+
+  // Brand Name & Subtitle
+  doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(16, 185, 129); // emerald-600
-  doc.text("FACTURE", 14, 25);
-  
-  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42); // slate-900
+  doc.text("Ordonnance Direct", textStartX, 18);
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(5, 150, 105); // emerald-600
+  doc.text("BURKINA FASO", textStartX, 23);
+
+  doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(100);
-  doc.text(`Réf: #${order.id.slice(-8).toUpperCase()}`, 14, 33);
-  
+  doc.setTextColor(100, 116, 139); // slate-500
+  doc.text("Plateforme Nationale de Télé-exécution d'Ordonnances", textStartX, 28);
+  doc.text("Tél: +226 70 00 00 00 • Support: contact@ordonnance-direct.bf", textStartX, 33);
+
+  // 3. Invoice Title & Metadata (Right Side)
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(5, 150, 105);
+  doc.text("FACTURE", 196, 18, { align: 'right' });
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Réf: #${order.id.slice(-8).toUpperCase()}`, 196, 24, { align: 'right' });
+
   let orderDateStr = "Date inconnue";
   try {
     if (order.createdAt) {
-      // Handle Firebase Timestamp or fallback to standard Date parsing
       const d = (order.createdAt as any).toDate ? (order.createdAt as any).toDate() : new Date(order.createdAt as any);
       if (!isNaN(d.getTime())) {
         orderDateStr = d.toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       }
     }
   } catch (e) {}
-  doc.text(`Date: ${orderDateStr}`, 14, 38);
-  
-  // Patient & Pharmacy Info Area
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(50);
-  doc.text("Facturé à :", 14, 55);
+
+  doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(80);
-  doc.text(profile.name || "Client", 14, 62);
-  if (profile.phone) doc.text(profile.phone, 14, 67);
-  if (profile.email) doc.text(profile.email, 14, 72);
-  
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Date: ${orderDateStr}`, 196, 29, { align: 'right' });
+
+  // Paid Status Pill
+  doc.setFillColor(209, 250, 229); // emerald-100
+  doc.setDrawColor(167, 243, 208); // emerald-200
+  doc.roundedRect(148, 33, 48, 8, 2, 2, 'FD');
+
+  doc.setFontSize(8.5);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(50);
-  doc.text("Émis par (Pharmacie) :", 110, 55);
+  doc.setTextColor(4, 120, 87); // emerald-800
+  doc.text("PAIEMENT CONFIRMÉ", 172, 38.5, { align: 'center' });
+
+  // 4. Horizontal Separator
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(14, 52, 196, 52);
+
+  // 5. Billing & Issuer Info Cards
+  // Client Card
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, 57, 88, 34, 3, 3, 'FD');
+
+  doc.setFillColor(241, 245, 249); // slate-100 header
+  doc.roundedRect(14, 57, 88, 8, 3, 3, 'F');
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(51, 65, 85);
+  doc.text("CLIENT (FACTURÉ À)", 18, 62.5);
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(15, 23, 42);
+  doc.text(profile.name || "Client", 18, 70);
+
+  doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(80);
-  doc.text(order.pharmacyName || "Pharmacie Partenaire", 110, 62);
-  doc.text("Ordonnance Direct - Burkina Faso", 110, 67);
-  
-  // Items Table
-  const tableColumn = ["Désignation", "Prix Unitaire", "Quantité", "Total"];
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Téléphone: ${profile.phone || "Non spécifié"}`, 18, 75);
+  doc.text(`Email: ${profile.email || "Non spécifié"}`, 18, 80);
+  const deliveryAddr = order.deliveryAddress || order.landmark || order.hospitalLocation;
+  if (deliveryAddr) {
+    const trimmedAddress = deliveryAddr.length > 38 ? deliveryAddr.substring(0, 35) + '...' : deliveryAddr;
+    doc.text(`Livraison: ${trimmedAddress}`, 18, 85);
+  }
+
+  // Issuer Card
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(108, 57, 88, 34, 3, 3, 'FD');
+
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(108, 57, 88, 8, 3, 3, 'F');
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(51, 65, 85);
+  doc.text("PHARMACIE ÉMETTRICE", 112, 62.5);
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(15, 23, 42);
+  doc.text(order.pharmacyName || "Pharmacie Partenaire", 112, 70);
+
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Ville: ${order.cityName || "Burkina Faso"}`, 112, 75);
+  doc.text("Réseau Agréé Ordonnance Direct", 112, 80);
+  doc.text(`Paiement: ${order.paymentMethod || "Mobile Money / Wallet"}`, 112, 85);
+
+  // 6. Items Table
+  const tableColumn = ["Désignation / Médicaments", "Prix Unitaire", "Qté", "Total (FCFA)"];
   const tableRows: any[] = [];
-  
+
   if (order.items && order.items.length > 0) {
     order.items.forEach(item => {
       const itemData = [
@@ -245,69 +377,105 @@ const generateInvoice = (order: Order, profile: UserProfile) => {
       tableRows.push(itemData);
     });
   } else {
-    tableRows.push(["Commande globale", "-", "-", `${(order.medicationTotal || 0).toLocaleString('fr-FR')} FCFA`]);
+    tableRows.push(["Commande d'ordonnance complète", "-", "-", `${(order.medicationTotal || 0).toLocaleString('fr-FR')} FCFA`]);
   }
-  
+
   // @ts-ignore
   autoTable(doc, {
-    startY: 85,
+    startY: 97,
     head: [tableColumn],
     body: tableRows,
     theme: 'grid',
-    headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold' },
-    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: {
+      fillColor: [5, 150, 105], // emerald-600
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 9,
+      cellPadding: 5
+    },
+    styles: {
+      fontSize: 8.5,
+      cellPadding: 5,
+      textColor: [30, 41, 59]
+    },
+    columnStyles: {
+      0: { cellWidth: 95 },
+      1: { halign: 'right', cellWidth: 32 },
+      2: { halign: 'center', cellWidth: 15 },
+      3: { halign: 'right', cellWidth: 40, fontStyle: 'bold' }
+    },
     alternateRowStyles: { fillColor: [248, 250, 252] },
-    margin: { top: 10, left: 14, right: 14 }
+    margin: { left: 14, right: 14 }
   });
-  
-  // Totals
+
   // @ts-ignore
-  const finalY = doc.lastAutoTable?.finalY || 85;
-  
-  // Background for totals block
-  doc.setFillColor(248, 250, 252);
-  doc.rect(96, finalY + 10, 100, 50, 'F');
-  
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(80);
-  
-  let currentY = finalY + 20;
-  
-  doc.text("Sous-total Médicaments :", 102, currentY);
-  doc.text(`${(order.medicationTotal || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
-  currentY += 8;
-  
-  if (order.deliveryFee) {
-    doc.text("Frais de Livraison :", 102, currentY);
-    doc.text(`${(order.deliveryFee).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
-    currentY += 8;
-  }
-  
-  if (order.serviceFee) {
-    doc.text("Frais de Service :", 102, currentY);
-    doc.text(`${(order.serviceFee).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
-    currentY += 8;
-  }
-  
-  // Separator line
-  doc.setDrawColor(200, 200, 200);
-  doc.line(102, currentY - 3, 190, currentY - 3);
-  
-  currentY += 5;
-  doc.setFontSize(14);
+  const finalY = doc.lastAutoTable?.finalY || 100;
+
+  // 7. Security Stamp / Verification Box (Left)
+  doc.setFillColor(240, 253, 244); // emerald-50
+  doc.setDrawColor(187, 247, 208); // emerald-200
+  doc.roundedRect(14, finalY + 8, 88, 44, 3, 3, 'FD');
+
+  doc.setFontSize(8.5);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(16, 185, 129);
-  doc.text("TOTAL PAYÉ :", 102, currentY);
+  doc.setTextColor(4, 120, 87);
+  doc.text("CERTIFICAT DE CONFORMITÉ", 18, finalY + 15);
+
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(71, 85, 105);
+  doc.text("• Document officiel généré informatiquement.", 18, finalY + 22);
+  doc.text("• Certifié conforme aux normes pharmaceutiques.", 18, finalY + 27);
+  doc.text("• Paiement sécurisé via réseau Agréé.", 18, finalY + 32);
+  doc.text(`• ID Sécurité: OD-BF-${order.id.slice(-10).toUpperCase()}`, 18, finalY + 37);
+  doc.text("• Conserver ce reçu pour tout remboursement.", 18, finalY + 42);
+
+  // 8. Totals Breakdown Box (Right)
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(108, finalY + 8, 88, 44, 3, 3, 'FD');
+
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(100, 116, 139);
+
+  let currentY = finalY + 16;
+  doc.text("Sous-total Médicaments :", 112, currentY);
+  doc.text(`${(order.medicationTotal || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
+
+  if (order.deliveryFee !== undefined) {
+    currentY += 6;
+    doc.text("Frais de Livraison :", 112, currentY);
+    doc.text(`${(order.deliveryFee || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
+  }
+
+  if (order.serviceFee !== undefined) {
+    currentY += 6;
+    doc.text("Frais de Service :", 112, currentY);
+    doc.text(`${(order.serviceFee || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
+  }
+
+  currentY += 5;
+  doc.setDrawColor(203, 213, 225);
+  doc.line(112, currentY, 192, currentY);
+
+  currentY += 7;
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(5, 150, 105);
+  doc.text("TOTAL PAYÉ :", 112, currentY);
   doc.text(`${(order.totalAmount || 0).toLocaleString('fr-FR')} FCFA`, 190, currentY, { align: 'right' });
-  
-  // Footer
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "italic");
-  doc.setTextColor(150);
-  doc.text("Document généré informatiquement par Ordonnance Direct.", 105, 275, { align: 'center' });
-  doc.text("Merci de votre confiance !", 105, 280, { align: 'center' });
-  
+
+  // 9. Page Footer
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(148, 163, 184);
+  doc.setDrawColor(226, 232, 240);
+  doc.line(14, 280, 196, 280);
+
+  doc.text("Ordonnance Direct - Plateforme de Télé-exécution Médicale • Burkina Faso", 105, 285, { align: 'center' });
+  doc.text("Merci pour votre confiance ! Pour toute réclamation : support@ordonnance-direct.bf", 105, 289, { align: 'center' });
+
   doc.save(`Facture_${order.id.slice(-6).toUpperCase()}.pdf`);
 };
 
@@ -466,25 +634,22 @@ const StatusTrace = React.memo(({ history, defaultExpanded = false }: { history?
   );
 });
 
-const LogoIcon = React.memo(({ size = 24, className = "" }: { size?: number, className?: string }) => (
-  <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
-    <img 
-      src="/logo-web.png" 
-      alt="Ordonnance Direct Logo" 
-      className="w-full h-full object-contain rounded-full"
-      onError={(e) => {
-        // Fallback to old cross icon if image is missing
-        e.currentTarget.style.display = 'none';
-        const svg = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="${className}"><rect width="100" height="100" rx="24" fill="#10b981" /><path d="M35 25C35 22.2386 37.2386 20 40 20H60C62.7614 20 65 22.2386 65 25V75C65 77.7614 62.7614 80 60 80H40C37.2386 80 35 77.7614 35 75V25Z" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M42 20V25H58V20" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M30 50H70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M50 30V70" stroke="white" strokeWidth="12" strokeLinecap="round"/><path d="M35 75V85H65L75 75" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/><path d="M65 85L75 75L65 65" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/></svg>`;
-        if (e.currentTarget.parentElement) {
-          const div = document.createElement('div');
-          div.innerHTML = svg;
-          e.currentTarget.parentElement.appendChild(div.firstChild!);
-        }
-      }}
-    />
-  </div>
-));
+const LogoIcon = React.memo(({ size = 32, className = "", logoUrl }: { size?: number, className?: string, logoUrl?: string }) => {
+  const finalLogo = logoUrl || "/logoOD.png";
+  return (
+    <div style={{ width: size, height: size }} className={`flex items-center justify-center shrink-0 ${className}`}>
+      <img 
+        src={finalLogo} 
+        alt="Ordonnance Direct Logo" 
+        className="w-full h-full object-contain"
+        onError={(e) => {
+          // Fallback
+          e.currentTarget.src = "/logoOD.png";
+        }}
+      />
+    </div>
+  );
+});
 
 function NotificationBell({ userId, profile }: { userId: string, profile?: UserProfile | null }) {
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -629,6 +794,931 @@ const BURKINA_HOSPITALS = [
   "CHR de Tenkodogo"
 ].sort();
 
+const adjustColor = (hex: string, percent: number): string => {
+  try {
+    if (!hex || hex[0] !== '#') return hex;
+    const cleanHex = hex.replace('#', '');
+    let r = parseInt(cleanHex.substring(0, 2), 16);
+    let g = parseInt(cleanHex.substring(2, 4), 16);
+    let b = parseInt(cleanHex.length === 3 ? cleanHex.substring(2, 3) : cleanHex.substring(4, 6), 16);
+    if (cleanHex.length === 3) {
+      r = parseInt(cleanHex[0] + cleanHex[0], 16);
+      g = parseInt(cleanHex[1] + cleanHex[1], 16);
+      b = parseInt(cleanHex[2] + cleanHex[2], 16);
+    }
+
+    r = Math.max(0, Math.min(255, r + percent));
+    g = Math.max(0, Math.min(255, g + percent));
+    b = Math.max(0, Math.min(255, b + percent));
+
+    const rHex = r.toString(16).padStart(2, '0');
+    const gHex = g.toString(16).padStart(2, '0');
+    const bHex = b.toString(16).padStart(2, '0');
+
+    return `#${rHex}${gHex}${bHex}`;
+  } catch (e) {
+    return hex;
+  }
+};
+
+const DynamicTheme = ({ settings }: { settings: Settings | null }) => {
+  if (!settings) return null;
+  
+  const theme = settings.themeType || 'default';
+  
+  let primary = '#059669'; // Default emerald-600
+  let secondary = '#10b981'; // Default emerald-500
+  
+  if (theme === 'christmas') {
+    primary = '#dc2626'; // Rouge Noël
+    secondary = '#15803d'; // Vert Sapin
+  } else if (theme === 'new-year') {
+    primary = '#d97706'; // Or ambré
+    secondary = '#1e293b'; // Noir ardoise
+  } else if (theme === 'valentine') {
+    primary = '#db2777'; // Rose
+    secondary = '#ec4899'; // Rose vif
+  } else if (theme === 'ocean') {
+    primary = '#0284c7'; // Bleu ciel pro
+    secondary = '#1e3a8a'; // Bleu marine
+  } else if (theme === 'royal') {
+    primary = '#7c3aed'; // Violet
+    secondary = '#5b21b6'; // Violet foncé
+  } else if (theme === 'orange') {
+    primary = '#ea580c'; // Orange
+    secondary = '#9a3412'; // Orange foncé
+  } else if (theme === 'rainy') {
+    primary = '#0284c7'; // Bleu pluie
+    secondary = '#0369a1';
+  } else if (theme === 'harmattan') {
+    primary = '#b45309'; // Sable ocre
+    secondary = '#d97706';
+  } else if (theme === 'ramadan') {
+    primary = '#047857'; // Vert émeraude
+    secondary = '#d97706'; // Or
+  } else if (theme === 'burkina') {
+    primary = '#059669'; // Vert patriotique
+    secondary = '#dc2626'; // Rouge patriotique
+  } else if (theme === 'spring') {
+    primary = '#ec4899'; // Cerisier
+    secondary = '#f472b6';
+  } else if (theme === 'custom' && settings.primaryColor) {
+    primary = settings.primaryColor;
+    secondary = settings.secondaryColor || settings.primaryColor;
+  } else {
+    // Respect custom colors if set in settings even if theme is standard default
+    if (settings.primaryColor) {
+      primary = settings.primaryColor;
+      secondary = settings.secondaryColor || settings.primaryColor;
+    }
+  }
+
+  const dark = adjustColor(primary, -25);
+  const light = adjustColor(primary, 235);
+  const mediumLight = adjustColor(primary, 215);
+  const borderCol = adjustColor(primary, 195);
+  const hoverPrimary = adjustColor(primary, -15);
+  const hoverSecondary = adjustColor(secondary, -15);
+
+  // Synchronize Mobile & Web platform metadata in real-time
+  useEffect(() => {
+    try {
+      // 1. Dynamic document title
+      const titleSuffix = settings.countryName || settings.appTagline || 'Plateforme Médicale';
+      document.title = settings.appName ? `${settings.appName} | ${titleSuffix}` : `Ordonnance Direct | ${titleSuffix}`;
+
+      // 2. Mobile Browser & PWA theme-color meta tag
+      let themeMeta = document.querySelector('meta[name="theme-color"]');
+      if (!themeMeta) {
+        themeMeta = document.createElement('meta');
+        themeMeta.setAttribute('name', 'theme-color');
+        document.head.appendChild(themeMeta);
+      }
+      themeMeta.setAttribute('content', primary);
+
+      // 3. Apple Mobile Web App status bar & title
+      let appleStatusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (!appleStatusBar) {
+        appleStatusBar = document.createElement('meta');
+        appleStatusBar.setAttribute('name', 'apple-mobile-web-app-status-bar-style');
+        document.head.appendChild(appleStatusBar);
+      }
+      appleStatusBar.setAttribute('content', 'default');
+
+      let appleAppTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+      if (!appleAppTitle) {
+        appleAppTitle = document.createElement('meta');
+        appleAppTitle.setAttribute('name', 'apple-mobile-web-app-title');
+        document.head.appendChild(appleAppTitle);
+      }
+      appleAppTitle.setAttribute('content', settings.appName || 'Ordonnance Direct');
+
+      // 4. Dynamic Favicon and Apple Touch Icon
+      const logoUrl = settings.appLogoUrl || '/logoOD.png';
+      let favIcon = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
+      if (favIcon) {
+        favIcon.href = logoUrl;
+      }
+      let appleIcon = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement | null;
+      if (appleIcon) {
+        appleIcon.href = logoUrl;
+      }
+
+      // 5. Dynamic Web App Manifest injection (Updates mobile PWA install metadata in real-time)
+      const dynamicManifest = {
+        name: settings.appName || 'Ordonnance Direct',
+        short_name: settings.appName || 'Ordonnance Direct',
+        description: settings.appTagline || 'Plateforme de commande et livraison express de médicaments et ordonnances',
+        start_url: '/',
+        display: 'standalone',
+        background_color: '#ffffff',
+        theme_color: primary,
+        icons: [
+          {
+            src: logoUrl,
+            sizes: '192x192 512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
+          }
+        ]
+      };
+      const manifestBlob = new Blob([JSON.stringify(dynamicManifest)], { type: 'application/json' });
+      const manifestUrl = URL.createObjectURL(manifestBlob);
+      let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+      if (!manifestLink) {
+        manifestLink = document.createElement('link');
+        manifestLink.setAttribute('rel', 'manifest');
+        document.head.appendChild(manifestLink);
+      }
+      manifestLink.href = manifestUrl;
+
+      // 6. Cache branding in LocalStorage for 0ms cold-start on mobile applications
+      localStorage.setItem('cached_app_branding', JSON.stringify(settings));
+
+      // 7. Post Message to Mobile Bridges (Capacitor / Cordova / React Native / Android Native WebView)
+      const brandingPayload = {
+        type: 'OD_BRANDING_SYNC',
+        appName: settings.appName,
+        appTagline: settings.appTagline,
+        countryName: settings.countryName,
+        appLogoUrl: settings.appLogoUrl,
+        primaryColor: primary,
+        secondaryColor: secondary,
+        themeType: settings.themeType,
+        effectType: settings.effectType,
+        effectsIntensity: settings.effectsIntensity,
+        decorationsEnabled: settings.decorationsEnabled
+      };
+
+      // Native Webview bridges
+      if ((window as any).ReactNativeWebView) {
+        (window as any).ReactNativeWebView.postMessage(JSON.stringify(brandingPayload));
+      }
+      if ((window as any).Capacitor?.Plugins?.StatusBar) {
+        (window as any).Capacitor.Plugins.StatusBar.setBackgroundColor({ color: primary }).catch(() => {});
+      }
+      if ((window as any).android?.onBrandingChanged) {
+        (window as any).android.onBrandingChanged(JSON.stringify(brandingPayload));
+      }
+
+      // Broadcast channel for multi-tab/multi-window synchronization
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('od_branding_sync_channel');
+        bc.postMessage(brandingPayload);
+        bc.close();
+      }
+
+      // Dispatch window event
+      window.dispatchEvent(new CustomEvent('app:brandingUpdated', { detail: brandingPayload }));
+    } catch (e) {
+      console.warn('[DynamicTheme] Sync error:', e);
+    }
+  }, [settings, primary, secondary]);
+
+  return (
+    <style dangerouslySetInnerHTML={{ __html: `
+      :root {
+        --theme-primary: ${primary};
+        --theme-secondary: ${secondary};
+        --theme-dark: ${dark};
+        --theme-light: ${light};
+        --theme-medium-light: ${mediumLight};
+        --theme-border: ${borderCol};
+        --primary: ${primary};
+        --primary-hover: ${hoverPrimary};
+        --primary-light: ${light};
+        --primary-medium: ${mediumLight};
+        --primary-border: ${borderCol};
+        --primary-dark: ${dark};
+      }
+      
+      /* Core primary overrides */
+      .text-primary { color: ${primary} !important; }
+      .bg-primary { background-color: ${primary} !important; }
+      .border-primary { border-color: ${primary} !important; }
+      .hover\\:bg-primary:hover { background-color: ${hoverPrimary} !important; }
+      .hover\\:text-primary:hover { color: ${primary} !important; }
+      .hover\\:bg-primary-dark:hover { background-color: ${dark} !important; }
+      .hover\\:bg-primary\\/5:hover { background-color: ${primary}0d !important; }
+      .hover\\:bg-primary\\/10:hover { background-color: ${primary}1a !important; }
+      .hover\\:bg-primary\\/20:hover { background-color: ${primary}33 !important; }
+      
+      /* Background overrides */
+      .bg-emerald-50 { background-color: ${light} !important; }
+      .bg-emerald-100 { background-color: ${mediumLight} !important; }
+      .bg-emerald-200 { background-color: ${borderCol} !important; }
+      .bg-emerald-500 { background-color: ${secondary} !important; }
+      .bg-emerald-600 { background-color: ${primary} !important; }
+      .bg-emerald-700 { background-color: ${dark} !important; }
+      .bg-emerald-800 { background-color: ${dark}ee !important; }
+
+      /* Gradient stops overrides */
+      .from-emerald-500 { --tw-gradient-from: ${secondary} var(--tw-gradient-from-position) !important; --tw-gradient-to: ${secondary}00 var(--tw-gradient-to-position) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important; }
+      .to-emerald-600 { --tw-gradient-to: ${primary} var(--tw-gradient-to-position) !important; }
+      .to-teal-600 { --tw-gradient-to: ${dark} var(--tw-gradient-to-position) !important; }
+      .from-emerald-600 { --tw-gradient-from: ${primary} var(--tw-gradient-from-position) !important; --tw-gradient-to: ${primary}00 var(--tw-gradient-to-position) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important; }
+      
+      /* Text overrides */
+      .text-emerald-500 { color: ${secondary} !important; }
+      .text-emerald-600 { color: ${primary} !important; }
+      .text-emerald-700 { color: ${dark} !important; }
+      .text-emerald-800 { color: ${dark} !important; }
+      
+      /* Border overrides */
+      .border-emerald-100 { border-color: ${mediumLight} !important; }
+      .border-emerald-200 { border-color: ${borderCol} !important; }
+      .border-emerald-500 { border-color: ${secondary} !important; }
+      .border-emerald-600 { border-color: ${primary} !important; }
+      .border-emerald-700 { border-color: ${dark} !important; }
+      
+      /* Hover states */
+      .hover\\:bg-emerald-50:hover { background-color: ${light} !important; }
+      .hover\\:bg-emerald-100:hover { background-color: ${mediumLight} !important; }
+      .hover\\:bg-emerald-500:hover { background-color: ${secondary} !important; }
+      .hover\\:bg-emerald-600:hover { background-color: ${primary} !important; }
+      .hover\\:bg-emerald-700:hover { background-color: ${dark} !important; }
+      
+      .hover\\:text-emerald-600:hover { color: ${primary} !important; }
+      .hover\\:text-emerald-700:hover { color: ${dark} !important; }
+      
+      /* Ring and focus overrides */
+      .focus\\:ring-emerald-500:focus { --tw-ring-color: ${secondary} !important; }
+      .focus\\:border-emerald-500:focus { border-color: ${secondary} !important; }
+      .ring-emerald-500 { --tw-ring-color: ${secondary} !important; }
+      
+      /* Shadows */
+      .shadow-emerald-500\\/10 { box-shadow: 0 10px 15px -3px ${primary}1a, 0 4px 6px -4px ${primary}1a !important; }
+      .shadow-emerald-500\\/20 { box-shadow: 0 10px 25px -5px ${primary}33, 0 8px 10px -6px ${primary}33 !important; }
+      .shadow-emerald-500\\/25 { box-shadow: 0 20px 25px -5px ${primary}40, 0 8px 10px -6px ${primary}40 !important; }
+    `}} />
+  );
+};
+
+const Ornaments = ({ theme }: { theme: string | undefined }) => {
+  if (!theme || theme === 'default') return null;
+  
+  if (theme === 'christmas') {
+    return (
+      <div className="fixed top-0 inset-x-0 pointer-events-none z-[60] flex justify-between px-3 sm:px-12 select-none">
+        <div className="flex flex-col items-center animate-[bounce_3s_infinite_alternate]" style={{ transformOrigin: 'top center' }}>
+          <div className="w-0.5 h-12 sm:h-16 bg-slate-300" />
+          <div className="w-9 h-9 sm:w-11 sm:h-11 bg-gradient-to-br from-red-500 to-red-700 rounded-full border-2 border-red-300 shadow-lg flex items-center justify-center text-sm text-white">🎄</div>
+        </div>
+        <div className="hidden md:flex gap-12 lg:gap-20">
+          <div className="flex flex-col items-center animate-[bounce_4s_infinite_alternate]" style={{ animationDelay: '0.4s' }}>
+            <div className="w-0.5 h-10 bg-slate-300" />
+            <div className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-full border-2 border-emerald-300 shadow-lg flex items-center justify-center text-xs">🔔</div>
+          </div>
+          <div className="flex flex-col items-center animate-[bounce_5s_infinite_alternate]" style={{ animationDelay: '0.9s' }}>
+            <div className="w-0.5 h-16 bg-slate-300" />
+            <div className="w-10 h-10 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-full border-2 border-yellow-200 shadow-lg flex items-center justify-center text-sm">⭐</div>
+          </div>
+        </div>
+        <div className="flex flex-col items-center animate-[bounce_3.5s_infinite_alternate]" style={{ transformOrigin: 'top center', animationDelay: '0.2s' }}>
+          <div className="w-0.5 h-14 sm:h-18 bg-slate-300" />
+          <div className="w-9 h-9 sm:w-11 sm:h-11 bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-full border-2 border-emerald-300 shadow-lg flex items-center justify-center text-sm text-white">❄</div>
+        </div>
+      </div>
+    );
+  }
+  
+  if (theme === 'new-year') {
+    return (
+      <div className="fixed top-0 inset-x-0 pointer-events-none z-[60] flex justify-center select-none pt-2 sm:pt-3">
+        <motion.div 
+          initial={{ y: -50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 120 }}
+          className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 border-2 border-yellow-200 shadow-xl px-5 sm:px-8 py-1.5 sm:py-2 rounded-full flex items-center gap-2"
+        >
+          <span className="text-xs sm:text-sm font-black text-slate-950 tracking-wider">✨ Bonne Année 2026 ! ✨</span>
+        </motion.div>
+      </div>
+    );
+  }
+  
+  if (theme === 'valentine') {
+    return (
+      <div className="fixed top-0 inset-x-0 pointer-events-none z-[60] flex justify-between px-4 sm:px-16 select-none">
+        <div className="flex flex-col items-center animate-[bounce_2.5s_infinite_alternate]">
+          <div className="w-0.5 h-10 sm:h-14 bg-pink-400/50" />
+          <span className="text-2xl sm:text-3xl filter drop-shadow-md animate-pulse">💖</span>
+        </div>
+        <div className="flex flex-col items-center animate-[bounce_3.2s_infinite_alternate]" style={{ animationDelay: '0.5s' }}>
+          <div className="w-0.5 h-12 sm:h-16 bg-pink-400/50" />
+          <span className="text-2xl sm:text-3xl filter drop-shadow-md animate-pulse">💘</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (theme === 'ramadan') {
+    return (
+      <div className="fixed top-0 inset-x-0 pointer-events-none z-[60] flex justify-between px-4 sm:px-16 select-none">
+        <div className="flex flex-col items-center animate-[bounce_4s_infinite_alternate]">
+          <div className="w-0.5 h-12 sm:h-16 bg-amber-400/50" />
+          <span className="text-2xl sm:text-3xl text-amber-500 font-bold filter drop-shadow">🌙</span>
+        </div>
+        <div className="flex flex-col items-center animate-[bounce_4.5s_infinite_alternate]" style={{ animationDelay: '0.6s' }}>
+          <div className="w-0.5 h-10 sm:h-14 bg-amber-400/50" />
+          <span className="text-2xl sm:text-3xl text-amber-500 font-bold filter drop-shadow">🕌</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (theme === 'burkina') {
+    return (
+      <div className="fixed top-0 inset-x-0 pointer-events-none z-[60] flex justify-center select-none pt-2">
+        <div className="flex items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 px-4 py-1.5 rounded-full shadow-md text-xs font-black text-slate-800">
+          <div className="flex flex-col w-4 h-3 rounded overflow-hidden shadow-inner">
+            <span className="h-1.5 bg-[#dc2626]" />
+            <span className="h-1.5 bg-[#059669]" />
+          </div>
+          <span>Fête Nationale du Burkina Faso 🇧🇫</span>
+        </div>
+      </div>
+    );
+  }
+  
+  return null;
+};
+
+interface SeasonalBrandingProps {
+  theme?: string;
+  effectType?: string;
+  decorationsEnabled?: boolean;
+  intensity?: 'low' | 'medium' | 'high';
+  primaryColor?: string;
+}
+
+const SeasonalBranding = ({ 
+  theme, 
+  effectType, 
+  decorationsEnabled, 
+  intensity = 'medium',
+  primaryColor = '#059669' 
+}: SeasonalBrandingProps) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  
+  // Compute effective effect
+  const effect = (effectType && effectType !== 'auto') 
+    ? effectType 
+    : (theme === 'christmas' ? 'snow' 
+      : theme === 'new-year' ? 'fireworks' 
+      : theme === 'valentine' ? 'hearts' 
+      : theme === 'rainy' ? 'rain' 
+      : theme === 'harmattan' ? 'harmattan' 
+      : theme === 'ramadan' ? 'ramadan' 
+      : theme === 'burkina' ? 'burkina' 
+      : theme === 'spring' ? 'sakura' 
+      : (theme && theme !== 'default') ? 'sparkles'
+      : 'none');
+  
+  useEffect(() => {
+    if (!effect || effect === 'none') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    let animationId: number;
+    let particles: any[] = [];
+    let fireworks: any[] = [];
+    let ripples: any[] = [];
+    let autoLaunchTimer = 0;
+    
+    const handleResize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    
+    const spawnFireworksAt = (x: number, y: number) => {
+      const colors = ['#f59e0b', '#fbbf24', '#fef08a', '#ef4444', '#10b981', '#3b82f6', '#ec4899', '#ffffff'];
+      const count = intensity === 'high' ? 50 : intensity === 'low' ? 25 : 38;
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 6 + 2;
+        fireworks.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          alpha: 1,
+          decay: Math.random() * 0.02 + 0.015,
+          size: Math.random() * 3.5 + 2
+        });
+      }
+    };
+    
+    const handleWindowClick = (e: MouseEvent) => {
+      if (effect === 'fireworks') {
+        spawnFireworksAt(e.clientX, e.clientY);
+      }
+    };
+    
+    window.addEventListener('mousedown', handleWindowClick);
+    
+    // Particle count multiplier
+    const countMultiplier = intensity === 'high' ? 1.6 : intensity === 'low' ? 0.5 : 1.0;
+    const baseCount = 45;
+    const particleCount = Math.round(baseCount * countMultiplier);
+    
+    const initParticles = () => {
+      particles = [];
+      for (let i = 0; i < particleCount; i++) {
+        if (effect === 'snow') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            r: Math.random() * 5 + 3,
+            d: Math.random() * 100,
+            vy: Math.random() * 1.6 + 0.8,
+            vx: Math.random() * 1.2 - 0.6,
+            rotation: Math.random() * Math.PI * 2,
+            rotSpeed: (Math.random() - 0.5) * 0.04,
+            isCrystal: Math.random() > 0.4
+          });
+        } else if (effect === 'fireworks') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 3.5 + 1.5,
+            vy: -(Math.random() * 0.8 + 0.2),
+            vx: Math.random() * 0.4 - 0.2,
+            alpha: Math.random() * 0.6 + 0.4,
+            twinkleSpeed: Math.random() * 0.03 + 0.015,
+            color: Math.random() > 0.3 ? '#f59e0b' : '#fbbf24'
+          });
+        } else if (effect === 'hearts') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 12 + 8,
+            vy: -(Math.random() * 1.4 + 0.7),
+            vx: Math.random() * 0.6 - 0.3,
+            swing: Math.random() * Math.PI * 2,
+            swingSpeed: Math.random() * 0.025 + 0.01,
+            color: ['#f43f5e', '#ec4899', '#db2777', '#e11d48'][Math.floor(Math.random() * 4)],
+            alpha: Math.random() * 0.45 + 0.55
+          });
+        } else if (effect === 'rain') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight - window.innerHeight,
+            length: Math.random() * 20 + 20,
+            vy: Math.random() * 14 + 10,
+            vx: -2.5,
+            opacity: Math.random() * 0.45 + 0.4
+          });
+        } else if (effect === 'harmattan') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 3.5 + 1.5,
+            vx: Math.random() * 5 + 3,
+            vy: Math.random() * 1 - 0.5,
+            opacity: Math.random() * 0.5 + 0.3,
+            color: Math.random() > 0.5 ? '#d97706' : '#f59e0b'
+          });
+        } else if (effect === 'ramadan') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 8 + 4,
+            alpha: Math.random() * 0.7 + 0.3,
+            twinkleSpeed: Math.random() * 0.025 + 0.01,
+            type: Math.random() > 0.75 ? 'moon' : 'star'
+          });
+        } else if (effect === 'burkina') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 10 + 6,
+            vy: Math.random() * 2.2 + 1.2,
+            vx: Math.random() * 1.2 - 0.6,
+            color: Math.random() > 0.5 ? '#059669' : '#dc2626',
+            rotation: Math.random() * Math.PI * 2,
+            rotSpeed: Math.random() * 0.06 + 0.02,
+            type: Math.random() > 0.65 ? 'star' : 'confetti'
+          });
+        } else if (effect === 'sakura') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight - window.innerHeight,
+            size: Math.random() * 12 + 7,
+            vy: Math.random() * 1.8 + 0.9,
+            vx: Math.random() * 1.2 + 0.6,
+            rotation: Math.random() * Math.PI * 2,
+            rotSpeed: Math.random() * 0.04 + 0.01,
+            swing: Math.random() * Math.PI * 2,
+            swingSpeed: Math.random() * 0.025 + 0.01
+          });
+        } else if (effect === 'sparkles') {
+          particles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 5 + 2,
+            vy: -(Math.random() * 0.9 + 0.3),
+            vx: Math.random() * 0.6 - 0.3,
+            alpha: Math.random() * 0.6 + 0.3,
+            twinkleSpeed: Math.random() * 0.03 + 0.01,
+            type: Math.random() > 0.5 ? 'orb' : 'star'
+          });
+        }
+      }
+    };
+    
+    initParticles();
+    
+    const render = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      particles.forEach((p) => {
+        if (effect === 'snow') {
+          p.y += p.vy;
+          p.x += p.vx + Math.sin(p.d / 10) * 0.3;
+          p.d += 0.05;
+          p.rotation += p.rotSpeed;
+          
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          
+          if (p.isCrystal) {
+            // Draw 6-branched snowflake
+            ctx.strokeStyle = 'rgba(147, 197, 253, 0.9)';
+            ctx.lineWidth = 1.5;
+            ctx.shadowColor = 'rgba(59, 130, 246, 0.5)';
+            ctx.shadowBlur = 4;
+            const s = p.r * 1.6;
+            for (let b = 0; b < 3; b++) {
+              ctx.beginPath();
+              ctx.moveTo(-s, 0);
+              ctx.lineTo(s, 0);
+              ctx.stroke();
+              ctx.rotate(Math.PI / 3);
+            }
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, 0, p.r * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // Glowing round snowflake
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            ctx.shadowColor = 'rgba(147, 197, 253, 0.8)';
+            ctx.shadowBlur = 6;
+            ctx.beginPath();
+            ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(147, 197, 253, 0.6)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+          ctx.restore();
+          
+          if (p.y > canvas.height + 15) {
+            p.y = -15;
+            p.x = Math.random() * canvas.width;
+          }
+        }
+        else if (effect === 'fireworks') {
+          p.alpha += p.twinkleSpeed;
+          if (p.alpha > 0.95 || p.alpha < 0.25) {
+            p.twinkleSpeed = -p.twinkleSpeed;
+          }
+          p.y += p.vy;
+          p.x += p.vx;
+          
+          ctx.save();
+          ctx.fillStyle = p.color;
+          ctx.globalAlpha = Math.max(0.1, Math.min(1, p.alpha));
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 8;
+          
+          // Draw 4-point star
+          const s = p.size;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y - s);
+          ctx.quadraticCurveTo(p.x, p.y, p.x + s, p.y);
+          ctx.quadraticCurveTo(p.x, p.y, p.x, p.y + s);
+          ctx.quadraticCurveTo(p.x, p.y, p.x - s, p.y);
+          ctx.quadraticCurveTo(p.x, p.y, p.x, p.y - s);
+          ctx.fill();
+          ctx.restore();
+          
+          if (p.y < -15) {
+            p.y = canvas.height + 15;
+            p.x = Math.random() * canvas.width;
+          }
+        }
+        else if (effect === 'hearts') {
+          p.swing += p.swingSpeed;
+          p.x += Math.sin(p.swing) * 0.4;
+          p.y += p.vy;
+          
+          ctx.save();
+          ctx.globalAlpha = p.alpha;
+          ctx.fillStyle = p.color;
+          ctx.shadowColor = 'rgba(244, 63, 94, 0.4)';
+          ctx.shadowBlur = 6;
+          
+          const x = p.x;
+          const y = p.y;
+          const s = p.size;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.bezierCurveTo(x - s/2, y - s/2, x - s, y + s/3, x, y + s);
+          ctx.bezierCurveTo(x + s, y + s/3, x + s/2, y - s/2, x, y);
+          ctx.fill();
+          
+          // Subtle glossy highlight
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+          ctx.beginPath();
+          ctx.arc(x - s * 0.25, y + s * 0.1, s * 0.15, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          
+          if (p.y < -30) {
+            p.y = canvas.height + 30;
+            p.x = Math.random() * canvas.width;
+          }
+        }
+        else if (effect === 'rain') {
+          ctx.save();
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(2, 132, 199, ${p.opacity})`;
+          ctx.lineWidth = 2;
+          ctx.shadowColor = 'rgba(56, 189, 248, 0.4)';
+          ctx.shadowBlur = 3;
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x + p.vx, p.y + p.length);
+          ctx.stroke();
+          ctx.restore();
+          
+          p.y += p.vy;
+          p.x += p.vx;
+          
+          if (p.y > canvas.height) {
+            ripples.push({
+              x: p.x,
+              y: canvas.height - 4,
+              r: 1,
+              maxR: Math.random() * 18 + 10,
+              alpha: 0.7,
+              decay: Math.random() * 0.03 + 0.02
+            });
+            
+            p.y = -p.length;
+            p.x = Math.random() * canvas.width;
+          }
+        }
+        else if (effect === 'harmattan') {
+          ctx.save();
+          ctx.fillStyle = p.color;
+          ctx.globalAlpha = p.opacity;
+          ctx.shadowColor = '#d97706';
+          ctx.shadowBlur = 4;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          
+          p.x += p.vx;
+          p.y += p.vy + Math.sin(p.x / 30) * 0.15;
+          
+          if (p.x > canvas.width + 10) {
+            p.x = -10;
+            p.y = Math.random() * canvas.height;
+          }
+        }
+        else if (effect === 'ramadan') {
+          p.alpha += p.twinkleSpeed;
+          if (p.alpha > 0.95 || p.alpha < 0.25) {
+            p.twinkleSpeed = -p.twinkleSpeed;
+          }
+          
+          ctx.save();
+          ctx.globalAlpha = p.alpha;
+          ctx.fillStyle = '#fbbf24';
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 8;
+          
+          if (p.type === 'moon') {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 1.4, -Math.PI / 2.8, Math.PI / 2.8, false);
+            ctx.quadraticCurveTo(p.x + p.size * 0.6, p.y, p.x + p.size * 0.4, p.y - p.size * 1.2);
+            ctx.fill();
+          } else {
+            const s = p.size;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y - s);
+            ctx.quadraticCurveTo(p.x, p.y, p.x + s, p.y);
+            ctx.quadraticCurveTo(p.x, p.y, p.x, p.y + s);
+            ctx.quadraticCurveTo(p.x, p.y, p.x - s, p.y);
+            ctx.quadraticCurveTo(p.x, p.y, p.x, p.y - s);
+            ctx.fill();
+          }
+          ctx.restore();
+          
+          p.y -= 0.15;
+          if (p.y < -20) p.y = canvas.height + 20;
+        }
+        else if (effect === 'burkina') {
+          p.rotation += p.rotSpeed;
+          p.y += p.vy;
+          p.x += p.vx;
+          
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          
+          if (p.type === 'star') {
+            ctx.fillStyle = '#fbbf24';
+            ctx.shadowColor = '#d97706';
+            ctx.shadowBlur = 6;
+            const s = p.size * 0.8;
+            ctx.beginPath();
+            for (let j = 0; j < 5; j++) {
+              ctx.lineTo(Math.cos((18 + j * 72) * Math.PI / 180) * s, -Math.sin((18 + j * 72) * Math.PI / 180) * s);
+              ctx.lineTo(Math.cos((54 + j * 72) * Math.PI / 180) * (s/2), -Math.sin((54 + j * 72) * Math.PI / 180) * (s/2));
+            }
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            ctx.fillStyle = p.color;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 3;
+            ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+          }
+          ctx.restore();
+          
+          if (p.y > canvas.height + 20) {
+            p.y = -20;
+            p.x = Math.random() * canvas.width;
+          }
+        }
+        else if (effect === 'sakura') {
+          p.rotation += p.rotSpeed;
+          p.swing += p.swingSpeed;
+          p.y += p.vy;
+          p.x += p.vx + Math.sin(p.swing) * 0.5;
+          
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          ctx.fillStyle = '#f472b6';
+          ctx.shadowColor = '#fda4af';
+          ctx.shadowBlur = 5;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, p.size, p.size * 0.55 * Math.abs(Math.cos(p.rotation)), 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          
+          if (p.y > canvas.height + 25 || p.x > canvas.width + 25) {
+            p.y = -25;
+            p.x = Math.random() * (canvas.width * 0.8);
+          }
+        }
+        else if (effect === 'sparkles') {
+          p.alpha += p.twinkleSpeed;
+          if (p.alpha > 0.9 || p.alpha < 0.25) {
+            p.twinkleSpeed = -p.twinkleSpeed;
+          }
+          p.y += p.vy;
+          p.x += p.vx;
+          
+          ctx.save();
+          ctx.globalAlpha = p.alpha;
+          ctx.fillStyle = primaryColor;
+          ctx.shadowColor = primaryColor;
+          ctx.shadowBlur = 8;
+          
+          if (p.type === 'star') {
+            const s = p.size;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y - s);
+            ctx.quadraticCurveTo(p.x, p.y, p.x + s, p.y);
+            ctx.quadraticCurveTo(p.x, p.y, p.x, p.y + s);
+            ctx.quadraticCurveTo(p.x, p.y, p.x - s, p.y);
+            ctx.quadraticCurveTo(p.x, p.y, p.x, p.y - s);
+            ctx.fill();
+          } else {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+          
+          if (p.y < -15) {
+            p.y = canvas.height + 15;
+            p.x = Math.random() * canvas.width;
+          }
+        }
+      });
+      
+      // Render fireworks bursts
+      fireworks.forEach((f, idx) => {
+        f.x += f.vx;
+        f.y += f.vy;
+        f.vy += 0.08;
+        f.alpha -= f.decay;
+        
+        if (f.alpha <= 0) {
+          fireworks.splice(idx, 1);
+        } else {
+          ctx.save();
+          ctx.beginPath();
+          ctx.fillStyle = f.color;
+          ctx.globalAlpha = f.alpha;
+          ctx.shadowColor = f.color;
+          ctx.shadowBlur = 6;
+          ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      });
+      
+      // Render ripples
+      ripples.forEach((r, idx) => {
+        r.r += (r.maxR - r.r) * 0.09;
+        r.alpha -= r.decay;
+        
+        if (r.alpha <= 0) {
+          ripples.splice(idx, 1);
+        } else {
+          ctx.save();
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(2, 132, 199, ${r.alpha})`;
+          ctx.lineWidth = 1.5;
+          ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      });
+      
+      // Auto fireworks launcher
+      if (effect === 'fireworks') {
+        autoLaunchTimer++;
+        if (autoLaunchTimer > 90) {
+          autoLaunchTimer = 0;
+          const x = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
+          const y = Math.random() * canvas.height * 0.4 + canvas.height * 0.1;
+          spawnFireworksAt(x, y);
+        }
+      }
+      
+      animationId = requestAnimationFrame(render);
+    };
+    
+    render();
+    
+    return () => {
+      cancelAnimationFrame(animationId);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('mousedown', handleWindowClick);
+    };
+  }, [effect, intensity, primaryColor]);
+  
+  return (
+    <>
+      {effect && effect !== 'none' && (
+        <canvas 
+          ref={canvasRef} 
+          className="fixed inset-0 pointer-events-none z-[45]"
+          style={{ width: '100vw', height: '100vh' }}
+        />
+      )}
+      {decorationsEnabled && <Ornaments theme={theme} />}
+    </>
+  );
+};
+
 export default function App() {
   // Helper for haptic feedback
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
@@ -657,13 +1747,34 @@ export default function App() {
       setViewMode(activeRole);
     }
   }, [profile, activeRole, viewMode]);
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(() => {
+    try {
+      const cached = localStorage.getItem('cached_app_branding');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [cities, setCities] = useState<City[]>([]);
   const [rotation, setRotation] = useState<OnCallRotation | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('isDarkMode');
+    return saved === 'true';
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('isDarkMode', String(isDarkMode));
+  }, [isDarkMode]);
+
   // Failsafe timeout to prevent infinite loading screen
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -686,6 +1797,43 @@ export default function App() {
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [newSupportMessage, setNewSupportMessage] = useState('');
   const [supportChatMeta, setSupportChatMeta] = useState<any>(null);
+
+  // Scroll to top on any core screen/mode/view/info-page transitions
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const mainEl = document.querySelector('main');
+    if (mainEl) mainEl.scrollTop = 0;
+  }, [viewMode, activeRole, showSupportChat, infoPage]);
+
+  // Network connection state & listeners
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      toast.success("Connexion Internet rétablie !", {
+        description: "Vous êtes de nouveau connecté à la plateforme.",
+        duration: 4000
+      });
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast.error("Connexion Internet interrompue", {
+        description: "Attention : vous n'avez plus accès au réseau. Veuillez vérifier votre connexion.",
+        duration: 8000
+      });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -817,6 +1965,8 @@ export default function App() {
   }, [lastActivity, user]);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
+  const [legalTab, setLegalTab] = useState<'cgu' | 'privacy' | 'mentions'>('cgu');
+  const [showShowcase, setShowShowcase] = useState(false);
   const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
 
   useEffect(() => {
@@ -1036,6 +2186,21 @@ export default function App() {
           }
         }, (error) => {
           console.error("Error fetching profile:", error);
+          if (isSuperAdminEmail(firebaseUser.email)) {
+            const fallbackProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              name: firebaseUser.displayName || 'Super Admin',
+              email: firebaseUser.email || '',
+              role: 'super-admin',
+              walletBalance: 0,
+              pharmacistBalance: 0,
+              deliveryBalance: 0,
+              status: 'active',
+              createdAt: new Date() as any
+            };
+            setProfile(fallbackProfile);
+            setViewMode(prev => prev || 'super-admin');
+          }
           setLoading(false);
           setIsAuthReady(true);
         });
@@ -1050,16 +2215,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) {
-      setSettings(null);
-      return;
-    }
     const unsubscribe = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as Settings;
         setSettings(data);
-      } else if (isSuperAdminEmail(user.email)) {
-        // Initialize default settings if they don't exist (only for admin)
+      } else {
+        // Initialize default settings if they don't exist
         const defaultSettings: Settings = {
           dayDeliveryFee: 1000,
           nightDeliveryFee: 2000,
@@ -1071,31 +2232,30 @@ export default function App() {
           supportChatEnabled: true,
           maintenanceMode: false
         };
-        // Set local settings immediately so UI doesn't hang
         setSettings(defaultSettings);
-        setDoc(doc(db, 'settings', 'global'), defaultSettings).catch(err => {
-          console.error("Error initializing settings:", err);
-        });
+        if (user && isSuperAdminEmail(user.email)) {
+          setDoc(doc(db, 'settings', 'global'), defaultSettings).catch(err => {
+            console.error("Error initializing settings:", err);
+          });
+        }
       }
     }, (err) => {
       console.error("Settings listener error:", err);
-      // Fallback for admin if listener fails
-      if (isSuperAdminEmail(user.email)) {
-        setSettings({
-          dayDeliveryFee: 1000,
-          nightDeliveryFee: 2000,
-          nightStartHour: 20,
-          nightEndHour: 6,
-          commissionPercentage: 10,
-          deliveryCommissionPercentage: 10,
-          appName: 'Ordonnance Direct',
-          supportChatEnabled: true,
-          maintenanceMode: false
-        });
-      }
+      // Fallback
+      setSettings({
+        dayDeliveryFee: 1000,
+        nightDeliveryFee: 2000,
+        nightStartHour: 20,
+        nightEndHour: 6,
+        commissionPercentage: 10,
+        deliveryCommissionPercentage: 10,
+        appName: 'Ordonnance Direct',
+        supportChatEnabled: true,
+        maintenanceMode: false
+      });
     });
     return () => unsubscribe();
-  }, [isAuthReady, user]);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -1262,11 +2422,11 @@ export default function App() {
             transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
             className="w-32 h-32 bg-emerald-50 rounded-[3rem] flex items-center justify-center text-emerald-600 mb-8 border border-emerald-100 shadow-xl"
           >
-            <LogoIcon size={80} />
+            <LogoIcon size={80} logoUrl={settings?.appLogoUrl} />
           </motion.div>
           
           <div className="flex flex-col items-center gap-2">
-            <h2 className="text-xl font-black text-slate-800 italic animate-pulse">Ordonnance Direct</h2>
+            <h2 className="text-xl font-black text-slate-800 italic animate-pulse">{settings?.appName || 'Ordonnance Direct'}</h2>
             <div className="flex items-center gap-1.5 h-6">
               <motion.div 
                 animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
@@ -1295,6 +2455,33 @@ export default function App() {
     );
   }
 
+  if (showShowcase) {
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-emerald-600 font-bold">Chargement du site vitrine...</div>}>
+        <ShowcaseLanding 
+          onGoToAuth={(mode) => {
+            setShowShowcase(false);
+          }} 
+          onOpenLegal={(tab) => {
+            if (tab) setLegalTab(tab);
+            setShowLegal(true);
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  if (showLegal) {
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-emerald-600 font-bold">Chargement des documents légaux...</div>}>
+        <Legal 
+          onBack={() => setShowLegal(false)} 
+          initialTab={legalTab}
+        />
+      </Suspense>
+    );
+  }
+
   if (!user) {
     if (settings?.maintenanceMode) {
       return (
@@ -1316,12 +2503,41 @@ export default function App() {
         </div>
       );
     }
-    return <LoginView onLogin={handleLogin} isLoggingIn={isLoggingIn} />;
+    return (
+      <>
+        <DynamicTheme settings={settings} />
+        <SeasonalBranding 
+          theme={settings?.themeType} 
+          effectType={settings?.effectType}
+          decorationsEnabled={settings?.decorationsEnabled}
+          intensity={settings?.effectsIntensity}
+          primaryColor={settings?.primaryColor}
+        />
+        <LoginView 
+          onLogin={handleLogin} 
+          isLoggingIn={isLoggingIn} 
+          onOpenShowcase={() => setShowShowcase(true)}
+          onOpenLegal={(tab) => {
+            if (tab) setLegalTab(tab);
+            setShowLegal(true);
+          }}
+          settings={settings}
+        />
+      </>
+    );
   }
 
   if (settings?.maintenanceMode && profile?.role !== 'admin' && profile?.role !== 'super-admin' && !isSuperAdminEmail(user.email)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
+        <DynamicTheme settings={settings} />
+        <SeasonalBranding 
+          theme={settings?.themeType} 
+          effectType={settings?.effectType}
+          decorationsEnabled={settings?.decorationsEnabled}
+          intensity={settings?.effectsIntensity}
+          primaryColor={settings?.primaryColor}
+        />
         <div className="w-24 h-24 bg-red-100 rounded-3xl flex items-center justify-center text-red-500 mb-8">
           <Power size={48} />
         </div>
@@ -1339,16 +2555,20 @@ export default function App() {
     );
   }
 
-  if (showLegal) {
-    return (
-      <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-400">Chargement...</div>}>
-        <Legal onBack={() => setShowLegal(false)} />
-      </Suspense>
-    );
-  }
-
   if (!profile) {
-    return <RoleSelectionView onSelect={handleRoleSelection} isAdmin={isSuperAdminEmail(user.email)} />;
+    return (
+      <>
+        <DynamicTheme settings={settings} />
+        <SeasonalBranding 
+          theme={settings?.themeType} 
+          effectType={settings?.effectType}
+          decorationsEnabled={settings?.decorationsEnabled}
+          intensity={settings?.effectsIntensity}
+          primaryColor={settings?.primaryColor}
+        />
+        <RoleSelectionView onSelect={handleRoleSelection} isAdmin={isSuperAdminEmail(user.email)} settings={settings} />
+      </>
+    );
   }
 
   if (profile?.status === 'suspended' && !isSuperAdminEmail(user?.email)) {
@@ -1433,6 +2653,14 @@ export default function App() {
 
   return (
     <div className="h-screen h-[100dvh] flex flex-col bg-slate-50 font-sans selection:bg-primary/20 selection:text-primary relative overflow-hidden md:min-h-screen md:h-auto md:overflow-visible">
+      <DynamicTheme settings={settings} />
+      <SeasonalBranding 
+        theme={settings?.themeType} 
+        effectType={settings?.effectType}
+        decorationsEnabled={settings?.decorationsEnabled}
+        intensity={settings?.effectsIntensity}
+        primaryColor={settings?.primaryColor}
+      />
       {/* Background Magic Touch */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <motion.div 
@@ -1457,7 +2685,16 @@ export default function App() {
         />
       </div>
 
-      <header className="sticky top-0 z-50 bg-white border-b border-slate-100/50 gpu-accelerated" style={{ paddingTop: 'max(env(safe-area-inset-top), 8px)' }}>
+      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-[0_4px_25px_-5px_rgba(0,0,0,0.05)] gpu-accelerated" style={{ paddingTop: 'max(env(safe-area-inset-top), 0px)' }}>
+        {/* Dynamic Top Brand Accent Bar */}
+        <div className="h-1 sm:h-1.5 w-full bg-gradient-to-r from-primary via-secondary to-primary shadow-sm" />
+
+        {!isOnline && (
+          <div className="bg-rose-600 text-white px-4 py-2.5 flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wider border-b border-rose-700 shadow-md animate-in fade-in slide-in-from-top duration-300">
+            <div className="w-2.5 h-2.5 rounded-full bg-white animate-ping shrink-0" />
+            <span>🔴 Mode Hors-Ligne : Connexion Internet perdue. Vérifiez votre réseau.</span>
+          </div>
+        )}
         {activeRole === 'delivery' && profile && (!profile.idCardFront || !profile.idCardBack || !profile.guarantorInfo?.name) && (
           <div className="bg-rose-50 text-rose-700 px-4 py-2 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wider border-b border-rose-100">
             <AlertCircle size={14} /> Attention : Votre dossier est incomplet (ID ou Garant manquant).
@@ -1485,24 +2722,33 @@ export default function App() {
             </motion.div>
           ))}
         </AnimatePresence>
-        <div className="max-w-7xl mx-auto px-4 h-14 md:h-16 flex items-center justify-between relative z-10">
-          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setViewMode(profile?.role || null); setIsMobileMenuOpen(false); }}>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3.5 min-h-[72px] sm:min-h-[84px] md:min-h-[92px] flex items-center justify-between relative z-10 gap-2 sm:gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 group cursor-pointer" onClick={() => { setViewMode(profile?.role || null); setIsMobileMenuOpen(false); }}>
             <motion.div 
               whileHover={{ scale: 1.05 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
-              className="w-12 h-12 flex items-center justify-center shadow-lg shadow-emerald-500/20 rounded-full"
+              className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 flex items-center justify-center shrink-0 p-1.5 bg-white rounded-2xl sm:rounded-3xl border-2 border-primary/25 shadow-lg shadow-primary/15 group-hover:border-primary/60 transition-all"
             >
-              <LogoIcon size={36} />
+              <LogoIcon size={80} logoUrl={settings?.appLogoUrl} />
             </motion.div>
             <div className="flex flex-col">
-              <span className="text-lg font-black tracking-tighter text-slate-900 leading-none">Ordonnance Direct</span>
-              <span className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mt-1">Burkina Faso</span>
+              <span className="text-base sm:text-xl md:text-2xl font-black tracking-tight text-slate-900 leading-tight group-hover:text-primary transition-colors">{settings?.appName || 'Ordonnance Direct'}</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[9px] sm:text-[10px] font-black text-primary uppercase tracking-widest bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full inline-flex items-center">
+                  {settings?.countryName || 'Burkina Faso'}
+                </span>
+                {settings?.appTagline && (
+                  <span className="hidden md:inline text-[10px] font-bold text-slate-500 max-w-[200px] truncate">
+                    • {settings.appTagline}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 md:gap-6">
+          <div className="flex items-center gap-1.5 sm:gap-3 md:gap-4">
             {profile?.role === 'super-admin' && (
-              <div className="hidden lg:flex items-center gap-2 bg-slate-900/5 p-1 rounded-2xl border border-slate-900/10">
+              <div className="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 shadow-inner">
                 {(['super-admin', 'admin', 'patient', 'pharmacist', 'delivery'] as const).map((role) => (
                   <button
                     key={role}
@@ -1510,10 +2756,10 @@ export default function App() {
                       setViewMode(role as UserRole);
                       toast.success(`Mode de vue : ${role.toUpperCase()}`);
                     }}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                    className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
                       (viewMode === role || (role === 'super-admin' && (viewMode === 'super-admin' || !viewMode)))
-                        ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/20 scale-105 z-10'
-                        : 'text-slate-500 hover:bg-slate-900/5'
+                        ? 'bg-gradient-to-r from-primary to-primary-hover text-white shadow-lg shadow-primary/30 scale-105 z-10'
+                        : 'text-slate-600 hover:text-primary hover:bg-primary/10'
                     }`}
                   >
                     {role === 'super-admin' ? 'Super Admin' : 
@@ -1525,28 +2771,47 @@ export default function App() {
               </div>
             )}
             
-            <div className="hidden md:flex items-center gap-4">
-              {(isSuperAdminEmail(user?.email) || profile?.role === 'super-admin') && (
-                <button 
-                  onClick={handleSwitchRole}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all border border-slate-200"
-                >
-                  <SettingsIcon size={14} /> Changer
-                </button>
-              )}
-              <div className="flex flex-col items-end">
-                <span className="text-sm font-black text-slate-900 truncate max-w-[120px]">{profile?.name}</span>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5 whitespace-nowrap">
-                  {activeRole === 'patient' ? 'Patient' : 
-                   activeRole === 'pharmacist' ? 'Pharmacien' : 
-                   activeRole === 'delivery' ? 'Livreur' : 
-                   activeRole === 'super-admin' ? 'Super Admin' : 'Admin'}
-                </span>
+            {/* Profil Utilisateur */}
+            {profile && (
+              <div 
+                className="flex items-center gap-2 sm:gap-3 bg-white hover:bg-primary/5 p-1.5 sm:p-2 pr-2.5 sm:pr-4 rounded-2xl border border-slate-200/90 hover:border-primary/30 shadow-sm transition-all cursor-pointer shrink-0" 
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+                title="Mon Profil"
+              >
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-secondary rounded-xl flex items-center justify-center text-white font-black text-xs sm:text-sm shadow-md shadow-primary/20 shrink-0">
+                  {profile?.name?.charAt(0)?.toUpperCase() || 'U'}
+                </div>
+                <div className="flex flex-col text-left leading-tight hidden xs:flex sm:flex">
+                  <span className="text-xs sm:text-sm font-extrabold text-slate-900 truncate max-w-[80px] sm:max-w-[140px]">{profile?.name}</span>
+                  <span className="text-[9px] sm:text-[10px] font-black text-primary uppercase tracking-wider">
+                    {activeRole === 'patient' ? 'Patient' : 
+                     activeRole === 'pharmacist' ? 'Pharmacien' : 
+                     activeRole === 'delivery' ? 'Livreur' : 
+                     activeRole === 'super-admin' ? 'Super Admin' : 'Admin'}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex items-center gap-1 sm:gap-2">
               <NotificationBell userId={profile?.uid || ''} profile={profile} />
+              
+              <button
+                onClick={() => {
+                  triggerHaptic();
+                  const newMode = !isDarkMode;
+                  setIsDarkMode(newMode);
+                  toast.success(newMode ? "Mode sombre activé" : "Mode clair activé", { duration: 2000 });
+                }}
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center border transition-all ${
+                  isDarkMode
+                    ? "bg-slate-800 text-amber-400 border-slate-700 hover:bg-slate-700"
+                    : "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+                }`}
+                title={isDarkMode ? "Activer le mode clair" : "Activer le mode sombre"}
+              >
+                {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
               
               {profile && (
                 <button
@@ -1556,7 +2821,7 @@ export default function App() {
                       await updateDoc(doc(db, 'users', profile.uid), {
                         sound_enabled: !currentSound
                       });
-                      toast.success(!currentSound ? "Sons activés 🔊" : "Sons coupés 🔇", { duration: 3000 });
+                      toast.success(!currentSound ? "Sons activés" : "Sons désactivés", { duration: 3000 });
                       if (!currentSound) {
                         playNotificationSound(settings, true);
                       }
@@ -1564,9 +2829,9 @@ export default function App() {
                       console.error("Error toggling sound:", err);
                     }
                   }}
-                  className={`w-10 h-10 rounded-2xl flex items-center justify-center border transition-all ${
+                  className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center border transition-all ${
                     (profile.sound_enabled !== false)
-                      ? "bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100/50"
+                      ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
                       : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
                   }`}
                   title={profile.sound_enabled !== false ? "Couper le son" : "Activer le son"}
@@ -1577,17 +2842,19 @@ export default function App() {
               
               <button 
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="md:hidden w-10 h-10 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center hover:bg-slate-100 transition-all border border-slate-200"
+                className="md:hidden w-9 h-9 sm:w-10 sm:h-10 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-all border border-slate-200"
               >
                 {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
               </button>
 
+              {/* Bouton Déconnexion (Agrandie & Visible partout) */}
               <button 
                 onClick={handleLogout}
-                className="hidden md:flex w-10 h-10 sm:w-11 sm:h-11 bg-white border border-rose-100 text-rose-500 rounded-xl sm:rounded-2xl items-center justify-center hover:bg-rose-500 hover:text-white transition-all shadow-sm"
+                className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm shadow-md shadow-rose-500/25 transition-all shrink-0 border border-rose-500"
                 title="Déconnexion"
               >
-                <LogOut size={18} className="sm:w-5 sm:h-5" />
+                <LogOut size={18} className="sm:w-5 sm:h-5 shrink-0" />
+                <span className="font-black text-xs sm:text-sm">Déconnexion</span>
               </button>
             </div>
           </div>
@@ -1603,13 +2870,13 @@ export default function App() {
               className="md:hidden bg-white border-b border-slate-100 overflow-hidden"
             >
               <div className="p-4 space-y-4">
-                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
-                  <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-white text-lg font-black">
+                <div className="flex items-center gap-3 p-3.5 bg-primary/5 rounded-2xl border border-primary/15">
+                  <div className="w-12 h-12 bg-gradient-to-br from-primary to-secondary rounded-xl flex items-center justify-center text-white text-lg font-black shadow-md shadow-primary/20">
                     {profile?.name?.charAt(0)}
                   </div>
                   <div>
                     <p className="font-black text-slate-900 leading-none">{profile?.name}</p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    <p className="text-[10px] font-black text-primary uppercase tracking-widest mt-1">
                       {activeRole === 'patient' ? 'Patient' : 
                        activeRole === 'pharmacist' ? 'Pharmacien' : 
                        activeRole === 'delivery' ? 'Livreur' : 'Administrateur'}
@@ -1632,7 +2899,7 @@ export default function App() {
                             }}
                             className={`flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
                               (viewMode === role || (role === 'super-admin' && (viewMode === 'super-admin' || !viewMode)))
-                                ? 'bg-slate-900 text-white border-slate-900 shadow-lg' 
+                                ? 'bg-gradient-to-r from-primary to-primary-hover text-white border-primary shadow-lg shadow-primary/25' 
                                 : 'bg-white text-slate-600 border-slate-200 shadow-sm'
                             }`}
                           >
@@ -1647,16 +2914,23 @@ export default function App() {
                   )}
 
                   <button 
-                    onClick={() => { setShowLegal(true); setIsMobileMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 p-4 bg-slate-50 text-slate-600 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-slate-100"
+                    onClick={() => { setShowShowcase(true); setIsMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 p-4 bg-primary/10 text-primary rounded-2xl font-bold text-xs shadow-sm border border-primary/20 hover:bg-primary/20 transition-all"
                   >
-                    <FileText size={18} /> Mentions Légales
+                    <Sparkles size={18} className="text-primary" /> Site Vitrine & Présentation
+                  </button>
+
+                  <button 
+                    onClick={() => { setLegalTab('cgu'); setShowLegal(true); setIsMobileMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 p-4 bg-slate-50 text-slate-700 rounded-2xl font-bold text-xs shadow-sm border border-slate-200/80 hover:bg-slate-100 transition-all"
+                  >
+                    <FileText size={18} className="text-slate-600" /> CGU & Confidentialité
                   </button>
 
                   {settings?.supportChatEnabled !== false && (
                     <button 
                       onClick={() => { setShowSupportChat(true); setIsMobileMenuOpen(false); }}
-                      className="w-full flex items-center gap-3 p-4 bg-secondary/5 text-secondary rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-secondary/10"
+                      className="w-full flex items-center gap-3 p-4 bg-secondary/10 text-secondary rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-secondary/20 hover:bg-secondary/20 transition-all"
                     >
                       <MessageSquare size={18} /> Chat de Support
                     </button>
@@ -1664,7 +2938,7 @@ export default function App() {
 
                   <button 
                     onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 p-4 bg-rose-50 text-rose-600 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-rose-100"
+                    className="w-full flex items-center gap-3 p-4 bg-rose-50 text-rose-600 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-sm border border-rose-100 hover:bg-rose-100 transition-all"
                   >
                     <LogOut size={18} /> Se déconnecter
                   </button>
@@ -1729,42 +3003,80 @@ export default function App() {
         <footer className="max-w-7xl w-full mx-auto px-4 py-8 border-t border-slate-200 mt-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-primary rounded-lg flex items-center justify-center text-white">
-                  <LogoIcon size={14} />
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center p-1 border border-slate-200 shadow-sm">
+                  <LogoIcon size={48} logoUrl={settings?.appLogoUrl} />
                 </div>
-                <span className="font-bold">Ordonnance Direct</span>
+                <div className="flex flex-col">
+                  <span className="font-extrabold text-lg text-slate-900 leading-tight">{settings?.appName || 'Ordonnance Direct'}</span>
+                  <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">{settings?.countryName || 'Burkina Faso'}</span>
+                </div>
               </div>
               <p className="text-sm text-slate-500 leading-relaxed">
-                La première plateforme de télé-exécution d'ordonnances au Burkina Faso. 
-                Qualité, rapidité et sécurité pour votre santé.
+                {settings?.appTagline || "La première plateforme de télé-exécution d'ordonnances."}
               </p>
             </div>
             <div>
-              <h5 className="font-bold mb-4">Support & Aide</h5>
-              <ul className="space-y-2 text-sm text-slate-500">
-                <li><button onClick={() => setInfoPage('how_it_works')} className="hover:text-primary transition-colors text-left">Comment ça marche ?</button></li>
-                <li><button onClick={() => setInfoPage('pharmacies')} className="hover:text-primary transition-colors text-left">Pharmacies partenaires</button></li>
-                <li><button onClick={() => setInfoPage('delivery')} className="hover:text-primary transition-colors text-left">Devenir livreur</button></li>
-                <li><button onClick={() => setInfoPage('contact')} className="hover:text-primary transition-colors text-left">Contactez-nous</button></li>
+              <h5 className="font-bold mb-4 text-slate-900">Information & Services</h5>
+              <ul className="space-y-2.5 text-sm text-slate-600">
+                <li>
+                  <button 
+                    onClick={() => setShowShowcase(true)} 
+                    className="flex items-center gap-2 text-emerald-700 font-extrabold hover:text-emerald-800 transition-colors bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100"
+                  >
+                    <Sparkles size={16} className="text-emerald-600" />
+                    <span>Site Vitrine & Présentation</span>
+                  </button>
+                </li>
+                <li>
+                  <button 
+                    onClick={() => { setLegalTab('cgu'); setShowLegal(true); }} 
+                    className="flex items-center gap-2 text-slate-700 font-bold hover:text-emerald-600 transition-colors bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 mt-1"
+                  >
+                    <FileText size={16} className="text-slate-600" />
+                    <span>CGU, Confidentialité & Législation</span>
+                  </button>
+                </li>
+                <li><button onClick={() => setInfoPage('how_it_works')} className="hover:text-primary transition-colors text-left pt-1 block">Comment ça marche ?</button></li>
+                <li><button onClick={() => setInfoPage('pharmacies')} className="hover:text-primary transition-colors text-left block">Pharmacies partenaires</button></li>
+                <li><button onClick={() => setInfoPage('delivery')} className="hover:text-primary transition-colors text-left block">Devenir livreur</button></li>
+                <li><button onClick={() => setInfoPage('contact')} className="hover:text-primary transition-colors text-left block">Contactez-nous</button></li>
               </ul>
             </div>
             <div>
-              <h5 className="font-bold mb-4">Urgence</h5>
-              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+              <h5 className="font-bold mb-4 text-slate-900">Urgence</h5>
+              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100 shadow-xs">
                 <p className="text-xs text-rose-600 font-bold uppercase mb-2">SOS Santé Burkina</p>
-                <a href="tel:112" className="text-2xl font-bold text-rose-700">112 / 17 / 18</a>
+                <a href="tel:112" className="text-2xl font-black text-rose-700">112 / 17 / 18</a>
               </div>
             </div>
           </div>
           <div className="mt-12 pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-xs text-slate-400">© 2026 Ordonnance Direct par NME TECHNOLOGIE Group. Tous droits réservés.</p>
-            <div className="flex gap-6 text-xs text-slate-400">
+            <p className="text-xs text-slate-400">© 2026 {settings?.appName || 'Ordonnance Direct'} par NME TECHNOLOGIE Group. Tous droits réservés.</p>
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 font-medium">
+              <button onClick={() => setShowShowcase(true)} className="text-emerald-700 font-bold hover:underline flex items-center gap-1">
+                <Sparkles size={12} /> Vitrine
+              </button>
+              <span className="text-slate-300">•</span>
+              <button onClick={() => { setLegalTab('cgu'); setShowLegal(true); }} className="hover:text-slate-900 transition-colors">
+                CGU
+              </button>
+              <span className="text-slate-300">•</span>
+              <button onClick={() => { setLegalTab('privacy'); setShowLegal(true); }} className="hover:text-slate-900 transition-colors">
+                Confidentialité
+              </button>
+              <span className="text-slate-300">•</span>
+              <button onClick={() => { setLegalTab('mentions'); setShowLegal(true); }} className="hover:text-slate-900 transition-colors">
+                Mentions légales
+              </button>
               {(isSuperAdminEmail(user?.email) || profile?.role === 'admin') && (
-                <button onClick={() => setShowResetConfirm(true)} className="text-rose-400 hover:text-rose-600 font-bold">Réinitialiser les données (Test)</button>
+                <>
+                  <span className="text-slate-300">•</span>
+                  <button onClick={() => setShowResetConfirm(true)} className="text-rose-500 hover:text-rose-700 font-bold">
+                    Réinitialiser (Test)
+                  </button>
+                </>
               )}
-              <button onClick={() => setInfoPage('legal')} className="hover:text-slate-600">Mentions légales</button>
-              <button onClick={() => setInfoPage('privacy')} className="hover:text-slate-600">Confidentialité</button>
             </div>
           </div>
         </footer>
@@ -2055,7 +3367,19 @@ export default function App() {
   );
 }
 
-function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn: boolean }) {
+function LoginView({ 
+  onLogin, 
+  isLoggingIn,
+  onOpenShowcase,
+  onOpenLegal,
+  settings
+}: { 
+  onLogin: () => void, 
+  isLoggingIn: boolean,
+  onOpenShowcase?: () => void,
+  onOpenLegal?: (tab?: 'cgu' | 'privacy' | 'mentions') => void,
+  settings?: Settings | null
+}) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -2136,156 +3460,195 @@ function LoginView({ onLogin, isLoggingIn }: { onLogin: () => void, isLoggingIn:
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-emerald-950 relative overflow-hidden p-4">
-      {/* Dynamic Background */}
-      <div className="absolute inset-0 z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/20 rounded-full blur-[120px] animate-pulse"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-sky-500/20 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }}></div>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(#ffffff05_1px,transparent_1px)] [background-size:32px_32px] pharmacy-pattern opacity-10"></div>
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 relative overflow-hidden p-4 sm:p-6">
+      {/* Subtle Ambient Light */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/5 rounded-full blur-[120px]"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-sky-500/5 rounded-full blur-[120px]"></div>
       </div>
       
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        className="bg-emerald-950/40 p-10 sm:p-16 rounded-[3.5rem] shadow-[0_32px_64px_-15px_rgba(0,0,0,0.5)] max-w-xl w-full text-center relative z-10 border border-emerald-800/20"
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        className="bg-white p-6 sm:p-10 rounded-3xl shadow-sm border border-slate-200/80 max-w-md w-full relative z-10"
       >
-        <motion.div 
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-          className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 shadow-[0_0_30px_rgba(16,185,129,0.3)] bg-white"
-        >
-          <LogoIcon size={96} />
-        </motion.div>
-        
-        <h1 className="text-4xl font-bold mb-2 text-white tracking-tight">Ordonnance Direct</h1>
-        <p className="text-slate-300 mb-8 leading-relaxed text-sm">
-          Votre santé, notre priorité au Burkina Faso. 
-        </p>
+        {/* Header with Logo & Brand */}
+        <div className="flex flex-col items-center text-center mb-6">
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center mb-3 bg-white p-2 border border-slate-200/80 shadow-md">
+            <LogoIcon size={64} logoUrl={settings?.appLogoUrl} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+            {settings?.appName || 'Ordonnance Direct'}
+          </h1>
+          <p className="text-slate-500 text-xs mt-1">
+            {isSignup ? "Créez votre compte en quelques secondes" : (settings?.appTagline || "Plateforme de télétransmission & livraison médicale")}
+          </p>
+        </div>
 
-        <form onSubmit={handleEmailAuth} className="space-y-4 mb-8 text-left">
+        {/* Tab Switcher: Connexion / Inscription */}
+        <div className="flex rounded-xl bg-slate-100 p-1 mb-6 border border-slate-200/60">
+          <button
+            type="button"
+            onClick={() => setIsSignup(false)}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+              !isSignup 
+                ? 'bg-white text-slate-900 shadow-xs' 
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Se connecter
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsSignup(true)}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+              isSignup 
+                ? 'bg-white text-slate-900 shadow-xs' 
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Créer un compte
+          </button>
+        </div>
+
+        <form onSubmit={handleEmailAuth} className="space-y-3.5 mb-5 text-left">
           {isSignup && (
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Nom complet</label>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nom complet</label>
               <input 
                 type="text" 
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-white/10 border border-white/10 rounded-2xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 transition-all outline-none"
-                placeholder="Jean Dupont"
+                className="w-full bg-slate-50/70 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition-all outline-none"
+                placeholder="Ex: Ousmane Ouedraogo"
                 required={isSignup}
               />
             </div>
           )}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Email</label>
+          
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Adresse Email</label>
             <input 
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-white/10 border border-white/10 rounded-2xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 transition-all outline-none"
-              placeholder="votre@email.com"
+              className="w-full bg-slate-50/70 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition-all outline-none"
+              placeholder="nom@exemple.com"
               required
             />
           </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Mot de passe</label>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-slate-700">Mot de passe</label>
+              {!isSignup && (
+                <button 
+                  type="button" 
+                  onClick={handleResetPassword}
+                  className="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium transition-colors"
+                >
+                  Oublié ?
+                </button>
+              )}
+            </div>
             <input 
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-white/10 border border-white/10 rounded-2xl p-4 text-white focus:ring-2 focus:ring-emerald-500/50 transition-all outline-none"
+              className="w-full bg-slate-50/70 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition-all outline-none"
               placeholder="••••••••"
               required
             />
-            {!isSignup && (
-              <div className="flex items-center justify-between mt-2">
-                <label className="flex items-center gap-2 cursor-pointer group">
-                  <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${rememberMe ? 'bg-emerald-500 border-emerald-500' : 'border-white/20 hover:border-white/40'}`}>
-                    <input 
-                      type="checkbox" 
-                      className="hidden" 
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                    />
-                    {rememberMe && <CheckCircle size={14} className="text-white" />}
-                  </div>
-                  <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors">Se souvenir de moi</span>
-                </label>
-                <button 
-                  type="button" 
-                  onClick={handleResetPassword}
-                  className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
-                >
-                  Mot de passe oublié ?
-                </button>
-              </div>
-            )}
           </div>
+
+          {!isSignup && (
+            <div className="pt-0.5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input 
+                  type="checkbox" 
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 accent-emerald-600" 
+                />
+                <span className="text-xs text-slate-600">Se souvenir de moi</span>
+              </label>
+            </div>
+          )}
+
           <button 
             type="submit"
             disabled={loading || isLoggingIn}
-            className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-sm hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/20 disabled:opacity-50"
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all shadow-sm active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
           >
-            {loading ? "Chargement..." : isSignup ? "Créer mon compte" : "Se connecter"}
-          </button>
-          
-          <button 
-            type="button"
-            onClick={() => setIsSignup(!isSignup)}
-            className="w-full text-center text-xs text-slate-400 hover:text-white transition-colors"
-          >
-            {isSignup ? "Déjà un compte ? Se connecter" : "Pas encore de compte ? S'inscrire"}
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : isSignup ? (
+              <>Créer mon compte <ArrowRight size={15} /></>
+            ) : (
+              <>Se connecter <ArrowRight size={15} /></>
+            )}
           </button>
         </form>
         
         {!Capacitor.isNativePlatform() && (
           <>
-            <div className="relative my-8">
+            <div className="relative my-4">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-white/10"></div>
+                <div className="w-full border-t border-slate-200"></div>
               </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-emerald-950 px-2 text-slate-500 font-bold">Ou continuer avec</span>
+              <div className="relative flex justify-center text-[11px]">
+                <span className="bg-white px-2.5 text-slate-400 font-medium">ou</span>
               </div>
             </div>
 
-            <div className="space-y-6">
-              <button 
-                onClick={onLogin}
-                disabled={isLoggingIn || loading}
-                className="w-full py-4 bg-white text-emerald-950 rounded-2xl font-black text-sm hover:bg-emerald-50 transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-95 disabled:opacity-50 group"
-              >
-                <div className="bg-white p-1 rounded-lg shadow-sm group-hover:rotate-12 transition-transform">
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
-                </div>
-                {isLoggingIn ? "Connexion..." : "Continuer avec Google"}
-              </button>
-            </div>
+            <button 
+              onClick={onLogin}
+              disabled={isLoggingIn || loading}
+              className="w-full py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl font-medium text-xs transition-all flex items-center justify-center gap-2.5 active:scale-[0.99] disabled:opacity-50 shadow-2xs"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4" alt="Google" />
+              {isLoggingIn ? "Connexion..." : "Continuer avec Google"}
+            </button>
           </>
         )}
-        
-        <div className="mt-12 pt-8 border-t border-white/5 grid grid-cols-3 gap-4">
-          {[
-            { icon: Truck, label: 'Livraison', color: 'text-emerald-400' },
-            { icon: Package, label: 'Qualité', color: 'text-sky-400' },
-            { icon: CheckCircle, label: 'Certifié', color: 'text-amber-400' }
-          ].map((item, i) => (
-            <div key={item.label} className="flex flex-col items-center gap-2">
-              <div className={`w-8 h-8 bg-white/5 rounded-xl flex items-center justify-center ${item.color}`}>
-                <item.icon size={16} />
-              </div>
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">{item.label}</span>
-            </div>
-          ))}
+
+        {/* Footer Navigation & Legal Links */}
+        <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-center gap-3 text-[11px] text-slate-500">
+          {onOpenShowcase && (
+            <>
+              <button 
+                type="button" 
+                onClick={onOpenShowcase} 
+                className="hover:text-emerald-600 font-medium transition-colors"
+              >
+                Présentation
+              </button>
+              <span>•</span>
+            </>
+          )}
+          <button 
+            type="button" 
+            onClick={() => onOpenLegal?.('cgu')} 
+            className="hover:text-emerald-600 font-medium transition-colors"
+          >
+            CGU
+          </button>
+          <span>•</span>
+          <button 
+            type="button" 
+            onClick={() => onOpenLegal?.('privacy')} 
+            className="hover:text-emerald-600 font-medium transition-colors"
+          >
+            Confidentialité
+          </button>
         </div>
       </motion.div>
     </div>
   );
 }
 
-function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, extraData: any) => void, isAdmin: boolean }) {
+function RoleSelectionView({ onSelect, isAdmin, settings }: { onSelect: (role: UserRole, extraData: any) => void, isAdmin: boolean, settings?: Settings | null }) {
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [formData, setFormData] = useState({
     authNumber: '',
@@ -2306,14 +3669,38 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
   const [showCGU, setShowCGU] = useState(false);
 
   const roles = [
-    { role: 'patient' as UserRole, icon: User, label: 'Patient', desc: 'Commander mes médicaments et me faire livrer.', color: 'from-emerald-500 to-teal-600', light: 'bg-emerald-50' },
-    { role: 'pharmacist' as UserRole, icon: Package, label: 'Pharmacien', desc: 'Gérer une officine et traiter des ordonnances.', color: 'from-blue-500 to-indigo-600', light: 'bg-blue-50' },
-    { role: 'delivery' as UserRole, icon: Truck, label: 'Livreur', desc: 'Effectuer des livraisons et gagner des revenus.', color: 'from-amber-500 to-orange-600', light: 'bg-amber-50' },
+    { 
+      role: 'patient' as UserRole, 
+      icon: User, 
+      label: 'Patient & Famille', 
+      desc: 'Transmettre mes ordonnances, comparer les devis d\'officines et me faire livrer rapidement.', 
+      badge: 'Particulier',
+      color: 'bg-emerald-600 text-white', 
+      accent: 'border-emerald-500/30 hover:border-emerald-500' 
+    },
+    { 
+      role: 'pharmacist' as UserRole, 
+      icon: Package, 
+      label: 'Officine & Pharmacien', 
+      desc: 'Réceptionner les ordonnances numériques, éditer des devis certifiés et gérer la dispensation.', 
+      badge: 'Professionnel de santé',
+      color: 'bg-sky-600 text-white', 
+      accent: 'border-sky-500/30 hover:border-sky-500' 
+    },
+    { 
+      role: 'delivery' as UserRole, 
+      icon: Truck, 
+      label: 'Livreur Santé Agréé', 
+      desc: 'Prendre en charge les plis scellés en officine et assurer la livraison sécurisée au domicile.', 
+      badge: 'Logistique sécurisée',
+      color: 'bg-amber-600 text-white', 
+      accent: 'border-amber-500/30 hover:border-amber-500' 
+    },
   ];
 
   if (isAdmin) {
-    roles.push({ role: 'admin' as UserRole, icon: ShieldCheck, label: 'Admin', desc: 'Gestion de la plateforme et configuration.', color: 'from-slate-700 to-slate-900', light: 'bg-slate-100' });
-    roles.push({ role: 'super-admin' as UserRole, icon: ShieldCheck, label: 'Super Admin', desc: 'Accès total à toutes les fonctionnalités.', color: 'from-purple-700 to-purple-900', light: 'bg-purple-100' });
+    roles.push({ role: 'admin' as UserRole, icon: ShieldCheck, label: 'Administration', desc: 'Pilotage de la plateforme, gestion des officines et modération.', badge: 'Supervision', color: 'bg-slate-800 text-white', accent: 'border-slate-400' });
+    roles.push({ role: 'super-admin' as UserRole, icon: ShieldCheck, label: 'Super Admin', desc: 'Accès intégral à l\'infrastructure et aux paramètres système.', badge: 'Accès Total', color: 'bg-purple-800 text-white', accent: 'border-purple-400' });
   }
 
   const handleConfirm = () => {
@@ -2437,17 +3824,24 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
         )}
       </>
 
-      <div className="max-w-6xl w-full relative z-10">
+      <div className="max-w-5xl w-full relative z-10 py-8">
         <motion.div 
-          initial={{ opacity: 0, y: -20 }}
+          initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-16"
+          className="text-center mb-12"
         >
-          <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center text-emerald-500 mx-auto mb-8 shadow-xl border border-emerald-50">
-            <LogoIcon size={96} />
+          <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl border border-slate-100 p-2">
+            <LogoIcon size={88} logoUrl={settings?.appLogoUrl} />
           </div>
-          <h2 className="text-5xl font-bold mb-4 text-slate-900 tracking-tight text-center">Bienvenue sur Ordonnance Direct</h2>
-          <p className="text-slate-500 max-w-md mx-auto font-medium text-lg text-center">Choisissez votre profil pour continuer votre expérience au Burkina Faso.</p>
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold uppercase tracking-wider mb-3">
+            Configuration initiale du compte
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+            Bienvenue sur {settings?.appName || 'Ordonnance Direct'}
+          </h2>
+          <p className="text-slate-500 max-w-lg mx-auto font-normal text-base mt-2">
+            Sélectionnez votre profil d'utilisation pour accéder à votre interface dédiée au {settings?.countryName || 'Burkina Faso'}.
+          </p>
         </motion.div>
 
         {!selectedRole ? (
@@ -2457,23 +3851,25 @@ function RoleSelectionView({ onSelect, isAdmin }: { onSelect: (role: UserRole, e
                 key={item.role}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.1 }}
+                transition={{ delay: i * 0.08 }}
                 onClick={() => setSelectedRole(item.role)}
-                className="group relative bg-white p-6 sm:p-8 rounded-3xl text-left border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
+                className={`group relative bg-white p-7 rounded-3xl text-left border-2 transition-all duration-300 shadow-sm hover:shadow-xl hover:-translate-y-1 flex flex-col justify-between ${item.accent}`}
               >
-                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center text-white mb-6 shadow-md group-hover:scale-105 transition-transform duration-300`}>
-                  <item.icon size={28} />
+                <div>
+                  <div className="flex items-center justify-between mb-5">
+                    <div className={`w-14 h-14 rounded-2xl ${item.color} flex items-center justify-center shadow-md group-hover:scale-105 transition-transform duration-300`}>
+                      <item.icon size={26} />
+                    </div>
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wider">
+                      {item.badge}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">{item.label}</h3>
+                  <p className="text-slate-500 leading-relaxed text-sm">{item.desc}</p>
                 </div>
-                <h3 className="text-xl font-bold mb-2 text-slate-900">{item.label}</h3>
-                <p className="text-slate-500 leading-relaxed mb-6 text-xs">{item.desc}</p>
                 
-                <div className="flex items-center gap-2 text-primary font-bold text-xs group-hover:gap-3 transition-all">
-                  Choisir <ChevronRight size={14} />
-                </div>
-
-                {/* Decorative element */}
-                <div className={`absolute top-4 right-4 w-10 h-10 rounded-full ${item.light} opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center`}>
-                  <ChevronRight size={16} className="text-current" />
+                <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm mt-6 pt-4 border-t border-slate-100 group-hover:gap-3 transition-all">
+                  Continuer comme {item.label} <ChevronRight size={16} />
                 </div>
               </motion.button>
             ))}
@@ -2807,161 +4203,165 @@ const PatientPrescriptionCard = React.memo(({
 
   const canDelete = !orders.some(o => o.prescriptionId === p.id && ['paid', 'preparing', 'ready', 'delivering', 'completed'].includes(o.status));
 
+  // Extract medication names
+  let medNames: string[] = [];
+  try {
+    if (p.extractedData) {
+      const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
+      if (jsonStr) {
+        const parsed = JSON.parse(jsonStr);
+        const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+        const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
+        medNames = displayMeds.map((m: any) => typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu'));
+      }
+    }
+  } catch (e) {
+    // fallback
+  }
+
+  const displayStatus = p.status as string;
+
   return (
     <motion.div 
       layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="bg-white p-3 sm:p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 group relative"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white dark:bg-slate-900/95 p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 group relative"
     >
-      <div className="flex gap-3 sm:gap-4">
+      {/* Left: Thumbnail + Core Metadata */}
+      <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+        {/* Prescription Thumbnail */}
         <div 
-          className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0 cursor-pointer group/img"
-          onClick={() => onViewImage(p.imageUrl)}
+          className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 flex-shrink-0 cursor-pointer group/img border border-slate-200/60 dark:border-slate-700/60"
+          onClick={() => p.imageUrl && onViewImage(p.imageUrl)}
         >
           {p.imageUrl ? (
             <>
-              <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500" loading="lazy" />
-              <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors flex items-center justify-center">
-                <div className="w-8 h-8 bg-white/40 rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
-                  <Search className="text-white" size={16} />
+              <img src={p.imageUrl} alt="Prescription" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-300" loading="lazy" />
+              <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors flex items-center justify-center">
+                <div className="w-6 h-6 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                  <Search className="text-white" size={12} />
                 </div>
               </div>
             </>
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100/50 text-slate-400">
-              <Camera size={24} />
-              <span className="text-[10px] font-bold mt-1 uppercase">Saisie</span>
+            <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
+              <Camera size={20} />
+              <span className="text-[9px] font-bold mt-0.5 uppercase">Saisie</span>
             </div>
           )}
         </div>
         
-        <div className="flex-1 min-w-0 py-0.5 flex flex-col justify-between">
-          <div className="space-y-1">
-            <div className="flex justify-between items-start">
-              <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-black uppercase tracking-tighter">#{p.id.slice(-4).toUpperCase()}</span>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-slate-400 font-bold">{p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}</span>
-                {canDelete && (
-                  <button 
-                    type="button"
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      console.log("Delete clicked", p.id);
-                      const associatedOrderIds = orders.filter(o => o.prescriptionId === p.id).map(o => o.id);
-                      onDelete(p.id, associatedOrderIds); 
-                    }}
-                    className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center transition-all relative z-50 shadow-sm"
-                    title="Supprimer l'ordonnance"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            </div>
-            <h4 className="text-sm font-black text-slate-900 pr-2 mt-1 line-clamp-2 leading-tight h-10">{p.hospitalLocation || "Ordonnance externe"}</h4>
+        {/* Main Details */}
+        <div className="flex-1 min-w-0 space-y-1">
+          {/* Header Row: ID + Date + Hospital */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-md font-black uppercase tracking-tight">
+              #{p.id.slice(-4).toUpperCase()}
+            </span>
+            <span className="text-[10px] text-slate-400 font-bold">
+              {p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}
+            </span>
+            <span className={`inline-flex items-center text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
+              displayStatus === 'draft' || displayStatus === 'analyzed' ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-500' :
+              displayStatus === 'submitted' ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 border border-amber-200/50 dark:border-amber-800/50' :
+              displayStatus === 'validated' ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600' :
+              displayStatus === 'preparing' ? 'bg-indigo-500 text-white' :
+              displayStatus === 'ready' ? 'bg-emerald-500 text-white' :
+              displayStatus === 'delivering' ? 'bg-sky-500 text-white' :
+              displayStatus === 'completed' ? 'bg-slate-500 text-white' :
+              'bg-rose-50 dark:bg-rose-950/50 text-rose-500'
+            }`}>
+              {getPrescriptionStatusLabel(p.status)}
+            </span>
           </div>
-          
-          <div className="mt-auto">
-            {(() => {
-              const displayStatus = p.status as string;
-              return (
-                <span className={`inline-flex items-center text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider ${
-                  displayStatus === 'draft' || displayStatus === 'analyzed' ? 'bg-indigo-50 text-indigo-500' :
-                  displayStatus === 'submitted' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
-                  displayStatus === 'validated' ? 'bg-emerald-50 text-emerald-600' :
-                  displayStatus === 'preparing' ? 'bg-indigo-500 text-white shadow-sm shadow-indigo-200' :
-                  displayStatus === 'ready' ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-200' :
-                  displayStatus === 'delivering' ? 'bg-sky-500 text-white shadow-sm shadow-sky-200' :
-                  displayStatus === 'completed' ? 'bg-slate-500 text-white shadow-sm shadow-slate-200' :
-                  'bg-rose-50 text-rose-500'
-                }`}>
-                  {getPrescriptionStatusLabel(p.status)}
+
+          <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
+            {p.hospitalLocation || "Ordonnance médicale externe"}
+          </h4>
+
+          {/* Medications Horizontal Pills */}
+          {medNames.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mr-1">Médicaments :</span>
+              {medNames.slice(0, 4).map((name, i) => (
+                <span key={i} className="inline-flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200/50 dark:border-emerald-800/40 text-[10px] px-2 py-0.5 rounded-md font-semibold truncate max-w-[150px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                  <span className="truncate">{name}</span>
                 </span>
-              );
-            })()}
-          </div>
+              ))}
+              {medNames.length > 4 && (
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-md">
+                  +{medNames.length - 4} autres
+                </span>
+              )}
+            </div>
+          ) : !p.extractedData && (p.status === 'draft' || p.status === 'analyzed') ? (
+            <div className="flex items-center gap-2 text-slate-400 text-[10px] font-bold">
+              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
+              <span>Analyse et extraction automatique en cours...</span>
+            </div>
+          ) : null}
+
+          {/* Rejection notice */}
+          {(p.status === 'rejected' || p.status === 'rejected_by_limit') && (
+            <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200/60 dark:border-rose-900/60 p-2 rounded-xl flex items-center gap-2 mt-1">
+              <AlertCircle className="text-rose-500 shrink-0" size={14} />
+              <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300 truncate">
+                Rejet : {p.rejectionReason || "Motif non spécifié."}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {(p.status === 'rejected' || p.status === 'rejected_by_limit') && (
-        <div className="bg-rose-50 border border-rose-100 p-3 rounded-2xl flex items-start gap-2.5 mt-1">
-          <AlertCircle className="text-rose-500 shrink-0 mt-0.5 animate-pulse" size={16} />
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black text-rose-800 uppercase tracking-wider">Motif du rejet :</p>
-            <p className="text-xs font-bold text-rose-600 mt-0.5 break-words">{p.rejectionReason || "Motif non spécifié."}</p>
+      {/* Right: Actions in line */}
+      <div className="flex items-center gap-2 self-stretch md:self-center shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
+        {(p.status === 'draft' || p.status === 'analyzed') && p.extractedData && (
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <button 
+              type="button"
+              onClick={async (e) => {
+                e.stopPropagation();
+                setIsLoading(true);
+                try { await onRequestQuote(p, 'all'); } finally { setIsLoading(false); }
+              }} 
+              disabled={isLoading}
+              className="flex-1 md:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-tight transition-all shadow-sm hover:shadow-emerald-600/20 active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              {isLoading ? <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div> : <CheckCircle size={14} />}
+              Complet
+            </button>
+            <button 
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowPartialSelect(p);
+              }} 
+              disabled={isLoading}
+              className="flex-1 md:flex-initial bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-tight transition-all active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <Plus size={14} />
+              Partiel
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {!p.extractedData && (p.status === 'draft' || p.status === 'analyzed') && (
-        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
-          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse en cours...</p>
-        </div>
-      )}
-
-      {p.extractedData && (
-        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
-            Médicaments
-            {p.requestType === 'partial' && <span className="text-primary italic flex items-center gap-1"><Plus size={10} /> Partiel</span>}
-          </p>
-          <div className="space-y-1.5 overflow-hidden">
-            {(() => {
-              try {
-                const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                if (!jsonStr) return <p className="text-[10px] text-slate-600 font-medium whitespace-pre-wrap">{p.extractedData || 'Données en attente'}</p>;
-                const parsed = JSON.parse(jsonStr);
-                const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
-                const displayMeds = p.requestType === 'partial' && p.selectedMedications ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament))) : meds;
-
-                return displayMeds.slice(0, 3).map((m: any, i: number) => {
-                  const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
-                  return (
-                    <div key={i} className="flex items-center gap-2 text-[10px] sm:text-xs">
-                      <div className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0"></div>
-                      <span className="font-bold text-slate-700 truncate">{name}</span>
-                    </div>
-                  );
-                });
-              } catch (e) { return <p className="text-[10px] text-slate-400 italic">Analyse manuelle requise</p>; }
-            })()}
-          </div>
-        </div>
-      )}
-
-      {(p.status === 'draft' || p.status === 'analyzed') && p.extractedData && (
-        <div className="flex gap-3 mt-1 relative z-50">
+        {canDelete && (
           <button 
             type="button"
-            onClick={async (e) => {
-              e.stopPropagation();
-              console.log("Complet clicked", p.id);
-              setIsLoading(true);
-              try { await onRequestQuote(p, 'all'); } finally { setIsLoading(false); }
-            }} 
-            disabled={isLoading}
-            className="flex-1 bg-primary text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-primary/90 transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              const associatedOrderIds = orders.filter(o => o.prescriptionId === p.id).map(o => o.id);
+              onDelete(p.id, associatedOrderIds); 
+            }}
+            className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/50 flex items-center justify-center transition-all shrink-0"
+            title="Supprimer l'ordonnance"
           >
-            {isLoading ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : <CheckCircle size={14} />}
-            Complet
+            <Trash2 size={15} />
           </button>
-          <button 
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              console.log("Partiel clicked", p.id);
-              onShowPartialSelect(p);
-            }} 
-            disabled={isLoading}
-            className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl text-[11px] font-black uppercase tracking-tight hover:bg-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Plus size={14} />
-            Partiel
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </motion.div>
   );
 });
@@ -2988,6 +4388,7 @@ const PatientOrderCard = React.memo(({
   compact?: boolean
 }) => {
   const [availableDrivers, setAvailableDrivers] = useState<number | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     if (o.status === 'pending_quote' && !o.deliveryMethod) {
@@ -3004,311 +4405,350 @@ const PatientOrderCard = React.memo(({
     }
   }, [o.status, o.deliveryMethod]);
 
+  const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'verifying_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
+  const currentStepIdx = stepsArr.indexOf(o.status);
+
   return (
     <motion.div 
       layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all duration-300 group"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-emerald-500/40 hover:shadow-sm transition-all text-slate-800 dark:text-slate-100 ${
+        compact ? 'rounded-xl p-2.5 sm:p-3 shadow-2xs' : 'rounded-2xl p-3 sm:p-4 shadow-xs'
+      }`}
     >
-      <div className={`flex flex-col ${compact ? '' : 'md:flex-row'} h-full`}>
-        {/* Left Summary Pane */}
-        <div className={`${compact ? '' : 'md:w-56'} bg-slate-50/50 p-4 sm:p-5 border-b ${compact ? '' : 'md:border-b-0 md:border-r'} border-slate-100 flex flex-col justify-between shrink-0`}>
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 bg-white rounded-xl shadow-sm border border-slate-100">
-                <Package size={18} className="text-primary" />
+      {compact ? (
+        /* TRULY COMPACT LAYOUT FOR HISTORY/LEDGER */
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {o.prescriptionImageUrl ? (
+                <div 
+                  onClick={() => onViewImage(o.prescriptionImageUrl!)}
+                  className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/60 dark:border-slate-700 shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                  title="Voir l'ordonnance"
+                >
+                  <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" loading="lazy" />
+                </div>
+              ) : (
+                <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 dark:text-slate-500 font-bold text-[10px] shrink-0">
+                  #{o.id.slice(-2).toUpperCase()}
+                </div>
+              )}
+
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-extrabold text-slate-900 dark:text-white text-[11px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                    #{o.id.slice(-6).toUpperCase()}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold">{formatDate(o.createdAt, 'dateTime')}</span>
+                </div>
+                <p className="font-bold text-slate-700 dark:text-slate-300 truncate text-[11px] flex items-center gap-1">
+                  <Building2 size={11} className="text-slate-400 shrink-0" />
+                  <span className="truncate">{o.pharmacyName || 'Pharmacie Partenaire'}</span>
+                </p>
+                {o.items && o.items.length > 0 && (
+                  <p className="text-[10px] text-slate-400 truncate max-w-[180px] sm:max-w-md">
+                    {o.items.map(item => `${item.name} x${item.quantity}`).join(', ')}
+                  </p>
+                )}
               </div>
-              <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
-                o.status === 'ready' || o.status === 'delivering' || o.status === 'paid' || o.status === 'completed' ? 'bg-emerald-500 text-white shadow-sm' : 
-                o.status === 'pending_payment' ? 'bg-amber-500 text-white shadow-sm' : 
-                'bg-slate-900 text-white text-center min-w-[60px]'
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="text-right">
+                <span className="font-black text-emerald-600 dark:text-emerald-400 text-xs block">
+                  {(o.totalAmount || 0).toLocaleString()} F
+                </span>
+                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
+                  o.status === 'completed' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                }`}>
+                  {getOrderStatusLabel(o.status)}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => onChat(o.id)}
+                  className="relative p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 hover:text-emerald-600 dark:text-slate-400 rounded-lg transition-colors border border-slate-200/50 dark:border-slate-700"
+                  title="Chat"
+                >
+                  <MessageCircle size={13} />
+                  {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full">
+                      {o.unreadCounts[profile?.role || 'patient']}
+                    </span>
+                  )}
+                </button>
+
+                {o.status === 'completed' && (
+                  <button 
+                    onClick={() => generateInvoice(o, profile)}
+                    className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-lg transition-colors border border-slate-200/50 dark:border-slate-700"
+                    title="Facture PDF"
+                  >
+                    <FileText size={13} />
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setShowDetails(!showDetails)}
+                  className="p-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-lg border border-slate-200/50 dark:border-slate-700"
+                  title="Détails"
+                >
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${showDetails ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {showDetails && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs"
+            >
+              {(o.deliveryPhoto || o.deliverySignature) && (
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-500">Preuves :</span>
+                  {o.deliveryPhoto && (
+                    <button onClick={() => onViewImage(o.deliveryPhoto!)} className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200">
+                      <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
+                    </button>
+                  )}
+                  {o.deliverySignature && (
+                    <button onClick={() => onViewImage(o.deliverySignature!)} className="w-10 h-10 rounded-lg border border-slate-200 p-0.5 bg-white">
+                      <img src={o.deliverySignature} className="w-full h-full object-contain" />
+                    </button>
+                  )}
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Historique des étapes</p>
+                <StatusTrace history={o.history} />
+              </div>
+            </motion.div>
+          )}
+        </div>
+      ) : (
+        /* DETAILED LAYOUT FOR ACTIVE ORDERS - ALREADY MORE SLICK & COMPACT */
+        <>
+          {/* Sleek Header Row */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <span className="text-[10px] font-black bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2 py-0.5 rounded-lg tracking-wider shadow-xs">
+                #{o.id.slice(-6).toUpperCase()}
+              </span>
+              <span className="text-[9px] text-slate-400 font-bold">
+                {formatDate(o.createdAt, 'dateTime')}
+              </span>
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate max-w-[170px] sm:max-w-[240px]">
+                <Building2 size={12} className="text-slate-400 shrink-0" />
+                <span className="truncate">{o.pharmacyName || 'Pharmacie en attente'}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-lg border border-emerald-100/80 dark:border-emerald-900/50">
+                {(o.totalAmount || 0).toLocaleString()} F
+              </span>
+              <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-wider ${
+                o.status === 'ready' || o.status === 'delivering' || o.status === 'paid' || o.status === 'completed' ? 'bg-emerald-500 text-white shadow-xs' : 
+                o.status === 'pending_payment' ? 'bg-amber-500 text-white' : 
+                'bg-slate-800 text-white'
               }`}>
                 {getOrderStatusLabel(o.status)}
               </span>
             </div>
-            <h4 className="text-base font-black text-slate-900 leading-tight">#{o.id.slice(-6).toUpperCase()}</h4>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Créée le {formatDate(o.createdAt, 'dateTime')}</p>
-            
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center gap-2 text-xs text-slate-600 font-bold">
-                <Building2 size={14} className="text-slate-400 shrink-0" />
-                <span className="truncate">{o.pharmacyName || 'Pharmacie en attente'}</span>
-              </div>
-              <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-100">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
-                <span className="text-sm font-black text-primary">{(o.totalAmount || 0).toLocaleString()} F</span>
-              </div>
-            </div>
           </div>
 
-          <div className="mt-4 md:mt-2 flex gap-2">
-            <button 
-              onClick={() => onChat(o.id)}
-              className="relative flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
-            >
-              <MessageCircle size={14} /> Chat
-              {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                  {o.unreadCounts[profile?.role || 'patient']}
-                </span>
-              )}
-            </button>
-            {o.prescriptionImageUrl && (
-              <button 
-                onClick={() => onViewImage(o.prescriptionImageUrl!)}
-                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform shrink-0"
-              >
-                <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" loading="lazy" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Right Tracking Pane */}
-        <div className="flex-1 p-4 sm:p-5 flex flex-col justify-center min-w-0">
-          {/* Horizontal Minimal Stepper */}
-          <div className="relative mb-6 px-1">
-            <div className="absolute top-[14px] left-0 w-full h-[2px] bg-slate-100 rounded-full"></div>
-            <div 
-              className="absolute top-[14px] left-0 h-[2px] bg-primary rounded-full transition-all duration-1000"
-              style={{ 
-                width: (() => {
-                  const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'verifying_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
-                  const idx = stepsArr.indexOf(o.status);
-                  if (idx < 4) return '0%';
-                  if (idx === 4) return '15%'; // verifying_payment
-                  if (idx === 5) return '35%'; // paid
-                  if (idx === 6) return '55%'; // preparing
-                  if (idx === 7) return '80%'; // ready
-                  return '100%';
-                })()
-              }}
-            ></div>
-            <div className="flex justify-between relative z-10 w-full">
+          {/* Main Body */}
+          <div className="pt-2 space-y-2">
+            {/* Horizontal Mini Progress Stepper */}
+            <div className="flex items-center justify-between gap-1 bg-slate-50 dark:bg-slate-800/60 p-1.5 rounded-xl border border-slate-100 dark:border-slate-800/80 text-[8px] font-black uppercase text-slate-500">
               {[
-                { label: 'Vérif', status: 'verifying_payment', icon: ShieldCheck },
-                { label: 'Payé', status: 'paid', icon: CreditCard },
-                { label: 'Prépa', status: 'preparing', icon: FlaskConical },
-                { label: 'Prêt', status: 'ready', icon: CheckCircle2 },
-                { label: 'Livré', status: 'completed', icon: Home },
+                { label: 'Vérif', statusIdx: 4, icon: ShieldCheck },
+                { label: 'Payé', statusIdx: 5, icon: CreditCard },
+                { label: 'Prépa', statusIdx: 6, icon: FlaskConical },
+                { label: 'Prêt', statusIdx: 7, icon: CheckCircle2 },
+                { label: 'Livré', statusIdx: 9, icon: Home },
               ].map((s, idx) => {
-                const stepsArr = ['submitted', 'validated', 'pending_quote', 'pending_payment', 'verifying_payment', 'paid', 'preparing', 'ready', 'delivering', 'completed'];
-                const currentStepIdx = stepsArr.indexOf(o.status);
-                const targetStepIdx = stepsArr.indexOf(s.status);
-                const isDone = currentStepIdx >= targetStepIdx && targetStepIdx !== -1;
-                const isActive = o.status === s.status;
-                
+                const isDone = currentStepIdx >= s.statusIdx;
+                const isActive = currentStepIdx === s.statusIdx;
                 return (
-                  <div key={s.label} className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-500 scale-100 shrink-0 ${
-                      isDone ? 'bg-primary text-white shadow-sm' : 'bg-white border text-slate-200'
-                    } ${isActive ? 'ring-2 ring-primary/20 scale-110' : ''}`}>
-                      <s.icon size={12} />
+                  <div key={s.label} className="flex items-center gap-1 flex-1 justify-center min-w-0">
+                    <div className={`w-4.5 h-4.5 rounded-md flex items-center justify-center shrink-0 transition-all ${
+                      isDone ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'
+                    } ${isActive ? 'ring-2 ring-emerald-400 scale-105' : ''}`}>
+                      <s.icon size={10} />
                     </div>
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-tight text-center w-full truncate ${isDone ? 'text-slate-900' : 'text-slate-300'}`}>
+                    <span className={`hidden sm:inline text-[8px] truncate ${isDone ? 'text-slate-900 dark:text-white font-extrabold' : 'text-slate-400'}`}>
                       {s.label}
                     </span>
+                    {idx < 4 && <div className={`h-0.5 flex-1 rounded-full ${currentStepIdx > s.statusIdx ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`} />}
                   </div>
                 );
               })}
             </div>
-          </div>
 
-          <div className="space-y-4">
-            {o.status === 'quote_rejected' && (
-              <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-black text-rose-950">Devis refusé</p>
-                    <p className="text-xs text-rose-700 font-medium leading-relaxed">Vous avez rejeté ce devis. Votre ordonnance a été remise en recherche.</p>
-                  </div>
-                  <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center shrink-0">
-                    <X size={20} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {o.status === 'completed' && (
-              <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-black text-slate-900">Commande terminée</p>
-                    <p className="text-xs text-slate-500 font-medium">Votre santé est notre priorité.</p>
-                  </div>
-                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
-                    <CheckCircle size={20} />
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => generateInvoice(o, profile)}
-                    className="flex-1 bg-slate-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
-                  >
-                    <FileText size={14} /> Facture PDF
-                  </button>
-                  {o.deliveryPhoto && (
+            {/* Action Controls & Notifications */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+              <div className="flex-1 min-w-0">
+                {o.status === 'pending_quote' && !o.deliveryMethod && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-black text-slate-700 dark:text-slate-200 shrink-0">Réception :</span>
                     <button 
-                      onClick={() => onViewImage(o.deliveryPhoto!)}
-                      className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 hover:scale-105 transition-transform shrink-0"
+                      onClick={() => onSelectDeliveryMethod(o.id, 'pickup')}
+                      className="bg-slate-100 dark:bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-800 dark:text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border border-slate-200/60 dark:border-slate-700"
                     >
-                      <img src={o.deliveryPhoto} className="w-full h-full object-cover" loading="lazy" />
+                      <Store size={12} /> Retrait libre (Gratuit)
                     </button>
-                  )}
-                  {o.deliverySignature && (
                     <button 
-                      onClick={() => onViewImage(o.deliverySignature!)}
-                      className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-1 hover:scale-105 transition-transform shrink-0"
+                      onClick={() => onSelectDeliveryMethod(o.id, 'delivery')}
+                      className="bg-orange-50 dark:bg-orange-950/40 hover:bg-orange-500 hover:text-white text-orange-700 dark:text-orange-300 border border-orange-200/80 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
                     >
-                      <img src={o.deliverySignature} className="max-h-full object-contain" />
+                      <Truck size={12} /> Livraison ({calculateDeliveryFee(settings)} F)
                     </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {o.status === 'verifying_payment' && (
-              <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between group/verify">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center animate-pulse">
-                    <ShieldCheck size={24} />
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-900">Vérification en cours</p>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
-                      Un agent confirme votre paiement USSD.<br/>Reçu par SMS sous peu.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end">
-                  <div className="w-5 h-5 border-2 border-indigo-600/30 border-t-indigo-600 rounded-full animate-spin"></div>
-                </div>
-              </div>
-            )}
+                )}
 
-            {o.status === 'pending_payment' && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-primary/5 border border-primary/10 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4"
-              >
-                <div className="text-center sm:text-left">
-                  <p className="text-sm font-black text-slate-900">Devis disponible !</p>
-                  <p className="text-xs text-slate-500">Validez et payez pour lancer la préparation.</p>
-                </div>
+                {o.status === 'pending_payment' && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-extrabold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-lg border border-amber-200/60">
+                      Devis prêt
+                    </span>
+                    <button 
+                      onClick={() => onApproveQuote(o)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider shadow-xs hover:shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1"
+                    >
+                      <CreditCard size={12} /> Payer {(o.totalAmount || 0).toLocaleString()} F
+                    </button>
+                  </div>
+                )}
+
+                {o.status === 'verifying_payment' && (
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 rounded-xl border border-indigo-100 dark:border-indigo-900">
+                    <ShieldCheck size={13} className="text-indigo-600 animate-pulse shrink-0" />
+                    <span>Paiement en cours de vérification</span>
+                  </div>
+                )}
+
+                {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-1 rounded-xl flex items-center gap-1 text-xs font-bold shadow-xs">
+                      <QrCode size={12} className="text-emerald-400 dark:text-emerald-600" />
+                      <span>Code : <strong className="text-emerald-400 dark:text-emerald-700 font-black tracking-widest">#{o.deliveryCode}</strong></span>
+                    </div>
+                    {o.status === 'delivering' && o.deliveryId && (
+                      <button onClick={() => onShowMap(o)} className="bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200/60 px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1 hover:bg-sky-100 transition-colors">
+                        <MapPin size={11} /> Suivre coursier
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {o.status === 'completed' && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-lg">
+                      <CheckCircle size={12} /> Livré
+                    </span>
+                    <button 
+                      onClick={() => generateInvoice(o, profile)}
+                      className="bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-1 rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
+                    >
+                      <FileText size={12} /> Facture PDF
+                    </button>
+                  </div>
+                )}
+
+                {o.status === 'quote_rejected' && (
+                  <div className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg inline-flex items-center gap-1">
+                    <X size={12} /> Devis refusé
+                  </div>
+                )}
+              </div>
+
+              {/* Right Action Icons (Chat, Image, Toggle details) */}
+              <div className="flex items-center gap-1 shrink-0">
                 <button 
-                  onClick={() => onApproveQuote(o)}
-                  className="w-full sm:w-auto px-6 py-2.5 bg-primary text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-sm hover:scale-105 transition-all"
+                  onClick={() => onChat(o.id)}
+                  className="relative px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
                 >
-                  Payer {(o.totalAmount || 0).toLocaleString()} F
+                  <MessageCircle size={12} />
+                  <span>Chat</span>
+                  {o.unreadCounts?.[profile?.role || 'patient'] > 0 && (
+                    <span className="w-3.5 h-3.5 bg-rose-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full">
+                      {o.unreadCounts[profile?.role || 'patient']}
+                    </span>
+                  )}
                 </button>
+
+                {o.prescriptionImageUrl && (
+                  <button 
+                    onClick={() => onViewImage(o.prescriptionImageUrl!)}
+                    className="w-7 h-7 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 hover:scale-105 transition-transform shrink-0"
+                    title="Voir l'ordonnance"
+                  >
+                    <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" loading="lazy" />
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setShowDetails(!showDetails)}
+                  className="px-2 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1 border border-slate-200/50 dark:border-slate-700"
+                  title="Détails"
+                >
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${showDetails ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Collapsible Details */}
+            {showDetails && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs"
+              >
+                {/* Driver warning info */}
+                {o.status === 'pending_quote' && !o.deliveryMethod && availableDrivers !== null && (
+                  <div className={`p-2 rounded-xl border flex items-center gap-1.5 ${
+                    availableDrivers > 0 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    <Truck size={12} className="shrink-0" />
+                    <span>{availableDrivers > 0 ? `${availableDrivers} livreur(s) disponible(s)` : 'Aucun livreur de garde. Choisissez le retrait direct.'}</span>
+                  </div>
+                )}
+
+                {/* Proofs */}
+                {(o.deliveryPhoto || o.deliverySignature) && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500">Preuves :</span>
+                    {o.deliveryPhoto && (
+                      <button onClick={() => onViewImage(o.deliveryPhoto!)} className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200">
+                        <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
+                      </button>
+                    )}
+                    {o.deliverySignature && (
+                      <button onClick={() => onViewImage(o.deliverySignature!)} className="w-10 h-10 rounded-lg border border-slate-200 p-0.5 bg-white">
+                        <img src={o.deliverySignature} className="w-full h-full object-contain" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Status History Trace */}
+                <div>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Historique des étapes</p>
+                  <StatusTrace history={o.history} />
+                </div>
               </motion.div>
             )}
-
-            {o.status === 'pending_quote' && !o.deliveryMethod && (
-              <div className="bg-amber-50/50 border border-amber-100 p-5 rounded-2xl space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-amber-600 shadow-sm shrink-0 border border-amber-100/50">
-                    <Package size={24} />
-                  </div>
-                  <div>
-                    <h5 className="text-sm font-black text-slate-900 tracking-tight">Comment recevoir ?</h5>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed">Choisissez pour passer au paiement.</p>
-                  </div>
-                </div>
-
-                {availableDrivers !== null && (
-                  <div className={`p-3 rounded-xl border flex items-start gap-3 ${availableDrivers > 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-orange-50 border-orange-100'}`}>
-                    <div className={`mt-0.5 w-6 h-6 rounded flex-shrink-0 flex items-center justify-center ${availableDrivers > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-orange-100 text-orange-600'}`}>
-                      {availableDrivers > 0 ? <Truck size={12} /> : <AlertCircle size={12} />}
-                    </div>
-                    <div>
-                      <p className={`text-xs font-black leading-tight ${availableDrivers > 0 ? 'text-emerald-900' : 'text-orange-900'}`}>
-                        {availableDrivers > 0 ? `${availableDrivers} livreur${availableDrivers > 1 ? 's' : ''} disponible${availableDrivers > 1 ? 's' : ''}` : 'Aucun livreur disponible en ce moment'}
-                      </p>
-                      <p className={`text-[10px] mt-0.5 leading-relaxed ${availableDrivers > 0 ? 'text-emerald-700' : 'text-orange-700'}`}>
-                        {availableDrivers > 0 ? "Vous pouvez choisir la livraison à domicile." : "La livraison pourrait connaître un retard. Vous pouvez tout de même la demander ou choisir le retrait sur place."}
-                      </p>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => onSelectDeliveryMethod(o.id, 'pickup')}
-                    className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-primary hover:bg-primary/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
-                  >
-                    <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                      <Store size={16} />
-                    </div>
-                    <div>
-                      <p className="font-black text-xs text-slate-900 group-hover:text-primary transition-colors">Sur place</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Gratuit</p>
-                    </div>
-                  </button>
-
-                  <button 
-                    onClick={() => onSelectDeliveryMethod(o.id, 'delivery')}
-                    className="group bg-white p-4 rounded-xl border border-slate-100 hover:border-orange-500 hover:bg-orange-500/[0.02] transition-all text-left flex items-start gap-3 shadow-sm hover:shadow-md"
-                  >
-                    <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-orange-500/10 group-hover:text-orange-500 transition-all">
-                      <Truck size={16} />
-                    </div>
-                    <div>
-                      <p className="font-black text-xs text-slate-900 group-hover:text-orange-500 transition-colors">Livraison</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{calculateDeliveryFee(settings)} F</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {o.deliveryCode && (o.status === 'ready' || o.status === 'delivering') && (
-              <div className="bg-slate-900 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center border border-white/10">
-                    <QrCode size={24} className="text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-0.5">Code de securité</p>
-                    <p className="text-2xl font-black tracking-widest">#{o.deliveryCode}</p>
-                  </div>
-                </div>
-                {o.status === 'delivering' && o.deliveryId && (
-                  <div className="flex items-center gap-3 bg-white/5 p-2 pr-3 rounded-xl border border-white/10">
-                    <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/20 shrink-0 bg-white/10 flex items-center justify-center">
-                      {o.deliveryPersonPhoto ? <img src={o.deliveryPersonPhoto} className="w-full h-full object-cover" /> : <User size={16} />}
-                    </div>
-                    <div className="hidden sm:block">
-                      <p className="text-[8px] font-black text-white/40 uppercase tracking-widest leading-none mb-0.5">Coursier</p>
-                      <p className="text-[10px] font-black truncate max-w-[80px]">{o.deliveryPersonName}</p>
-                    </div>
-                    <button onClick={() => onShowMap(o)} className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white hover:bg-primary/80 transition-all shrink-0">
-                      <MapPin size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-
-          <div className="mt-4 pt-4 border-t border-slate-50">
-            <details className="group">
-              <summary className="list-none flex items-center justify-between cursor-pointer">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Historique du statut</span>
-                  <div className="h-[1px] w-8 bg-slate-100"></div>
-                </div>
-                <ChevronDown size={14} className="text-slate-400 group-open:rotate-180 transition-transform" />
-              </summary>
-              <div className="mt-4">
-                <StatusTrace history={o.history} />
-              </div>
-            </details>
-          </div>
-        </div>
-      </div>
+        </>
+      )}
     </motion.div>
   );
 });
@@ -3321,6 +4761,14 @@ const PatientDashboard = React.memo(({ profile, settings, location, cities, rota
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<'prescriptions' | 'orders' | 'pharmacies' | 'history'>('prescriptions');
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const mainEl = document.querySelector('main');
+    if (mainEl) mainEl.scrollTop = 0;
+  }, [activeTab]);
   const [hospitalLocation, setHospitalLocation] = useState('');
   const [hospitalSuggestions, setHospitalSuggestions] = useState<string[]>([]);
   const [showHospitalSuggestions, setShowHospitalSuggestions] = useState(false);
@@ -4520,55 +5968,37 @@ Format JSON attendu (strict):
         {/* Background Decorative Element */}
         <div className="fixed inset-0 pharmacy-pattern pointer-events-none -z-10"></div>
         
-        {/* Pharmacy Header (Android style) */}
-        <div className="bg-emerald-600 rounded-[2rem] p-4 relative overflow-hidden shadow-xl shadow-emerald-600/10">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
-        <div className="relative flex items-center gap-4 text-white">
-          <div className="w-10 h-10 bg-white/25 border border-white/10 rounded-xl flex items-center justify-center">
-            <Plus size={20} className="text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-black tracking-tight uppercase leading-none">Portail Patient</h1>
-            <p className="text-emerald-100 text-[9px] font-bold uppercase tracking-widest mt-1 opacity-80 underline underline-offset-2">Santé & Pharmacie Online</p>
-          </div>
-        </div>
-      </div>
+        {/* Professional Healthcare Portal Header */}
+        <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-r from-emerald-800 via-emerald-900 to-slate-900 p-5 sm:p-6 text-white shadow-xl shadow-emerald-950/15 border border-emerald-600/30">
+          <div className="absolute top-0 right-0 w-72 h-72 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/2" />
+          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[11px] font-bold uppercase tracking-wider">
+                <ShieldCheck size={13} className="text-emerald-400" />
+                <span>Espace Patient • Burkina Faso</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2">
+                Bonjour, <span className="capitalize">{profile.name || 'Patient'}</span>
+              </h1>
+            </div>
 
-      {/* Welcome & Stats */}
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-          >
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">Salut, {profile.name} 👋</h2>
-            <p className="text-slate-500 mt-1 text-base sm:text-lg">Gérez vos ordonnances simplement.</p>
-          </motion.div>
-          
-          <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-2 sm:pb-0 scrollbar-hide">
-            <div className="medical-card p-4 sm:p-6 flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[180px]">
-              <div className="w-10 h-10 sm:w-14 sm:h-14 bg-emerald-100 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-600 shadow-sm">
-                <FileText size={20} className="sm:hidden" />
-                <FileText size={28} className="hidden sm:block" />
+            {/* Essential Metrics */}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="px-4 py-2.5 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center gap-3">
+                <div className="text-left">
+                  <p className="text-[10px] font-bold text-emerald-200 uppercase tracking-wider">Ordonnances</p>
+                  <p className="text-xl font-black text-white leading-none mt-1">{prescriptions.length}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ordos</p>
-                <p className="text-xl sm:text-3xl font-black text-slate-900">{prescriptions.length}</p>
-              </div>
-            </div>
-            <div className="medical-card p-4 sm:p-6 flex items-center gap-3 sm:gap-4 min-w-[140px] sm:min-w-[180px]">
-              <div className="w-10 h-10 sm:w-14 sm:h-14 bg-sky-100 rounded-xl sm:rounded-2xl flex items-center justify-center text-sky-600 shadow-sm">
-                <Package size={20} className="sm:hidden" />
-                <Package size={28} className="hidden sm:block" />
-              </div>
-              <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Suivi</p>
-                <p className="text-xl sm:text-3xl font-black text-slate-900">{orders.filter(o => o.status !== 'completed').length}</p>
+              <div className="px-4 py-2.5 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center gap-3">
+                <div className="text-left">
+                  <p className="text-[10px] font-bold text-sky-200 uppercase tracking-wider">En cours</p>
+                  <p className="text-xl font-black text-white leading-none mt-1">{orders.filter(o => o.status !== 'completed').length}</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
       {/* Navigation Tabs (Desktop Side, Mobile Bottom) */}
       <div className="flex flex-col md:flex-row gap-8">
@@ -4646,64 +6076,84 @@ Format JSON attendu (strict):
           <div key={activeTab} className="space-y-6">
               {activeTab === 'prescriptions' && (
                 <>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-              <div>
-                <h3 className="text-2xl font-bold text-slate-900">Mes Ordonnances</h3>
-                <p className="text-slate-500 text-sm">Envoyez vos ordonnances pour recevoir des devis.</p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
-                <div className="flex items-center gap-3 bg-white px-4 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-colors min-w-[200px] relative">
-                  <MapPin size={20} className="text-primary shrink-0" />
-                  <select
-                    value={patientCityId}
-                    onChange={(e) => setPatientCityId(e.target.value)}
-                    className="bg-transparent outline-none text-sm w-full font-bold text-slate-700 cursor-pointer appearance-none pr-10"
-                  >
-                    <option value="">📍 Choisissez votre ville...</option>
-                    {cities.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <button 
-                    onClick={autoDetectCity}
-                    disabled={isLocating}
-                    title="Détecter ma position"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-primary/5 text-primary rounded-xl hover:bg-primary/20 transition-all disabled:opacity-50"
-                  >
-                    {isLocating ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div> : <Navigation size={16} />}
-                  </button>
+            {/* Prescription Creation Card */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-600 mb-1">
+                    <FileText size={14} /> Nouvelle Demande
+                  </div>
+                  <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+                    Transmettre une Ordonnance
+                  </h3>
+                  <p className="text-slate-500 text-sm mt-0.5">
+                    Prenez en photo votre ordonnance ou saisissez vos médicaments pour recevoir les offres des pharmacies.
+                  </p>
                 </div>
-                <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-all relative">
-                  <Hospital size={20} className="text-primary shrink-0" />
-                  <input 
-                    type="text" 
-                    placeholder="Établissement ou Médecin (Optionnel)" 
-                    value={hospitalLocation}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setHospitalLocation(val);
-                      if (val.length > 1) {
-                        const filtered = BURKINA_HOSPITALS.filter(h => h.toLowerCase().includes(val.toLowerCase()));
-                        setHospitalSuggestions(filtered);
-                        setShowHospitalSuggestions(filtered.length > 0);
-                      } else {
-                        setShowHospitalSuggestions(false);
-                      }
-                    }}
-                    onFocus={() => {
-                      if (hospitalLocation.length > 1) {
-                        setShowHospitalSuggestions(hospitalSuggestions.length > 0);
-                      }
-                    }}
-                    className="bg-transparent outline-none text-sm w-full sm:w-64 font-bold text-slate-700 placeholder:text-slate-400 placeholder:font-normal"
-                  />
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <div className="flex items-center gap-2 bg-slate-50 px-3.5 py-2 rounded-2xl border border-slate-200 text-xs font-semibold text-slate-700">
+                    <MapPin size={15} className="text-emerald-600 shrink-0" />
+                    <select
+                      value={patientCityId}
+                      onChange={(e) => setPatientCityId(e.target.value)}
+                      className="bg-transparent outline-none font-bold text-slate-800 cursor-pointer pr-2"
+                    >
+                      <option value="">Ville (Burkina Faso)...</option>
+                      {cities.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={autoDetectCity}
+                      disabled={isLocating}
+                      title="Détecter ma position GPS"
+                      className="p-1 rounded-lg hover:bg-emerald-100 text-emerald-600 transition-colors disabled:opacity-50"
+                    >
+                      {isLocating ? <div className="w-3.5 h-3.5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" /> : <Navigation size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Optional details & landmarks */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="relative">
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    Établissement ou Médecin prescripteur (Optionnel)
+                  </label>
+                  <div className="flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-200 focus-within:border-emerald-500 focus-within:bg-white transition-all">
+                    <Hospital size={18} className="text-slate-400 shrink-0" />
+                    <input 
+                      type="text" 
+                      placeholder="Ex: CHU Yalgado, Polyclinique..." 
+                      value={hospitalLocation}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setHospitalLocation(val);
+                        if (val.length > 1) {
+                          const filtered = BURKINA_HOSPITALS.filter(h => h.toLowerCase().includes(val.toLowerCase()));
+                          setHospitalSuggestions(filtered);
+                          setShowHospitalSuggestions(filtered.length > 0);
+                        } else {
+                          setShowHospitalSuggestions(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (hospitalLocation.length > 1) {
+                          setShowHospitalSuggestions(hospitalSuggestions.length > 0);
+                        }
+                      }}
+                      className="bg-transparent outline-none text-sm w-full font-medium text-slate-800 placeholder:text-slate-400"
+                    />
+                  </div>
                   
                   {showHospitalSuggestions && (
-                    <div className="absolute top-full left-0 w-full bg-white mt-2 rounded-2xl shadow-xl border border-slate-100 z-[100] max-h-48 overflow-y-auto overflow-x-hidden py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="absolute top-full left-0 w-full bg-white mt-1.5 rounded-2xl shadow-xl border border-slate-100 z-50 max-h-48 overflow-y-auto py-1">
                       {hospitalSuggestions.map((suggestion, idx) => (
                         <button
                           key={idx}
-                          className="w-full text-left px-4 py-2 hover:bg-primary/5 text-sm font-bold text-slate-700 transition-colors"
+                          className="w-full text-left px-4 py-2.5 hover:bg-emerald-50 text-sm font-semibold text-slate-700 transition-colors"
                           onClick={() => {
                             setHospitalLocation(suggestion);
                             setShowHospitalSuggestions(false);
@@ -4716,19 +6166,21 @@ Format JSON attendu (strict):
                   )}
                 </div>
 
-                {/* Proposition 1: Landmarks & Facade Photo */}
-                <div className="flex flex-col sm:flex-row gap-4 w-full">
-                  <div className="flex-1 flex items-center gap-3 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm focus-within:border-primary transition-all">
-                    <MapPin size={20} className="text-primary shrink-0" />
-                    <input 
-                      type="text" 
-                      placeholder="Quartier / Repère / Instructions (ex: appeler à l'arrivée) *" 
-                      value={landmark}
-                      onChange={(e) => setLandmark(e.target.value)}
-                      className="bg-transparent outline-none text-sm w-full font-bold text-slate-700 placeholder:text-slate-400 placeholder:font-normal"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    Repères & Précisions pour la livraison
+                  </label>
                   <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-200 focus-within:border-emerald-500 focus-within:bg-white transition-all">
+                      <MapPin size={18} className="text-slate-400 shrink-0" />
+                      <input 
+                        type="text" 
+                        placeholder="Quartier, carrefour, porte..." 
+                        value={landmark}
+                        onChange={(e) => setLandmark(e.target.value)}
+                        className="bg-transparent outline-none text-sm w-full font-medium text-slate-800 placeholder:text-slate-400"
+                      />
+                    </div>
                     <button 
                       onClick={() => {
                         const input = document.createElement('input');
@@ -4740,42 +6192,55 @@ Format JSON attendu (strict):
                           if (file) {
                              const base64 = await compressImage(file, RAM_OPTIMIZED_COMPRESSION.maxWidth, RAM_OPTIMIZED_COMPRESSION.maxHeight, RAM_OPTIMIZED_COMPRESSION.quality);
                              setFacadePhoto(base64);
-                             toast.success("Photo de façade enregistrée !");
+                             toast.success("Photo de repère enregistrée !");
                           }
                         };
                         input.click();
                       }}
-                      className={`h-12 px-4 rounded-2xl flex items-center gap-2 font-bold text-sm transition-all ${facadePhoto ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-100 border'}`}
+                      className={`h-[46px] px-3.5 rounded-2xl flex items-center gap-1.5 font-bold text-xs transition-all shrink-0 ${facadePhoto ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                      title="Prendre une photo de la façade ou du portail pour faciliter la livraison"
                     >
-                      <Camera size={18} />
-                      {facadePhoto ? "Photo Façade OK" : "Photo Façade (Optionnel)"}
+                      <Camera size={16} />
+                      <span className="hidden sm:inline">{facadePhoto ? "Photo OK" : "Photo Façade"}</span>
                     </button>
                     {facadePhoto && (
-                      <button onClick={() => setFacadePhoto(null)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center">
+                      <button onClick={() => setFacadePhoto(null)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-100">
                         <X size={14} />
                       </button>
                     )}
                   </div>
                 </div>
+              </div>
 
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="btn-primary flex items-center justify-center gap-3 px-6"
-                  >
-                    {uploading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Camera size={20} />}
-                    Scanner
-                  </button>
-                  <button 
-                    onClick={() => setShowManualEntryModal(true)}
-                    disabled={uploading}
-                    className="bg-white border-2 border-primary text-primary hover:bg-primary/5 font-bold rounded-2xl flex items-center justify-center gap-3 px-6 py-4 transition-all"
-                  >
-                    <PenTool size={20} />
-                    Saisie Manuelle / Vocale
-                  </button>
-                </div>
+              {/* Action Buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white p-5 rounded-2xl font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-3 disabled:opacity-50 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    {uploading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Camera size={20} />}
+                  </div>
+                  <div className="text-left">
+                    <p className="text-base font-extrabold leading-tight">Scanner l'ordonnance</p>
+                    <p className="text-xs text-emerald-100 font-normal">Appareil photo ou fichier image</p>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setShowManualEntryModal(true)}
+                  disabled={uploading}
+                  className="bg-white hover:bg-slate-50 active:scale-[0.99] border-2 border-slate-200 text-slate-800 p-5 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 group-hover:scale-110 transition-transform">
+                    <PenTool size={18} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-base font-extrabold leading-tight text-slate-900">Saisie Manuelle / Dictée</p>
+                    <p className="text-xs text-slate-500 font-normal">Tapez ou dictez vos médicaments</p>
+                  </div>
+                </button>
               </div>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" capture="environment" className="hidden" />
             </div>
@@ -4846,222 +6311,178 @@ Format JSON attendu (strict):
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-                {prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed')).map(p => (
-                  <VirtualListItem key={p.id} estimatedHeight={260}>
-                    <PatientPrescriptionCard 
-                      p={p} 
-                      orders={orders} 
-                      onViewImage={setViewImage} 
-                      onRequestQuote={handleRequestQuote} 
-                      onShowPartialSelect={(p) => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
-                      onDelete={onDeletePrescription}
-                    />
-                  </VirtualListItem>
-                ))}
-              </div>
+              <PaginatedList
+                items={prescriptions.filter(p => !orders.find(o => o.prescriptionId === p.id && o.status === 'completed'))}
+                pageSize={10}
+                emptyMessage="Aucune ordonnance"
+                emptyIcon={<FileText size={36} className="text-slate-400" />}
+                renderItem={(p) => (
+                  <PatientPrescriptionCard 
+                    p={p} 
+                    orders={orders} 
+                    onViewImage={setViewImage} 
+                    onRequestQuote={handleRequestQuote} 
+                    onShowPartialSelect={(p) => { setShowPartialSelect(p); setSelectedMeds(p.selectedMedications || []); }} 
+                    onDelete={onDeletePrescription}
+                  />
+                )}
+              />
             )}
                 </>
               )}
 
               {activeTab === 'orders' && (
-                <div className="max-w-4xl mx-auto space-y-8">
-                  <div className="flex flex-col gap-2">
-                    <h3 className="text-3xl font-black text-slate-900 tracking-tight">Mes Commandes</h3>
+                <div className="max-w-4xl mx-auto space-y-4">
+                  <div className="flex flex-col gap-1">
+                    <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight">Mes Commandes</h3>
                     <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-12 bg-primary rounded-full"></div>
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                      <div className="h-1.5 w-10 bg-emerald-600 rounded-full"></div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                         {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').length} commandes actives
                       </p>
                     </div>
                   </div>
 
-                  {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').length === 0 ? (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="bg-white p-10 rounded-[3rem] border border-slate-100 text-center shadow-xl shadow-slate-200/50"
-                    >
-                      <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center text-blue-500 mx-auto mb-8 rotate-3 hover:rotate-0 transition-transform duration-500">
-                        <Package size={48} strokeWidth={1.5} />
-                      </div>
-                      <h4 className="text-slate-900 font-black text-2xl mb-3">Aucune commande en cours</h4>
-                      <p className="text-slate-500 text-sm max-w-xs mx-auto leading-relaxed">
-                        Vos commandes actives et leur suivi en temps réel apparaîtront ici dès que vous aurez soumis une ordonnance.
-                      </p>
-                    </motion.div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-6">
-                      {orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected').map(o => (
-                         <VirtualListItem key={o.id} estimatedHeight={320}>
-                           <PatientOrderCard 
-                              o={o} 
-                              settings={settings} 
-                              profile={profile} 
-                              onChat={setActiveChatOrderId} 
-                              onViewImage={setViewImage} 
-                              onApproveQuote={handleApproveQuote} 
-                              onSelectDeliveryMethod={handleSelectDeliveryMethod} 
-                              onShowMap={setShowMapForOrder} 
-                           />
-                         </VirtualListItem>
-                      ))}
-                    </div>
-                  )}
+                  <PaginatedList
+                    items={orders.filter(o => o.status !== 'completed' && o.status !== 'quote_rejected')}
+                    pageSize={10}
+                    emptyMessage="Aucune commande en cours"
+                    emptyIcon={<Package size={36} className="text-slate-400" />}
+                    renderItem={(o) => (
+                      <PatientOrderCard 
+                        o={o} 
+                        settings={settings} 
+                        profile={profile} 
+                        onChat={setActiveChatOrderId} 
+                        onViewImage={setViewImage} 
+                        onApproveQuote={handleApproveQuote} 
+                        onSelectDeliveryMethod={handleSelectDeliveryMethod} 
+                        onShowMap={setShowMapForOrder} 
+                      />
+                    )}
+                  />
                 </div>
               )}
 
               {activeTab === 'history' && (
-                <>
-                  <h3 className="text-xl font-bold">Historique de Santé</h3>
-                  {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').length === 0 ? (
-                    <div className="bg-white p-10 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                      <div className="w-24 h-24 bg-indigo-500/10 rounded-full flex items-center justify-center text-indigo-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                        <Clock size={48} strokeWidth={1.5} />
-                      </div>
-                      <p className="text-slate-900 font-black text-2xl mb-2">Historique vide</p>
-                      <p className="text-slate-500 text-sm max-w-xs mx-auto">Vos commandes terminées ou annulées apparaîtront ici.</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected').map(o => (
-                         <VirtualListItem key={o.id} estimatedHeight={180}>
-                           <PatientOrderCard 
-                              o={o} 
-                              settings={settings} 
-                              profile={profile} 
-                              onChat={setActiveChatOrderId} 
-                              onViewImage={setViewImage} 
-                              onApproveQuote={handleApproveQuote} 
-                              onSelectDeliveryMethod={handleSelectDeliveryMethod} 
-                              onShowMap={setShowMapForOrder}
-                              compact={true}
-                           />
-                         </VirtualListItem>
-                      ))}
-                    </div>
-                  )}
-                </>
+                <div className="space-y-4">
+                  <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">Historique de Santé</h3>
+                  <PaginatedList
+                    items={orders.filter(o => o.status === 'completed' || o.status === 'quote_rejected')}
+                    pageSize={10}
+                    emptyMessage="Historique vide"
+                    emptyIcon={<Clock size={36} className="text-slate-400" />}
+                    renderItem={(o) => (
+                      <PatientOrderCard 
+                        o={o} 
+                        settings={settings} 
+                        profile={profile} 
+                        onChat={setActiveChatOrderId} 
+                        onViewImage={setViewImage} 
+                        onApproveQuote={handleApproveQuote} 
+                        onSelectDeliveryMethod={handleSelectDeliveryMethod} 
+                        onShowMap={setShowMapForOrder}
+                        compact={true}
+                      />
+                    )}
+                  />
+                </div>
               )}
 
               {activeTab === 'pharmacies' && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xl font-bold">Pharmacies à proximité</h3>
-                    <div className="flex items-center gap-2 text-sm text-slate-500 bg-white px-4 py-2 rounded-xl border border-slate-100">
-                <Search size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Rechercher une pharmacie ou un quartier..." 
-                  className="bg-transparent outline-none"
-                  value={pharmacySearch}
-                  onChange={(e) => setPharmacySearch(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {pharmacies
-                .filter(ph => {
-                  const matchesSearch = ph.name.toLowerCase().includes(pharmacySearch.toLowerCase()) || 
-                                        ph.address.toLowerCase().includes(pharmacySearch.toLowerCase()) ||
-                                        (ph as any).locality?.toLowerCase().includes(pharmacySearch.toLowerCase());
-                  
-                  const city = cities.find(c => c.id === ph.cityId);
-                  const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
-                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
-                  const isMyGroupOnCall = ph.groupId === currentGroup.toString();
-
-                  if (isOnCallNow) {
-                    // La nuit : uniquement celles de garde
-                    return matchesSearch && isMyGroupOnCall;
-                  } else {
-                    // Le jour : toutes les pharmacies (standard et de garde ce soir)
-                    return matchesSearch;
-                  }
-                })
-                .sort((a, b) => {
-                  if (!location) return 0;
-                  const distA = a.location ? calculateDistance(location.lat, location.lng, a.location.lat, a.location.lng) : Infinity;
-                  const distB = b.location ? calculateDistance(location.lat, location.lng, b.location.lat, b.location.lng) : Infinity;
-                  return distA - distB;
-                })
-                .slice(0, 20)
-                .map((ph) => {
-                  const distance = location && ph.location ? calculateDistance(location.lat, location.lng, ph.location.lat, ph.location.lng) : null;
-                  
-                  const city = cities.find(c => c.id === ph.cityId);
-                  const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
-                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
-                  const isMyGroupOnCall = ph.groupId === currentGroup.toString();
-
-                  const statusLabel = isOnCallNow ? (isMyGroupOnCall ? 'De Garde' : 'Ouvert') : (isMyGroupOnCall ? 'De Garde Ce Soir' : 'Standard');
-                  const statusClasses = isMyGroupOnCall 
-                    ? 'bg-amber-100 text-amber-700' 
-                    : 'bg-emerald-100 text-emerald-700';
-
-                  return (
-                  <div key={ph.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 hover:border-primary/30 transition-all">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
-                        <Plus size={24} />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {distance !== null && (
-                          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
-                            {distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`}
-                          </span>
-                        )}
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${statusClasses}`}>
-                          {statusLabel}
-                        </span>
-                      </div>
-                    </div>
-                    <h4 className="font-bold text-lg mb-1">{ph.name}</h4>
-                    <p className="text-slate-500 text-sm flex items-center gap-1 mb-4">
-                      <MapPin size={14} /> {ph.address}
-                    </p>
-                    <div className="flex gap-2">
-                      {ph.phone && (
-                        <a href={`tel:${ph.phone}`} className="flex-1 py-2.5 bg-slate-50 text-slate-700 rounded-xl text-center text-sm font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2">
-                          <Phone size={14} /> Appeler
-                        </a>
-                      )}
-                      <button 
-                        onClick={() => {
-                          if (ph.location?.lat && ph.location?.lng) {
-                            window.open(`https://www.google.com/maps/dir/?api=1&destination=${ph.location.lat},${ph.location.lng}`, '_blank');
-                          } else {
-                            window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ph.name + ' ' + (cities.find(c => c.id === ph.cityId)?.name || ''))}`, '_blank');
-                          }
-                        }}
-                        className="flex-1 py-2.5 bg-primary/10 text-primary rounded-xl text-sm font-bold hover:bg-primary/20 transition-all flex items-center justify-center gap-2"
-                      >
-                        <MapPin size={14} /> Itinéraire
-                      </button>
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">Pharmacies à proximité</h3>
+                    <div className="flex items-center gap-2 text-xs text-slate-500 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                      <Search size={15} />
+                      <input 
+                        type="text" 
+                        placeholder="Rechercher une pharmacie..." 
+                        className="bg-transparent outline-none w-44 sm:w-60 text-slate-900"
+                        value={pharmacySearch}
+                        onChange={(e) => setPharmacySearch(e.target.value)}
+                      />
                     </div>
                   </div>
-                );
-              })}
-              {pharmacies.filter(ph => {
-                  const city = cities.find(c => c.id === ph.cityId);
-                  const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
-                  const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
-                  const isMyGroupOnCall = ph.groupId === currentGroup.toString();
-                  return isOnCallNow ? isMyGroupOnCall : true;
-                }).length === 0 && (
-                <div className="col-span-full bg-white p-10 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                  <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500 mx-auto mb-4 group-hover:scale-110 transition-transform duration-500">
-                    <LogoIcon size={36} />
-                  </div>
-                  <p className="text-slate-900 font-black text-2xl mb-2">Aucune pharmacie</p>
-                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Il n'y a actuellement aucune pharmacie correspondante à votre recherche ou ouverte dans votre zone.</p>
+
+                  <PaginatedList
+                    items={pharmacies
+                      .filter(ph => {
+                        const matchesSearch = ph.name.toLowerCase().includes(pharmacySearch.toLowerCase()) || 
+                                              ph.address.toLowerCase().includes(pharmacySearch.toLowerCase()) ||
+                                              (ph as any).locality?.toLowerCase().includes(pharmacySearch.toLowerCase());
+                        
+                        const city = cities.find(c => c.id === ph.cityId);
+                        const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
+                        const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
+                        const isMyGroupOnCall = ph.groupId === currentGroup.toString();
+
+                        if (isOnCallNow) {
+                          return matchesSearch && isMyGroupOnCall;
+                        } else {
+                          return matchesSearch;
+                        }
+                      })
+                      .sort((a, b) => {
+                        if (!location) return 0;
+                        const distA = a.location ? calculateDistance(location.lat, location.lng, a.location.lat, a.location.lng) : Infinity;
+                        const distB = b.location ? calculateDistance(location.lat, location.lng, b.location.lat, b.location.lng) : Infinity;
+                        return distA - distB;
+                      })
+                    }
+                    pageSize={10}
+                    emptyMessage="Aucune pharmacie trouvée"
+                    emptyIcon={<MapPin size={36} className="text-slate-400" />}
+                    renderItem={(ph) => {
+                      const distance = location && ph.location ? calculateDistance(location.lat, location.lng, ph.location.lat, ph.location.lng) : null;
+                      const city = cities.find(c => c.id === ph.cityId);
+                      const isOnCallNow = city ? isCityOnCallNow(city.onCallStartTime, city.onCallEndTime) : false;
+                      const currentGroup = rotation ? getCurrentOnCallGroup(rotation) : 1;
+                      const isMyGroupOnCall = ph.groupId === currentGroup.toString();
+
+                      const statusLabel = isOnCallNow ? (isMyGroupOnCall ? 'De Garde' : 'Ouvert') : (isMyGroupOnCall ? 'De Garde Ce Soir' : 'Standard');
+                      const statusClasses = isMyGroupOnCall 
+                        ? 'bg-amber-50 text-amber-700 border-amber-200/80' 
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200/80';
+
+                      return (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 font-bold shrink-0 border border-emerald-100">
+                              <Plus size={18} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-slate-900 text-sm">{ph.name}</h4>
+                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${statusClasses}`}>
+                                  {statusLabel}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 mt-0.5">{ph.address} • {city?.name || 'Burkina Faso'}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-3 justify-between sm:justify-end text-xs">
+                            {distance !== null && (
+                              <span className="font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">
+                                {distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`}
+                              </span>
+                            )}
+                            {ph.phone && (
+                              <a 
+                                href={`tel:${ph.phone}`} 
+                                className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1.5"
+                              >
+                                <Phone size={13} />
+                                <span>Appeler</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
                 </div>
-              )}
-            </div>
-                </>
               )}
             </div>
         </div>
@@ -5378,7 +6799,7 @@ Format JSON attendu (strict):
               <p className="text-slate-500 mb-8">
                 Des frais de livraison de <span className="font-bold text-primary">{showDeliveryConfirm.fee} CFA</span> s'appliquent pour cette commande.
                 <span className="block mt-2 text-xs">
-                  {showDeliveryConfirm.fee === settings?.nightDeliveryFee ? '🌙 Tarif de nuit appliqué (Risque)' : '☀️ Tarif de journée appliqué'}
+                  {showDeliveryConfirm.fee === settings?.nightDeliveryFee ? 'Tarif de nuit appliqué (Risque)' : 'Tarif de journée appliqué'}
                 </span>
               </p>
               <div className="flex flex-col gap-3">
@@ -5856,102 +7277,108 @@ const PharmacistPrescriptionCard = React.memo(({
         </div>,
         document.body
       )}
-      <div className="flex gap-4">
-        <div 
-          className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
-          onClick={() => onViewImage(p.imageUrl)}
-        >
-          <img src={p.imageUrl} alt="Ordo" className="w-full h-full object-cover" loading="lazy" />
-        </div>
-        <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-black text-slate-900 leading-none truncate">#{p.id.slice(-6).toUpperCase()}</p>
-            <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400">
-              <Clock size={10} />
-              {p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0">
+          <div 
+            className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 shrink-0 cursor-pointer relative group/img"
+            onClick={() => onViewImage(p.imageUrl)}
+          >
+            <img src={p.imageUrl} alt="Ordo" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-300" loading="lazy" />
+            <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors flex items-center justify-center">
+              <div className="w-6 h-6 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                <Search className="text-white" size={12} />
+              </div>
             </div>
           </div>
           
-          <div className="flex items-center gap-2 mt-auto">
-            <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase">
-              <MapPin size={10} />
-              {p.distance || 2} km
+          <div className="flex-1 min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-black text-slate-900 dark:text-white leading-none">#{p.id.slice(-6).toUpperCase()}</span>
+              <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
+                <Clock size={11} />
+                {p.createdAt?.toDate ? formatDate(p.createdAt.toDate(), 'dateTime') : 'Récents'}
+              </div>
+              <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase">
+                <MapPin size={10} />
+                {p.distance || 2} km
+              </div>
+              {p.requestType === 'partial' ? (
+                <span className="text-[9px] bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-800/50 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
+                  <Package size={10} /> Partiel
+                </span>
+              ) : (
+                <span className="text-[9px] bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
+                  <CheckCircle size={10} /> Complet
+                </span>
+              )}
             </div>
-            {p.requestType === 'partial' ? (
-              <span className="text-[9px] bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
-                <Package size={10} /> Partiel
-              </span>
-            ) : (
-              <span className="text-[9px] bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-0.5 rounded-lg font-black uppercase flex items-center gap-1">
-                <CheckCircle size={10} /> Complet
-              </span>
+
+            {p.landmark && (
+              <div className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-lg font-medium border border-amber-200/40 dark:border-amber-800/40 w-fit max-w-full">
+                <MapPin size={10} className="shrink-0" />
+                <span className="truncate italic">Repère : {p.landmark}</span>
+              </div>
             )}
+
+            {/* Extracted meds horizontal pills */}
+            <div className="text-[11px] text-slate-600 dark:text-slate-300">
+              {p.extractedData ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Articles :</span>
+                  {(() => {
+                    try {
+                      const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
+                      if (!jsonStr) return <p className="text-slate-500 text-xs italic truncate">{p.extractedData || 'Non structuré'}</p>;
+                      const parsed = JSON.parse(jsonStr);
+                      const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
+                      
+                      const displayMeds = p.requestType === 'partial' && p.selectedMedications
+                        ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament)))
+                        : meds;
+
+                      return displayMeds.map((m: any, i: number) => {
+                        const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
+                        return (
+                          <span key={`${name}-${i}`} className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-2 py-0.5 rounded-md text-[10px] font-bold border border-slate-200/60 dark:border-slate-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                            <span className="truncate max-w-[140px]">{name}</span>
+                          </span>
+                        );
+                      });
+                    } catch (e) {
+                      return <p className="truncate text-xs">{p.extractedData}</p>;
+                    }
+                  })()}
+                </div>
+              ) : (
+                <span className="flex items-center gap-2 text-xs text-slate-400"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse et extraction en cours...</span>
+              )}
+            </div>
           </div>
-          {p.landmark && (
-            <div className="mt-1 flex items-start gap-1 text-[9px] text-amber-700 bg-amber-50 px-2 py-1 rounded-lg font-medium border border-amber-100/50">
-              <MapPin size={10} className="shrink-0 mt-0.5" />
-              <span className="truncate italic">Repère: {p.landmark}</span>
-            </div>
-          )}
         </div>
-      </div>
 
-      <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100/50 max-h-24 overflow-hidden relative">
-        <div className="text-[10px] text-slate-600">
-          {p.extractedData ? (
-            <div className="space-y-1">
-              {(() => {
-                try {
-                  const jsonStr = p.extractedData?.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-                  if (!jsonStr) return <p className="text-slate-600 text-xs italic truncate">{p.extractedData || 'Non structuré'}</p>;
-                  const parsed = JSON.parse(jsonStr);
-                  const meds = Array.isArray(parsed) ? parsed : (parsed.prescriptions || parsed.medications || parsed.medicaments || Object.values(parsed).find(v => Array.isArray(v)) || []);
-                  
-                  const displayMeds = p.requestType === 'partial' && p.selectedMedications
-                    ? meds.filter((m: any) => p.selectedMedications?.includes(typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament)))
-                    : meds;
-
-                  return displayMeds.map((m: any, i: number) => {
-                    const name = typeof m === 'string' ? m : (m.nom_article || m.name || m.medicament || 'Inconnu');
-                    return (
-                      <div key={`${name}-${i}`} className="flex items-center gap-1.5 truncate">
-                        <div className="w-1 h-1 rounded-full bg-slate-300 shrink-0"></div>
-                        <span className="font-bold text-slate-700">{name}</span>
-                      </div>
-                    );
-                  });
-                } catch (e) {
-                  return <p className="truncate">{p.extractedData}</p>;
-                }
-              })()}
-            </div>
-          ) : (
-            <span className="flex items-center gap-2"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div> Analyse...</span>
-          )}
+        {/* Actions */}
+        <div className="flex items-center gap-2 self-stretch md:self-center shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
+          <button 
+            onClick={async () => {
+              setIsLoading(true);
+              try { await onStartQuote(p); } finally { setIsLoading(false); }
+            }}
+            disabled={isLoading}
+            className="flex-1 md:flex-initial bg-primary hover:bg-primary/90 text-white px-5 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl shadow-md shadow-primary/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            {isLoading ? '...' : 'Établir le Devis'}
+          </button>
+          <button 
+            onClick={() => setShowRejectionModal(true)}
+            disabled={isLoading}
+            className="p-2.5 bg-rose-50 dark:bg-rose-950/40 text-rose-500 dark:text-rose-400 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all border border-rose-200/50 dark:border-rose-900/50 disabled:opacity-50 flex items-center justify-center gap-1.5"
+            title="Rejeter l'ordonnance"
+          >
+            <X size={16} />
+            <span className="md:hidden text-xs font-black uppercase">Rejeter</span>
+          </button>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
-      </div>
-
-      <div className="flex gap-2">
-        <button 
-          onClick={async () => {
-            setIsLoading(true);
-            try { await onStartQuote(p); } finally { setIsLoading(false); }
-          }}
-          disabled={isLoading}
-          className="flex-1 bg-primary text-white py-3 text-[11px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-95 disabled:opacity-50"
-        >
-          {isLoading ? '...' : 'Devis'}
-        </button>
-        <button 
-          onClick={() => setShowRejectionModal(true)}
-          disabled={isLoading}
-          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
-          title="Rejeter"
-        >
-          <X size={16} />
-          <span className="sm:hidden text-[10px] font-black uppercase">Rejeter</span>
-        </button>
       </div>
     </div>
   );
@@ -5973,175 +7400,150 @@ const PharmacistOrderCard = React.memo(({
   onUpdateStatus: (o: Order) => void 
 }) => {
   return (
-    <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
-      <div className="px-5 py-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-white shadow-sm flex items-center justify-center text-slate-400 font-black text-[10px]">
+    <div className="bg-white dark:bg-slate-900 p-3 sm:p-3.5 rounded-xl shadow-xs border border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 hover:border-emerald-500/40 hover:shadow-xs transition-all">
+      {/* Left: Patient Info & Header */}
+      <div className="flex items-start sm:items-center gap-3 flex-1 min-w-0">
+        {o.prescriptionImageUrl ? (
+          <div 
+            className="w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer relative group/img"
+            onClick={() => onViewImage(o.prescriptionImageUrl!)}
+          >
+            <img src={o.prescriptionImageUrl} alt="Ordo" className="w-full h-full object-cover group-hover/img:scale-105 transition-transform" loading="lazy" />
+          </div>
+        ) : (
+          <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs flex items-center justify-center text-slate-500 dark:text-slate-400 font-black text-[11px] shrink-0">
             {o.id.slice(-2).toUpperCase()}
           </div>
-          <div>
-            <p className="text-xs font-black text-slate-900 leading-none mb-1">#{o.id.slice(-6).toUpperCase()}</p>
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              {o.quoteType === 'partial' ? (
-                <span className="text-[8px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">Devis Partiel</span>
-              ) : (
-                <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-md font-black uppercase flex items-center gap-1">Devis Complet</span>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
-            o.status === 'paid' ? 'bg-emerald-500 text-white' : 
-            o.status === 'verifying_payment' ? 'bg-amber-100 text-amber-700' :
-            o.status === 'preparing' ? 'bg-indigo-500 text-white' :
-            o.status === 'ready' ? 'bg-emerald-600 text-white' :
-            o.status === 'delivering' ? 'bg-sky-500 text-white' :
-            'bg-slate-200 text-slate-600'
-          }`}>
-            {getOrderStatusLabel(o.status)}
-          </span>
-          <button 
-            onClick={() => onChat(o.id)}
-            className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
-          >
-            <MessageCircle size={14} />
-            {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
-              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
-                {o.unreadCounts[profile?.role || 'pharmacist']}
-              </span>
+        )}
+
+        <div className="flex-1 min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="text-xs font-black text-slate-900 dark:text-white leading-none">#{o.id.slice(-6).toUpperCase()}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
+            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
+              o.status === 'paid' ? 'bg-emerald-500 text-white' : 
+              o.status === 'verifying_payment' ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400' :
+              o.status === 'preparing' ? 'bg-indigo-500 text-white' :
+              o.status === 'ready' ? 'bg-emerald-600 text-white' :
+              o.status === 'delivering' ? 'bg-sky-500 text-white' :
+              'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}>
+              {getOrderStatusLabel(o.status)}
+            </span>
+            {o.quoteType === 'partial' ? (
+              <span className="text-[8px] bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 px-1 rounded-md font-black uppercase">Devis Partiel</span>
+            ) : (
+              <span className="text-[8px] bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 px-1 rounded-md font-black uppercase">Devis Complet</span>
             )}
+          </div>
+
+          {/* Articles pills */}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Articles :</span>
+            {o.items?.slice(0, 3).map((item, i) => (
+              <span key={i} className="text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded-md font-semibold border border-slate-200/50 dark:border-slate-700 truncate max-w-[130px]">
+                {item.name} x{item.quantity}
+              </span>
+            ))}
+            {o.items && o.items.length > 3 && (
+              <span className="text-[9px] text-slate-400 font-bold">+{o.items.length - 3} autres</span>
+            )}
+          </div>
+
+          {/* Gain Net */}
+          <div className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
+            Gain Net Estimé : <span className="font-black text-xs">{o.pharmacyAmount?.toLocaleString()} FCFA</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Actions & Status */}
+      <div className="flex flex-wrap items-center gap-1.5 self-stretch lg:self-center shrink-0 pt-1.5 lg:pt-0 border-t lg:border-t-0 border-slate-100 dark:border-slate-800">
+        {o.deliveryId && !o.isHandedOver && o.deliveryMethod === 'delivery' && (
+          <button 
+            onClick={() => onHandover(o)}
+            className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-xs"
+          >
+            <ShieldCheck size={14} />
+            Remettre au livreur ({o.deliveryPersonName})
           </button>
-        </div>
+        )}
+
+        {o.status === 'ready' && o.deliveryMethod === 'pickup' && (
+          <button 
+            onClick={() => onHandover(o)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1"
+          >
+            <CheckCircle size={14} />
+            Confirmer le retrait
+          </button>
+        )}
+
+        {o.status === 'delivering' && o.isHandedOver && (
+          <div className="bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 px-2 py-1 rounded-lg border border-emerald-200/50 dark:border-emerald-800/50 flex items-center gap-1 text-xs font-medium">
+            <CheckCircle className="text-emerald-500" size={13} />
+            Remis au livreur
+          </div>
+        )}
+
+        {o.status === 'pending_quote' ? (
+          <span className="text-xs text-slate-400 font-medium px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-lg">
+            En attente de validation client
+          </span>
+        ) : o.status === 'pending_payment' ? (
+          <span className="text-xs text-slate-400 font-medium px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-lg">
+            En attente de paiement client
+          </span>
+        ) : o.status === 'verifying_payment' ? (
+          <div className="px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-200/50 dark:border-indigo-800/50 flex items-center gap-1 text-xs font-bold">
+            <ShieldCheck size={13} />
+            Validation Admin
+          </div>
+        ) : o.status === 'ready' && !o.deliveryMethod ? (
+          <span className="text-xs text-amber-700 dark:text-amber-400 font-bold px-2.5 py-1.5 bg-amber-50 dark:bg-amber-950/50 rounded-lg">
+            En attente choix livraison
+          </span>
+        ) : (o.status === 'paid' || o.status === 'preparing') ? (
+          <button 
+            onClick={() => onUpdateStatus(o)}
+            className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3 py-2 rounded-lg text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100 transition-all flex items-center gap-1"
+          >
+            {o.status === 'paid' ? 'Préparer' : 'Prêt'}
+            <ChevronRight size={14} />
+          </button>
+        ) : null}
+
+        <button 
+          onClick={() => onChat(o.id)}
+          className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-emerald-600 transition-all relative shrink-0"
+          title="Ouvrir la discussion"
+        >
+          <MessageCircle size={14} />
+          {o.unreadCounts?.[profile?.role || 'pharmacist'] > 0 && (
+            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border border-white dark:border-slate-900">
+              {o.unreadCounts[profile?.role || 'pharmacist']}
+            </span>
+          )}
+        </button>
       </div>
 
-      <div className="p-5 space-y-4">
-        <div className="flex gap-4">
-          {o.prescriptionImageUrl && (
-            <div 
-              className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer relative group"
-              onClick={() => onViewImage(o.prescriptionImageUrl!)}
-            >
-              <img src={o.prescriptionImageUrl} alt="Ordo" className="w-full h-full object-cover" loading="lazy" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold text-slate-400 leading-tight mb-2 uppercase tracking-tight">Articles & Traitement</p>
-            <div className="space-y-1">
-              {o.items?.slice(0, 2).map((item, i) => (
-                <p key={i} className="text-xs text-slate-600 truncate flex items-center gap-2">
-                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                  {item.name} x{item.quantity}
-                </p>
-              ))}
-              {o.items && o.items.length > 2 && (
-                <p className="text-[10px] text-slate-400 italic">+{o.items.length - 2} autres articles</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-3 border-t border-slate-50 flex flex-col gap-1">
-          <div className="flex justify-between text-[8px] font-bold text-emerald-600 uppercase tracking-widest">
-            <span>Gain Net Estimé</span>
-            <span>{o.pharmacyAmount?.toLocaleString()} FCFA</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          {o.deliveryId && !o.isHandedOver && o.deliveryMethod === 'delivery' && (
-            <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 mb-2">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 overflow-hidden border border-amber-200">
-                  {o.deliveryPersonPhoto ? (
-                    <img src={o.deliveryPersonPhoto} alt={o.deliveryPersonName} className="w-full h-full object-cover" />
-                  ) : (
-                    <Truck size={24} />
-                  )}
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest">Livreur assigné</p>
-                  <p className="font-bold text-slate-900">{o.deliveryPersonName}</p>
-                  <p className="text-xs text-slate-500">{o.deliveryPersonPhone}</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => onHandover(o)}
-                className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
-              >
-                <ShieldCheck size={18} />
-                Vérifier l'identité et remettre
+      {o.status === 'completed' && (o.deliveryPhoto || o.deliverySignature) && (
+        <div className="w-full mt-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Preuve de Livraison</p>
+          <div className="flex gap-3">
+            {o.deliveryPhoto && (
+              <button onClick={() => onViewImage(o.deliveryPhoto!)} className="w-24 aspect-video rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 relative group">
+                <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
               </button>
-            </div>
-          )}
-
-          {o.status === 'ready' && o.deliveryMethod === 'pickup' && (
-            <button 
-              onClick={() => onHandover(o)}
-              className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
-            >
-              <CheckCircle size={18} />
-              Confirmer le retrait physique
-            </button>
-          )}
-
-          {o.status === 'delivering' && o.isHandedOver && (
-            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 flex items-center gap-3 mb-2">
-              <CheckCircle className="text-emerald-500" size={20} />
-              <p className="text-sm font-medium text-emerald-700">Remis au livreur</p>
-            </div>
-          )}
-
-          {o.status === 'pending_quote' ? (
-            <div className="text-center p-4 bg-slate-50 rounded-2xl">
-              <p className="text-xs text-slate-400 font-medium">En attente de validation par le client</p>
-            </div>
-          ) : o.status === 'pending_payment' ? (
-            <div className="text-center p-4 bg-slate-50 rounded-2xl">
-              <p className="text-xs text-slate-400 font-medium">En attente de paiement par le client</p>
-            </div>
-          ) : o.status === 'verifying_payment' ? (
-            <div className="text-center p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 ring-1 ring-indigo-200">
-              <div className="flex items-center justify-center gap-2 text-indigo-700 mb-1">
-                <ShieldCheck size={14} />
-                <p className="text-xs font-black uppercase tracking-tight">Validation Admin en cours</p>
-              </div>
-              <p className="text-[9px] text-indigo-500 font-bold leading-tight">Patient a déclaré le paiement USSD.<br/>En attente du feu vert administratif.</p>
-            </div>
-          ) : o.status === 'ready' && !o.deliveryMethod ? (
-            <div className="text-center p-4 bg-amber-50 rounded-2xl border border-amber-100">
-              <p className="text-xs text-amber-700 font-bold">En attente du choix de livraison du client</p>
-            </div>
-          ) : (o.status === 'paid' || o.status === 'preparing') ? (
-            <button 
-              onClick={() => onUpdateStatus(o)}
-              className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
-            >
-              {o.status === 'paid' ? 'Commencer la préparation' : 'Marquer comme prêt'}
-              <ChevronRight size={18} />
-            </button>
-          ) : null}
-
-          {o.status === 'completed' && (o.deliveryPhoto || o.deliverySignature) && (
-            <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Preuve de Livraison</p>
-              <div className="flex gap-4">
-                {o.deliveryPhoto && (
-                  <button onClick={() => onViewImage(o.deliveryPhoto!)} className="flex-1 aspect-video rounded-xl overflow-hidden border border-slate-200 relative group">
-                    <img src={o.deliveryPhoto} className="w-full h-full object-cover" />
-                  </button>
-                )}
-                {o.deliverySignature && (
-                  <button onClick={() => onViewImage(o.deliverySignature!)} className="flex-1 aspect-video rounded-xl bg-white border border-slate-200 flex items-center justify-center p-2 group relative">
-                    <img src={o.deliverySignature} className="max-h-full object-contain" />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+            )}
+            {o.deliverySignature && (
+              <button onClick={() => onViewImage(o.deliverySignature!)} className="w-24 aspect-video rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 group relative">
+                <img src={o.deliverySignature} className="max-h-full object-contain" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 });
@@ -6152,6 +7554,14 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'history' | 'wallet' | 'reports' | 'profile'>('pending');
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const mainEl = document.querySelector('main');
+    if (mainEl) mainEl.scrollTop = 0;
+  }, [activeTab]);
   const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
   const [dailyGains, setDailyGains] = useState(0);
   const [totalEarned, setTotalEarned] = useState(0);
@@ -6546,82 +7956,97 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
       <div className="relative space-y-4 pb-8 pt-2 md:pt-1 transition-all">
         {viewImage && <ImageViewerModal imageUrl={viewImage} onClose={() => setViewImage(null)} />}
       
-      {/* Role Header (Android Style) */}
-      <div className="bg-slate-900 rounded-[2rem] p-4 relative overflow-hidden shadow-xl shadow-slate-900/10">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
-        <div className="relative flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center backdrop-blur-md">
-              <Plus size={20} className="text-white" />
+      {/* Role Header */}
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 p-5 sm:p-6 text-white shadow-xl border border-slate-700/50">
+        <div className="absolute top-0 right-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/2" />
+        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-white/10 border border-white/15 text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+              <Plus size={13} className="text-emerald-400" />
+              <span>Espace Pharmacien</span>
             </div>
-            <div>
-              <h1 className="text-lg font-black tracking-tight text-white uppercase leading-none">Portail Pharmacien</h1>
-              <p className="text-white/40 text-[9px] font-bold uppercase tracking-widest mt-1">{myPharmacy?.name || "Pharmacie Partenaire"}</p>
-            </div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+              {myPharmacy?.name || "Officine Partenaire"}
+            </h1>
           </div>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isOnCallNow && isMyGroupOnCall ? 'bg-indigo-400 animate-pulse' : 'bg-slate-500 opacity-30'}`}></div>
-            <span className="text-[10px] font-black text-white/60 uppercase racking-widest">{isOnCallNow && isMyGroupOnCall ? 'En garde' : 'Standard'}</span>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <div className={`px-3.5 py-2 rounded-xl flex items-center gap-2 border text-[11px] font-bold uppercase tracking-wider ${
+              isOnCallNow && isMyGroupOnCall
+                ? 'bg-amber-500/20 border-amber-400/40 text-amber-300 animate-pulse'
+                : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${isOnCallNow && isMyGroupOnCall ? 'bg-amber-400 shadow-xs shadow-amber-400' : 'bg-emerald-400'}`} />
+              <span>{isOnCallNow && isMyGroupOnCall ? 'Officine de Garde' : 'Service Ouvert'}</span>
+            </div>
+            <button 
+              onClick={() => setShowWithdrawalModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-900/30 transition-all active:scale-95"
+            >
+              <CreditCard size={14} />
+              <span>Retrait</span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* On-Call Status Banner */}
       {currentCity && isMyGroupOnCall && isOnCallNow && (
-        <div className="bg-indigo-600 text-white p-6 rounded-[2rem] shadow-lg flex items-center justify-between">
+        <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white p-5 sm:p-6 rounded-[2rem] shadow-xl flex items-center justify-between border border-amber-400/30">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-              <Navigation size={24} />
+            <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
+              <Navigation size={22} className="text-white" />
             </div>
             <div>
-              <h3 className="text-xl font-bold">Votre pharmacie est de garde !</h3>
-              <p className="text-indigo-100 text-sm">Groupe {profile.groupId} • {currentCity.name} ({currentCity.onCallStartTime} - {currentCity.onCallEndTime})</p>
+              <h3 className="text-lg font-bold">Votre pharmacie est de garde cette nuit</h3>
+              <p className="text-amber-100 text-xs sm:text-sm">Groupe {profile.groupId} • {currentCity.name} ({currentCity.onCallStartTime} - {currentCity.onCallEndTime})</p>
             </div>
           </div>
-          <div className="hidden md:block">
-            <span className="px-4 py-2 bg-white/20 rounded-full text-sm font-bold animate-pulse">
-              En service
-            </span>
-          </div>
+          <span className="hidden sm:inline-flex px-3.5 py-1.5 bg-white/20 rounded-full text-xs font-black uppercase tracking-wider">
+            Priorité Urgences Nuit
+          </span>
         </div>
       )}
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
-          <div className="bg-slate-900 p-4 sm:p-6 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
-            <div className="relative z-10">
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Gains</p>
-              <h3 className="text-sm sm:text-lg font-bold text-white">{availableGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Gains Disponibles</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{availableGains.toLocaleString()} <span className="text-xs font-bold text-emerald-600">FCFA</span></h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white/5 rounded-xl flex items-center justify-center text-emerald-400">
-              <CreditCard size={18} />
+            <div className="w-11 h-11 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
+              <CreditCard size={20} />
             </div>
           </div>
-          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Jour</p>
-              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{dailyGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Gains du Jour</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{dailyGains.toLocaleString()} <span className="text-xs font-bold text-emerald-600">FCFA</span></h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-              <TrendingUp size={18} />
+            <div className="w-11 h-11 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
+              <TrendingUp size={20} />
             </div>
           </div>
-          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Attente</p>
-              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{prescriptions.length}</h3>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">En attente de devis</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{prescriptions.length}</h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-              <FileText size={18} />
+            <div className="w-11 h-11 bg-sky-50 rounded-2xl flex items-center justify-center text-sky-600">
+              <FileText size={20} />
             </div>
           </div>
-          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
-              <h3 className="text-sm sm:text-lg font-bold text-slate-900">{historyOrders.length}</h3>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Commandes Terminées</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{historyOrders.length}</h3>
             </div>
-            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-secondary/10 rounded-xl flex items-center justify-center text-secondary">
-              <Package size={18} />
+            <div className="w-11 h-11 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
+              <Package size={20} />
             </div>
           </div>
           <div className={`p-4 sm:p-6 rounded-[2rem] shadow-sm border flex items-center justify-between group transition-all ${
@@ -6724,84 +8149,62 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
         <div className="flex-1 min-w-0 pb-32 md:pb-0">
           <div key={activeTab}>
               {activeTab === 'pending' && (
-                <>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {prescriptions.length === 0 ? (
-              <div className="lg:col-span-2 bg-white p-10 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center text-primary mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                  <FileText size={48} strokeWidth={1.5} />
-                </div>
-                <p className="text-slate-900 font-black text-2xl mb-2">Aucune ordonnance en attente</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">Les nouvelles ordonnances soumises par les patients apparaîtront ici.</p>
-              </div>
-            ) : (
-              prescriptions.map(p => (
-                <VirtualListItem key={p.id} estimatedHeight={220}>
-                  <PharmacistPrescriptionCard 
-                    p={p} 
-                    onStartQuote={handleStartQuote} 
-                    onReject={handleValidatePrescription} 
-                    onViewImage={setViewImage}
-                  />
-                </VirtualListItem>
-              ))
-            )}
-                  </div>
-                </>
+                <PaginatedList
+                  items={prescriptions}
+                  pageSize={10}
+                  emptyMessage="Aucune ordonnance en attente"
+                  emptyIcon={<FileText size={36} className="text-slate-400" />}
+                  renderItem={(p) => (
+                    <PharmacistPrescriptionCard 
+                      p={p} 
+                      onStartQuote={handleStartQuote} 
+                      onReject={handleValidatePrescription} 
+                      onViewImage={setViewImage}
+                    />
+                  )}
+                />
               )}
 
               {activeTab === 'active' && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {orders.length === 0 ? (
-              <div className="lg:col-span-3 bg-white p-10 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                  <Package size={48} strokeWidth={1.5} />
-                </div>
-                <p className="text-slate-900 font-black text-2xl mb-2">Aucune commande active</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">Les commandes payées et en attente de préparation apparaîtront ici.</p>
-              </div>
-            ) : (
-              orders.map(o => (
-                <VirtualListItem key={o.id} estimatedHeight={260}>
-                  <PharmacistOrderCard 
-                    o={o} 
-                    profile={profile} 
-                    onChat={setActiveChatOrderId} 
-                    onViewImage={setViewImage} 
-                    onHandover={setShowHandoverVerify} 
-                    onUpdateStatus={async (order) => {
-                      try {
-                        const nextStatus = order.status === 'paid' ? 'preparing' : 'ready';
-                        await updateDoc(doc(db, 'orders', order.id), { 
-                          status: nextStatus, 
-                          updatedAt: serverTimestamp(),
-                          history: arrayUnion({
-                            status: nextStatus,
-                            timestamp: new Date().toISOString(),
-                            label: nextStatus === 'preparing' ? 'Préparation commencée' : 'Commande prête'
-                          })
-                        });
+                <PaginatedList
+                  items={orders}
+                  pageSize={10}
+                  emptyMessage="Aucune commande active"
+                  emptyIcon={<Package size={36} className="text-slate-400" />}
+                  renderItem={(o) => (
+                    <PharmacistOrderCard 
+                      o={o} 
+                      profile={profile} 
+                      onChat={setActiveChatOrderId} 
+                      onViewImage={setViewImage} 
+                      onHandover={setShowHandoverVerify} 
+                      onUpdateStatus={async (order) => {
+                        try {
+                          const nextStatus = order.status === 'paid' ? 'preparing' : 'ready';
+                          await updateDoc(doc(db, 'orders', order.id), { 
+                            status: nextStatus, 
+                            updatedAt: serverTimestamp(),
+                            history: arrayUnion({
+                              status: nextStatus,
+                              timestamp: new Date().toISOString(),
+                              label: nextStatus === 'preparing' ? 'Préparation commencée' : 'Commande prête'
+                            })
+                          });
 
-                        if (nextStatus === 'ready' && order.deliveryMethod === 'delivery') {
-                          await notifyDeliveryDrivers(
-                            "Nouvelle mission de livraison",
-                            `Une commande est prête pour livraison à ${order.pharmacyName || 'la pharmacie'}.`,
-                            order.id
-                          );
+                          if (nextStatus === 'ready' && order.deliveryMethod === 'delivery') {
+                            await notifyDeliveryDrivers(
+                              "Nouvelle mission de livraison",
+                              `Une commande est prête pour livraison à ${order.pharmacyName || 'la pharmacie'}.`,
+                              order.id
+                            );
+                          }
+                        } catch (err) {
+                          handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`);
                         }
-                      } catch (err) {
-                        handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`);
-                      }
-                    }} 
-                  />
-                </VirtualListItem>
-              ))
-            )}
-                  </div>
-                </>
+                      }} 
+                    />
+                  )}
+                />
               )}
 
         {/* Quote Modal */}
@@ -7003,66 +8406,64 @@ const PharmacistDashboard = React.memo(({ profile, settings, cities, rotation }:
 
               {activeTab === 'history' && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="flex flex-col gap-3 sm:gap-3.5">
             {historyOrders.length === 0 ? (
-              <div className="lg:col-span-3 bg-white p-10 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                  <Clock size={48} strokeWidth={1.5} />
+              <div className="bg-white dark:bg-slate-900 p-10 rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800 text-center relative overflow-hidden group">
+                <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-4 group-hover:scale-110 transition-transform duration-500">
+                  <Clock size={40} strokeWidth={1.5} />
                 </div>
-                <p className="text-slate-900 font-black text-2xl mb-2">Historique vide</p>
+                <p className="text-slate-900 dark:text-white font-black text-xl mb-1">Historique vide</p>
                 <p className="text-slate-500 text-sm max-w-xs mx-auto">Les commandes terminées ou annulées apparaîtront ici.</p>
               </div>
             ) : (
               historyOrders.map(o => (
-                <VirtualListItem key={o.id} estimatedHeight={180}>
-                  <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity">
-                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
-                      <div>
-                        <span className="font-bold text-sm block">#{o.id.slice(-6).toUpperCase()}</span>
-                        <span className="text-[10px] text-slate-500">{o.updatedAt ? formatDate(o.updatedAt, 'dateTime') : 'Date inconnue'}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">TERMINÉE</span>
-                        <span className="text-xs font-black text-emerald-600">+{o.pharmacyAmount?.toLocaleString()} FCFA</span>
+                <VirtualListItem key={o.id} estimatedHeight={100}>
+                  <div className="bg-white dark:bg-slate-900 p-2.5 sm:p-3 rounded-xl shadow-2xs border border-slate-200/60 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-300 dark:hover:border-slate-700 transition-all">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      {o.prescriptionImageUrl ? (
+                        <div 
+                          className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer"
+                          onClick={() => setViewImage(o.prescriptionImageUrl!)}
+                        >
+                          <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" loading="lazy" />
+                        </div>
+                      ) : (
+                        <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 font-bold text-[10px] shrink-0">
+                          #{o.id.slice(-2).toUpperCase()}
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-black text-slate-900 dark:text-white">#{o.id.slice(-6).toUpperCase()}</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</span>
+                          <span className="text-[9px] text-slate-400 font-semibold">{o.updatedAt ? formatDate(o.updatedAt, 'dateTime') : 'Date inconnue'}</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                          {o.hospitalLocation && (
+                            <span className="flex items-center gap-1 text-[10px] text-slate-500 truncate max-w-[180px]">
+                              <Hospital size={11} className="shrink-0" />
+                              {o.hospitalLocation}
+                            </span>
+                          )}
+                          {o.landmark && (
+                            <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-medium italic truncate max-w-[180px]">
+                              <MapPin size={11} className="shrink-0" />
+                              {o.landmark}
+                            </span>
+                          )}
+                          <span className="text-[9px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold text-slate-600 dark:text-slate-400">
+                            {o.items?.length || 0} art.
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    
-                    <div className="flex-1 flex flex-col gap-4">
-                      <div className="flex gap-4">
-                        {o.prescriptionImageUrl && (
-                          <div 
-                            className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 shrink-0 cursor-pointer"
-                            onClick={() => setViewImage(o.prescriptionImageUrl!)}
-                          >
-                            <img src={o.prescriptionImageUrl} className="w-full h-full object-cover" />
-                          </div>
-                        )}
-                        {o.facadePhoto && (
-                          <div 
-                            className="w-16 h-16 rounded-xl overflow-hidden bg-slate-50 border border-emerald-200 shrink-0 cursor-pointer relative"
-                            onClick={() => setViewImage(o.facadePhoto!)}
-                          >
-                            <img src={o.facadePhoto} className="w-full h-full object-cover" />
-                            <div className="absolute top-0 right-0 bg-emerald-500 text-white p-0.5 rounded-bl-lg">
-                              <Home size={8} />
-                            </div>
-                          </div>
-                        )}
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{o.patientName}</p>
-                          <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1">
-                            <Hospital size={10} className="shrink-0" />
-                            <p className="truncate">{o.hospitalLocation}</p>
-                          </div>
-                          {o.landmark && (
-                            <div className="flex items-center gap-1 text-[9px] text-amber-600 mb-1 font-medium italic truncate">
-                               <MapPin size={10} className="shrink-0" />
-                               {o.landmark}
-                            </div>
-                          )}
-                          <p className="text-xs text-slate-700 font-medium truncate">{o.items?.length || 0} article(s)</p>
-                        </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:text-right shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+                      <div>
+                        <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider block mb-0.5 text-center">TERMINÉE</span>
+                        <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">+{o.pharmacyAmount?.toLocaleString()} FCFA</span>
                       </div>
                     </div>
                   </div>
@@ -7490,57 +8891,80 @@ const MissionCard = React.memo(({
   onReject: (id: string) => Promise<void> | void 
 }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
+
   return (
-    <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-md transition-all flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-          <MapPin size={20} />
-        </div>
-        <div className="text-right">
-          <span className="text-lg font-black text-emerald-600 block leading-none">+{m.deliveryFee || 1500} <span className="text-[10px]">CFA</span></span>
-        </div>
-      </div>
-      
-      <div className="space-y-3">
-        <div className="flex gap-3">
-          <div className="flex flex-col items-center gap-1 py-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-            <div className="w-0.5 flex-1 bg-slate-100"></div>
-            <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+    <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-xs border border-slate-200/90 hover:border-emerald-500/40 hover:shadow-sm transition-all space-y-2.5">
+      {/* Header Row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+            <MapPin size={15} />
           </div>
-          <div className="flex flex-col gap-3 min-w-0">
-            <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Pharmacie</p>
-              <p className="text-xs font-bold text-slate-800 truncate">{m.pharmacyName || "Pharmacie Partenaire"}</p>
-            </div>
-            <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Patient</p>
-              <p className="text-xs font-bold text-slate-800 truncate">{m.hospitalLocation}</p>
-            </div>
+          <div className="min-w-0">
+            <p className="text-xs font-black text-slate-900 truncate">
+              {m.pharmacyName || "Pharmacie Partenaire"}
+            </p>
+            <p className="text-[11px] text-slate-500 font-medium truncate flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0"></span>
+              <span className="truncate">{m.hospitalLocation || "Burkina Faso"}</span>
+            </p>
           </div>
         </div>
-        <div className="flex gap-3 pt-3 border-t border-slate-50">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-            <Package size={12} /> {m.items?.length || 0} art.
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg ml-auto">
-            {m.status === 'pending_payment' ? 'En attente paiement' : 'Prêt'}
-          </div>
+
+        <div className="text-right shrink-0">
+          <span className="text-sm font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200/60 inline-block">
+            +{m.deliveryFee || 1500} <span className="text-[9px] font-bold">CFA</span>
+          </span>
         </div>
       </div>
 
-      <StatusTrace history={m.history} />
+      {/* Info Pills Strip */}
+      <div className="flex items-center justify-between gap-2 text-[10px] text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100/80">
+        <div className="flex items-center gap-1.5 font-bold">
+          <Package size={12} className="text-slate-400" />
+          <span>{m.items?.length || 0} art.</span>
+        </div>
 
-      <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`px-2 py-0.5 rounded-md font-bold uppercase tracking-wider text-[9px] ${
+            m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-800'
+          }`}>
+            {m.status === 'pending_payment' ? 'Att. Paiement' : 'Prêt'}
+          </span>
+
+          {m.history && m.history.length > 0 && (
+            <button 
+              type="button"
+              onClick={() => setShowTrace(!showTrace)}
+              className="text-slate-400 hover:text-slate-700 p-0.5 transition-colors"
+              title="Historique de suivi"
+            >
+              {showTrace ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Optional Collapsible Trace */}
+      {showTrace && m.history && m.history.length > 0 && (
+        <div className="pt-1">
+          <StatusTrace history={m.history} defaultExpanded={true} />
+        </div>
+      )}
+
+      {/* Compact Action Buttons */}
+      <div className="flex items-center gap-2 pt-0.5">
         <button 
           onClick={async () => {
              setIsLoading(true);
              try { await onAccept(m); } finally { setIsLoading(false); }
           }}
           disabled={isLoading}
-          className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-90 shadow-lg shadow-slate-900/10 disabled:opacity-50"
+          className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-98 disabled:opacity-50"
         >
-          {isLoading ? '...' : 'Accepter'}
+          <CheckCircle2 size={14} className="text-emerald-400" />
+          <span>{isLoading ? 'Acceptation...' : 'Accepter'}</span>
         </button>
         <button 
           onClick={async () => {
@@ -7548,9 +8972,10 @@ const MissionCard = React.memo(({
              try { await onReject(m.id); } finally { setIsLoading(false); }
           }}
           disabled={isLoading}
-          className="px-4 bg-rose-50 text-rose-500 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-90 disabled:opacity-50"
+          className="p-2 bg-rose-50 text-rose-600 rounded-xl font-bold hover:bg-rose-500 hover:text-white transition-all border border-rose-100/80 active:scale-95 disabled:opacity-50"
+          title="Refuser"
         >
-          <X size={16} />
+          <X size={15} />
         </button>
       </div>
     </div>
@@ -7575,27 +9000,27 @@ const DeliveryActiveCard = React.memo(({
   onShowMap: (m: Order) => void 
 }) => {
   return (
-    <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all">
-      <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+    <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden hover:shadow-xs transition-all">
+      <div className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-150 dark:border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-white rounded-lg shadow-sm flex items-center justify-center text-blue-600">
+          <div className="w-7 h-7 bg-white dark:bg-slate-800 rounded-lg shadow-2xs flex items-center justify-center text-blue-600 dark:text-blue-400">
             <Truck size={14} />
           </div>
-          <span className="text-xs font-black text-slate-900 leading-none tracking-tight">#{m.id.slice(-6).toUpperCase()}</span>
+          <span className="text-xs font-black text-slate-900 dark:text-white leading-none tracking-tight">#{m.id.slice(-6).toUpperCase()}</span>
         </div>
-        <div className="flex items-center gap-2">
-           <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-wider ${
+        <div className="flex items-center gap-1.5">
+           <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
             m.status === 'pending_payment' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-500 text-white'
           }`}>
             {m.status === 'pending_payment' ? 'Att. Paiement' : 'En Livraison'}
           </span>
           <button 
             onClick={() => onChat(m.id)}
-            className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
+            className="w-7 h-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-all relative"
           >
-            <MessageCircle size={14} />
+            <MessageCircle size={13} />
             {m.unreadCounts?.[profile?.role || 'delivery'] > 0 && (
-              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border border-white">
                 {m.unreadCounts[profile?.role || 'delivery']}
               </span>
             )}
@@ -7603,36 +9028,36 @@ const DeliveryActiveCard = React.memo(({
         </div>
       </div>
 
-      <div className="p-5 space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="p-3.5 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1">
               <Hospital size={10} /> Origine
             </p>
-            <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{m.hospitalLocation}</p>
+            <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200 leading-tight truncate">{m.hospitalLocation}</p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1">
               <MapPin size={10} /> Ville
             </p>
-            <p className="text-[11px] font-bold text-slate-700 leading-tight truncate">{cities.find(c => c.id === m.cityId)?.name || "Non précisée"}</p>
+            <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200 leading-tight truncate">{cities.find(c => c.id === m.cityId)?.name || "Non précisée"}</p>
           </div>
           
-          <div className="col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-start gap-3">
+          <div className="col-span-2 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-start gap-3">
              {m.facadePhoto && (
-               <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 border border-slate-200">
+               <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
                  <img src={m.facadePhoto} className="w-full h-full object-cover" />
                </div>
              )}
              <div className="min-w-0 flex-1">
-               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><User size={10} /> Client</p>
-               <p className="text-sm font-bold text-slate-900 truncate">{m.patientName || "Client"}</p>
-               <div className="flex flex-col sm:flex-row gap-1.5 mt-1">
-                 <a href={`tel:${m.patientPhone || ''}`} className="inline-flex items-center justify-center gap-1 text-xs text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded-md border border-blue-100 flex-1">
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5 flex items-center gap-1"><User size={10} /> Client</p>
+               <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{m.patientName || "Client"}</p>
+               <div className="flex gap-1.5 mt-1">
+                 <a href={`tel:${m.patientPhone || ''}`} className="inline-flex items-center justify-center gap-1 text-[11px] text-blue-600 font-bold bg-blue-50 dark:bg-blue-950/40 px-2 py-1 rounded-md border border-blue-100/50 flex-1">
                    <Phone size={10} />
                    Appeler
                  </a>
-                 <a href={`https://wa.me/${(m.patientPhone || '').replace(/\D/g, '')}?text=Bonjour%2C%20je%20suis%20votre%20livreur%2E%20Pouvez-vous%20m'envoyer%20votre%20position%20en%20direct%20%3F`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 flex-1 group" title="Demander position via WhatsApp">
+                 <a href={`https://wa.me/${(m.patientPhone || '').replace(/\D/g, '')}?text=Bonjour%2C%20je%20suis%20votre%20livreur%2E%20Pouvez-vous%20m'envoyer%20votre%20position%20en%20direct%20%3F`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-1 text-[11px] text-emerald-600 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded-md border border-emerald-100/50 flex-1 group" title="Demander position via WhatsApp">
                    <MapPin size={10} className="group-hover:animate-bounce" />
                    WhatsApp GPS
                  </a>
@@ -7641,23 +9066,23 @@ const DeliveryActiveCard = React.memo(({
           </div>
           
           {m.landmark && (
-            <div className="col-span-2 bg-amber-50 p-2.5 rounded-xl border border-amber-100/50 flex items-start gap-2">
-              <MapPin size={14} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="col-span-2 bg-amber-50 dark:bg-amber-950/20 p-2 rounded-xl border border-amber-100/30 dark:border-amber-900/40 flex items-start gap-2">
+              <MapPin size={12} className="text-amber-600 shrink-0 mt-0.5" />
               <div>
-                <p className="text-[9px] font-black text-amber-600/70 uppercase tracking-widest">Secteur / Quartier / Repère</p>
-                <p className="text-xs font-bold text-amber-900 leading-tight">{m.landmark}</p>
+                <p className="text-[8px] font-black text-amber-600/70 uppercase tracking-widest">Secteur / Quartier / Repère</p>
+                <p className="text-xs font-bold text-amber-950 dark:text-amber-300 leading-tight">{m.landmark}</p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><Package size={10} /> Colis</p>
+        <div className="bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-slate-100/50 dark:border-slate-850">
+          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Package size={10} /> Colis</p>
           <div className="space-y-1">
             {m.items?.slice(0, 1).map((item, i) => (
               <div key={i} className="flex justify-between text-[10px]">
-                <span className="text-slate-600 truncate mr-2">{item.name}</span>
-                <span className="font-bold shrink-0">x{item.quantity}</span>
+                <span className="text-slate-600 dark:text-slate-300 truncate mr-2">{item.name}</span>
+                <span className="font-bold shrink-0 text-slate-900 dark:text-white">x{item.quantity}</span>
               </div>
             ))}
             {m.items && m.items.length > 1 && (
@@ -7670,25 +9095,25 @@ const DeliveryActiveCard = React.memo(({
         {!m.isHandedOver ? (
           <button 
             onClick={() => onShowPickupQR(m)}
-            className="w-full py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-all shadow-sm flex items-center justify-center gap-2"
+            className="w-full py-2 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 transition-all shadow-sm flex items-center justify-center gap-1.5"
           >
-            <QrCode size={14} />
+            <QrCode size={13} />
             Code Retrait
           </button>
         ) : (
           <button 
             onClick={() => onShowDeliveryVerify(m)}
-            className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-2"
+            className="w-full py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1.5"
           >
-            <ShieldCheck size={14} />
+            <ShieldCheck size={13} />
             Valider Livr.
           </button>
         )}
         <button 
           onClick={() => onShowMap(m)}
-          className="w-full py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+          className="w-full py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-1.5"
         >
-          <Search size={14} /> Carte
+          <Search size={13} /> Carte
         </button>
       </div>
     </div>
@@ -7771,9 +9196,9 @@ const printReceipt = (order: Order) => {
       </head>
       <body>
         <div class="header">
-          <div style="font-size: 28px; font-weight: bold;">🏥</div>
+          <img id="receipt-logo" src="${window.location.origin}/logoOD.png" alt="Logo" onerror="this.onerror=null; this.src='${window.location.origin}/logo-web.png';" style="height: 55px; width: auto; object-fit: contain; margin-bottom: 8px;" />
           <div class="title">ORDONNANCE DIRECT</div>
-          <div style="font-size: 11px; font-weight: bold; margin-top: 4px;">RECU DE LIVRAISON SÉCURISÉE</div>
+          <div style="font-size: 11px; font-weight: bold; margin-top: 4px;">REÇU DE LIVRAISON SÉCURISÉE</div>
         </div>
         
         <div style="font-size: 12px; margin-bottom: 10px; text-align: center; font-weight: bold;">
@@ -7825,11 +9250,20 @@ const printReceipt = (order: Order) => {
         </div>
         
         <script>
-          window.onload = function() {
+          function startPrint() {
             window.print();
             window.onafterprint = function() {
               window.close();
             };
+          }
+          window.onload = function() {
+            const img = document.getElementById('receipt-logo');
+            if (img && !img.complete) {
+              img.onload = startPrint;
+              img.onerror = startPrint;
+            } else {
+              startPrint();
+            }
           };
         </script>
       </body>
@@ -7841,6 +9275,14 @@ const printReceipt = (order: Order) => {
 const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: UserProfile, settings: Settings | null, cities: City[] }) => {
   const [missions, setMissions] = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState<'available' | 'active' | 'history' | 'wallet' | 'profile' | 'reports'>('available');
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const mainEl = document.querySelector('main');
+    if (mainEl) mainEl.scrollTop = 0;
+  }, [activeTab]);
 
   const [showPickupQR, setShowPickupQR] = useState<Order | null>(null);
   const [showDeliveryVerify, setShowDeliveryVerify] = useState<Order | null>(null);
@@ -8040,53 +9482,56 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
               <Truck size={20} className="text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-tight text-white uppercase leading-none">Espace Livreur</h1>
-              <p className="text-white/60 text-[9px] font-bold uppercase tracking-widest mt-1">Prêt pour livraison</p>
+              <h1 className="text-xl sm:text-3xl font-extrabold tracking-tight text-white leading-none">Espace Livreur Partenaire</h1>
+              <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mt-1.5">Réseau Logistique Santé • Burkina Faso</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${availableMissions.length > 0 ? 'bg-white animate-pulse' : 'bg-white/30'}`}></div>
-            <span className="text-[10px] font-black text-white/60 uppercase racking-widest">Actif</span>
+            <div className={`w-2.5 h-2.5 rounded-full ${availableMissions.length > 0 ? 'bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse' : 'bg-slate-500'}`}></div>
+            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">{availableMissions.length > 0 ? `${availableMissions.length} Mission(s) Prête(s)` : 'En attente'}</span>
           </div>
         </div>
       </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-8">
-          <div className="bg-emerald-500 p-4 sm:p-5 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
-            <div className="relative z-10">
-              <p className="text-[8px] font-black text-emerald-100 uppercase tracking-widest mb-1">Gains du jour</p>
-              <h3 className="text-sm font-bold text-white">{dailyGains.toLocaleString()} <span className="text-[8px] text-emerald-100">FCFA</span></h3>
-            </div>
-            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center text-white">
-              <TrendingUp size={16} />
-            </div>
-          </div>
-          <div className="bg-slate-900 p-4 sm:p-5 rounded-[2rem] shadow-xl flex items-center justify-between group relative overflow-hidden">
-            <div className="relative z-10">
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Gains</p>
-              <h3 className="text-sm font-bold text-white">{availableGains.toLocaleString()} <span className="text-[8px] text-slate-400">FCFA</span></h3>
-            </div>
-            <div className="w-8 h-8 bg-white/5 rounded-xl flex items-center justify-center text-emerald-400">
-              <CreditCard size={16} />
-            </div>
-          </div>
-          <div className="bg-white p-4 sm:p-5 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Missions</p>
-              <h3 className="text-sm font-bold text-slate-900">{availableMissions.length}</h3>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Gains du jour</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{dailyGains.toLocaleString()} <span className="text-xs font-bold text-emerald-600">FCFA</span></h3>
             </div>
-            <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-              <MapPin size={16} />
+            <div className="w-11 h-11 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
+              <TrendingUp size={20} />
             </div>
           </div>
-          <div className="bg-white p-4 sm:p-5 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between group">
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
-              <h3 className="text-sm font-bold text-slate-900">{completedMissionsCount}</h3>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Disponible</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{availableGains.toLocaleString()} <span className="text-xs font-bold text-emerald-600">FCFA</span></h3>
             </div>
-            <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-              <Package size={16} />
+            <div className="w-11 h-11 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-700">
+              <CreditCard size={20} />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Missions Disponibles</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{availableMissions.length}</h3>
+            </div>
+            <div className="w-11 h-11 bg-sky-50 rounded-2xl flex items-center justify-center text-sky-600">
+              <MapPin size={20} />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Courses Réalisées</p>
+              <h3 className="text-lg sm:text-2xl font-extrabold text-slate-900">{completedMissionsCount}</h3>
+            </div>
+            <div className="w-11 h-11 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
+              <Package size={20} />
             </div>
           </div>
         </div>
@@ -8168,132 +9613,85 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
         <div className="flex-1 min-w-0 pb-36 md:pb-0">
           <div key={activeTab}>
               {activeTab === 'available' && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {availableMissions.length === 0 ? (
-              <div className="md:col-span-2 lg:col-span-3 bg-white p-10 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="w-24 h-24 bg-amber-500/10 rounded-full flex items-center justify-center text-amber-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                  <Truck size={48} strokeWidth={1.5} />
-                </div>
-                <p className="text-slate-900 font-black text-2xl mb-2">Aucune mission</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">Les nouvelles commandes prêtes à être livrées apparaîtront ici.</p>
-              </div>
-            ) : (
-              availableMissions.map(m => (
-                <MissionCard 
-                  key={m.id} 
-                  m={m} 
-                  onAccept={async (mission) => {
-                    try {
-                      await updateDoc(doc(db, 'orders', mission.id), { 
-                        deliveryId: profile.uid,
-                        deliveryPersonName: profile.name,
-                        deliveryPersonPhone: profile.phone || "Non spécifié",
-                        deliveryPersonPhoto: profile.photoUrl || null,
-                        pickupCode: generateCode(),
-                        isHandedOver: false,
-                        updatedAt: serverTimestamp(),
-                        history: arrayUnion({
-                          status: mission.status,
-                          timestamp: new Date().toISOString(),
-                          label: 'Mission acceptée par le livreur'
-                        })
-                      });
-                    } catch (err) {
-                      handleFirestoreError(err, OperationType.UPDATE, `orders/${mission.id}`);
-                    }
-                  }} 
-                  onReject={handleRejectMission} 
+                <PaginatedList
+                  items={availableMissions}
+                  pageSize={10}
+                  emptyMessage="Aucune mission disponible"
+                  emptyIcon={<Truck size={36} className="text-slate-400" />}
+                  renderItem={(m) => (
+                    <MissionCard 
+                      key={m.id} 
+                      m={m} 
+                      onAccept={async (mission) => {
+                        try {
+                          await updateDoc(doc(db, 'orders', mission.id), { 
+                            deliveryId: profile.uid,
+                            deliveryPersonName: profile.name,
+                            deliveryPersonPhone: profile.phone || "Non spécifié",
+                            deliveryPersonPhoto: profile.photoUrl || null,
+                            pickupCode: generateCode(),
+                            isHandedOver: false,
+                            updatedAt: serverTimestamp(),
+                            history: arrayUnion({
+                              status: mission.status,
+                              timestamp: new Date().toISOString(),
+                              label: 'Mission acceptée par le livreur'
+                            })
+                          });
+                        } catch (err) {
+                          handleFirestoreError(err, OperationType.UPDATE, `orders/${mission.id}`);
+                        }
+                      }} 
+                      onReject={handleRejectMission} 
+                    />
+                  )}
                 />
-              ))
-            )}
-                  </div>
-                </>
               )}
 
               {activeTab === 'active' && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {activeMissions.length === 0 ? (
-              <div className="lg:col-span-3 bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                  <Truck size={48} strokeWidth={1.5} />
-                </div>
-                <p className="text-slate-900 font-black text-2xl mb-2">Aucune livraison en cours</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">Acceptez une mission pour commencer une livraison.</p>
-              </div>
-            ) : (
-              activeMissions.map(m => (
-                <DeliveryActiveCard 
-                  key={m.id} 
-                  m={m} 
-                  profile={profile} 
-                  cities={cities} 
-                  onChat={setActiveChatOrderId} 
-                  onShowPickupQR={setShowPickupQR} 
-                  onShowDeliveryVerify={setShowDeliveryVerify} 
-                  onShowMap={setShowMapForOrder} 
+                <PaginatedList
+                  items={activeMissions}
+                  pageSize={10}
+                  emptyMessage="Aucune livraison en cours"
+                  emptyIcon={<Package size={36} className="text-slate-400" />}
+                  renderItem={(m) => (
+                    <DeliveryActiveCard 
+                      key={m.id} 
+                      m={m} 
+                      profile={profile} 
+                      cities={cities} 
+                      onChat={setActiveChatOrderId} 
+                      onShowPickupQR={setShowPickupQR} 
+                      onShowDeliveryVerify={setShowDeliveryVerify} 
+                      onShowMap={setShowMapForOrder} 
+                    />
+                  )}
                 />
-              ))
-            )}
-                  </div>
-                </>
               )}
 
       {activeTab === 'history' && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {historyMissions.length === 0 ? (
-            <div className="lg:col-span-3 bg-white p-20 rounded-[3.5rem] border-2 border-dashed border-slate-100 text-center relative overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-              <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500">
-                <Clock size={48} strokeWidth={1.5} />
+        <PaginatedList
+          items={historyMissions}
+          pageSize={10}
+          emptyMessage="Aucun historique de livraison"
+          emptyIcon={<Clock size={36} className="text-slate-400" />}
+          renderItem={(m) => (
+            <div key={m.id} onClick={() => setSelectedOrder(m)} className="flex items-center justify-between gap-3 p-1 cursor-pointer hover:bg-slate-50 transition-colors">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-900 text-sm">Commande #{m.id.slice(-6).toUpperCase()}</span>
+                  <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold">LIVRÉE</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">{m.pharmacyName} → {m.patientName}</p>
               </div>
-              <p className="text-slate-900 font-black text-2xl mb-2">Historique vide</p>
-              <p className="text-slate-500 text-sm max-w-xs mx-auto">Les livraisons terminées apparaîtront ici.</p>
+              <div className="text-right">
+                <span className="font-bold text-emerald-700 text-xs block">{m.deliveryFee ? `${m.deliveryFee.toLocaleString('fr-FR')} FCFA` : '-'}</span>
+                <span className="text-[10px] text-slate-400">{m.updatedAt ? formatDate(m.updatedAt, 'dateTime') : ''}</span>
+              </div>
             </div>
-          ) : (
-            historyMissions.map(m => (
-              <div key={m.id} onClick={() => setSelectedOrder(m)} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col opacity-80 hover:opacity-100 transition-opacity cursor-pointer">
-                <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
-                  <div>
-                    <span className="font-bold text-sm block">#{m.id.slice(-6).toUpperCase()}</span>
-                    <span className="text-[10px] text-slate-500">{m.updatedAt ? formatDate(m.updatedAt, 'dateTime') : 'Date inconnue'}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-bold block mb-1">LIVRÉE</span>
-                    <span className="text-xs font-black text-emerald-600">+{m.deliveryFee || 1500} FCFA</span>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="flex gap-3">
-                    <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
-                      <MapPin size={14} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Secteur / Quartier</p>
-                      <p className="font-bold text-xs text-slate-600 truncate">Secteur 15, Rue 15.22</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-8 h-8 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
-                      <Package size={14} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Articles</p>
-                      <p className="font-bold text-xs text-slate-600 truncate">{m.items?.length || 0} article(s)</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))
           )}
-                  </div>
-                </>
-              )}
+        />
+      )}
 
       {activeTab === 'wallet' && (
         <>
@@ -9066,9 +10464,9 @@ const DeliveryDashboard = React.memo(({ profile, settings, cities }: { profile: 
             {selectedOrder.status === 'completed' && (
               <button 
                 onClick={() => printReceipt(selectedOrder)}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
+                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2"
               >
-                <span>🖨️</span> Imprimer le reçu (PDF)
+                <Printer size={18} /> Imprimer le reçu (PDF)
               </button>
             )}
             

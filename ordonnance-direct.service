@@ -1,0 +1,16 @@
+[Unit]
+Description=Ordonnance Direct Node.js Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/ordonnance-direct
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target

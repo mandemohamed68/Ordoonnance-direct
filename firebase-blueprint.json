@@ -125,7 +125,16 @@
         "dayDeliveryFee": { "type": "number" },
         "nightDeliveryFee": { "type": "number" },
         "nightStartHour": { "type": "integer", "description": "Hour when night rate starts (0-23)." },
-        "nightEndHour": { "type": "integer", "description": "Hour when night rate ends (0-23)." }
+        "nightEndHour": { "type": "integer", "description": "Hour when night rate ends (0-23)." },
+        "appName": { "type": "string", "description": "The custom branded app name." },
+        "appTagline": { "type": "string", "description": "The slogan or tagline." },
+        "appLogoUrl": { "type": "string", "description": "The custom app logo URL or base64 image." },
+        "themeType": { "type": "string", "enum": ["default", "christmas", "new-year", "valentine", "ocean", "royal", "orange", "custom", "rainy", "harmattan", "ramadan", "burkina", "spring"], "description": "Active seasonal or custom color theme." },
+        "effectType": { "type": "string", "enum": ["auto", "none", "snow", "fireworks", "hearts", "rain", "harmattan", "ramadan", "burkina", "sakura", "sparkles"], "description": "Active visual canvas effect animation." },
+        "effectsIntensity": { "type": "string", "enum": ["low", "medium", "high"], "description": "Particle density and motion speed." },
+        "decorationsEnabled": { "type": "boolean", "description": "Whether seasonal decorations/ornaments are rendered at the top of the viewport." },
+        "primaryColor": { "type": "string", "description": "Hex color code for primary color when custom theme is active." },
+        "secondaryColor": { "type": "string", "description": "Hex color code for secondary color when custom theme is active." }
       },
       "required": ["dayDeliveryFee", "nightDeliveryFee", "nightStartHour", "nightEndHour"]
     },

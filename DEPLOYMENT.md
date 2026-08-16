@@ -1,46 +1,51 @@
-# Guide de Déploiement Ordonnance Direct
+# 🚀 Ordonnance Direct - Déploiement Local avec PM2 & Mobile
 
-Ce projet est prêt pour le déploiement en tant qu'application web et application mobile Android (via Capacitor).
+Pour le guide complet et détaillé, consultez **[`GUIDE_DEPLOIEMENT_LOCAL_ET_MOBILE.md`](./GUIDE_DEPLOIEMENT_LOCAL_ET_MOBILE.md)**.
 
-## 1. Déploiement Web
-L'application est configurée pour être déployée sur des plateformes comme Vercel, Firebase Hosting ou Netlify.
-- Exécutez `npm run build` pour générer les fichiers statiques dans le dossier `dist`.
-- Le serveur Express (`server.ts`) peut être utilisé pour un déploiement Node.js complet.
+## ⚡ 1. Déploiement Local avec PM2 & SSL (1-Clic)
 
-## 2. Génération de l'APK (Android)
-En raison des restrictions de l'environnement de développement actuel (absence de Java/Android SDK), l'APK ne peut pas être généré directement ici. 
+```bash
+# 🚀 1. Lancer ou Recharger l'application avec PM2
+./deploy-pm2.sh
 
-**Procédure pour générer l'APK sur votre machine :**
+# 🔒 2. Configurer Nginx avec SSL (HTTPS sur port 443 -> PM2)
+sudo ./scripts/install-nginx-pm2.sh
+```
 
-### Prérequis
-- [Node.js](https://nodejs.org/) installé.
-- [Android Studio](https://developer.android.com/studio) installé et configuré.
-- [Java JDK 17+](https://www.oracle.com/java/technologies/downloads/) installé.
+### 📊 Commandes PM2 usuelles :
+```bash
+npm run pm2:status    # Voir l'état des processus
+npm run pm2:logs      # Voir les logs en temps réel
+npm run pm2:monit     # Dashboard interactif CPU / Mémoire
+npm run pm2:reload    # Recharger le code sans coupure de service
+npm run pm2:stop      # Arrêter l'application
+```
+- **Accès HTTPS Sécurisé :** `https://localhost`
+- **Accès Direct Node.js :** `http://localhost:3000`
 
-### Étapes
-1. **Exporter le code :** Téléchargez le projet (ZIP) ou clonez-le depuis votre dépôt.
-2. **Installer les dépendances :**
-   ```bash
-   npm install
-   ```
-3. **Construire le projet web :**
-   ```bash
-   npm run build
-   ```
-4. **Synchroniser Capacitor :**
-   ```bash
-   npx cap sync android
-   ```
-5. **Ouvrir dans Android Studio :**
-   ```bash
-   npx cap open android
-   ```
-6. **Générer l'APK :**
-   - Dans Android Studio, allez dans **Build** > **Build Bundle(s) / APK(s)** > **Build APK(s)**.
-   - Une fois terminé, Android Studio affichera une notification avec un lien vers l'APK généré.
+---
 
-## 3. Configuration Firebase
-Assurez-vous que les informations dans `firebase-applet-config.json` sont correctes. Pour la production mobile, vous devrez peut-être ajouter l'empreinte SHA-1 de votre certificat de signature Android dans la console Firebase.
+## 📱 2. Générer l'APK Android (Debug ou Release)
 
-## 4. Notifications SMS
-Le système utilise un service de simulation SMS dans `src/utils/sms.ts`. Pour la production, intégrez un fournisseur comme Twilio ou Infobip.
+```bash
+# Générer l'APK Debug (prêt à installer sur smartphone)
+./scripts/build-android-apk.sh debug
+
+# Générer l'APK Release & AAB pour le Play Store
+./scripts/build-android-apk.sh release
+
+# Ouvrir dans Android Studio
+npm run cap:open:android
+```
+
+---
+
+## 🍏 3. Générer l'application iOS (iPhone/iPad)
+
+```bash
+# Préparer et synchroniser le projet iOS
+./scripts/build-ios.sh
+
+# Ouvrir dans Xcode (sur Mac)
+npm run cap:open:ios
+```

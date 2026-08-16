@@ -253,6 +253,84 @@ export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2
   return d;
 };
 
+/**
+ * Calculates the fixed delivery fee for Moto Express based on distance and settings.
+ * Formula:
+ * Total = Base Fee + Math.max(0, Distance - Base Distance) * Price Per Km
+ * Optional multipliers: Night and Express
+ */
+export const calculateMotoDeliveryFee = (
+  distanceKm: number,
+  settings?: any,
+  options?: { isExpress?: boolean; isNight?: boolean }
+): {
+  finalFee: number;
+  baseFee: number;
+  distanceKm: number;
+  extraKm: number;
+  extraFee: number;
+  nightFee: number;
+  expressFee: number;
+  isNight: boolean;
+} => {
+  const moto = settings?.motoPricing || {
+    baseFee: settings?.dayDeliveryFee || 500,
+    baseDistanceKm: 3,
+    pricePerKm: 150,
+    nightMultiplier: 1.25,
+    expressMultiplier: 1.20,
+    nightStartHour: settings?.nightStartHour ?? 20,
+    nightEndHour: settings?.nightEndHour ?? 6
+  };
+
+  const currentHour = new Date().getHours();
+  const nightStart = moto.nightStartHour ?? settings?.nightStartHour ?? 20;
+  const nightEnd = moto.nightEndHour ?? settings?.nightEndHour ?? 6;
+
+  const isNightTime = options?.isNight !== undefined 
+    ? options.isNight 
+    : (nightStart > nightEnd 
+        ? (currentHour >= nightStart || currentHour < nightEnd)
+        : (currentHour >= nightStart && currentHour < nightEnd));
+
+  const baseFee = moto.baseFee || settings?.dayDeliveryFee || 500;
+  const baseDistanceKm = moto.baseDistanceKm || 3;
+  const pricePerKm = moto.pricePerKm || 150;
+
+  const extraKm = Math.max(0, distanceKm - baseDistanceKm);
+  const extraFee = extraKm * pricePerKm;
+
+  let feeBeforeMultipliers = baseFee + extraFee;
+
+  let nightFee = 0;
+  if (isNightTime && (moto.nightMultiplier || 1) > 1) {
+    nightFee = Math.round(feeBeforeMultipliers * ((moto.nightMultiplier || 1.25) - 1));
+  } else if (isNightTime && settings?.nightDeliveryFee && settings.nightDeliveryFee > settings.dayDeliveryFee) {
+    // Fallback if fixed night fee is set
+    nightFee = Math.max(0, settings.nightDeliveryFee - settings.dayDeliveryFee);
+  }
+
+  let expressFee = 0;
+  if (options?.isExpress && (moto.expressMultiplier || 1) > 1) {
+    expressFee = Math.round(feeBeforeMultipliers * ((moto.expressMultiplier || 1.2) - 1));
+  }
+
+  let totalRaw = feeBeforeMultipliers + nightFee + expressFee;
+  // Round up to nearest 25 FCFA for local currency standard
+  const finalFee = Math.ceil(totalRaw / 25) * 25;
+
+  return {
+    finalFee,
+    baseFee,
+    distanceKm: Math.round(distanceKm * 10) / 10,
+    extraKm: Math.round(extraKm * 10) / 10,
+    extraFee,
+    nightFee,
+    expressFee,
+    isNight: isNightTime
+  };
+};
+
 const deg2rad = (deg: number): number => {
   return deg * (Math.PI / 180);
 };

@@ -146,18 +146,43 @@ export interface Order {
   };
   landmark?: string;
   facadePhoto?: string;
+  deliveryAddress?: string;
+  cityName?: string;
 }
 
 export interface Settings {
   appName?: string;
+  appTagline?: string;
+  appLogoUrl?: string;
+  themeType?: 'default' | 'christmas' | 'new-year' | 'valentine' | 'ocean' | 'royal' | 'orange' | 'custom' | 'rainy' | 'harmattan' | 'ramadan' | 'burkina' | 'spring';
+  effectType?: 'auto' | 'none' | 'snow' | 'fireworks' | 'hearts' | 'rain' | 'harmattan' | 'ramadan' | 'burkina' | 'sakura' | 'sparkles';
+  effectsIntensity?: 'low' | 'medium' | 'high';
+  decorationsEnabled?: boolean;
+  primaryColor?: string;
+  secondaryColor?: string;
   supportEmail?: string;
   supportPhone?: string;
-  supportChatEnabled?: boolean;
+  emergencyPhone?: string;
   currency?: string;
+  countryName?: string;
+  announcementText?: string;
+  announcementEnabled?: boolean;
+  termsText?: string;
+  legalNoticeText?: string;
+  supportChatEnabled?: boolean;
   dayDeliveryFee: number;
   nightDeliveryFee: number;
   nightStartHour: number;
   nightEndHour: number;
+  motoPricing?: {
+    baseFee: number;
+    baseDistanceKm: number;
+    pricePerKm: number;
+    nightMultiplier: number;
+    expressMultiplier: number;
+    nightStartHour: number;
+    nightEndHour: number;
+  };
   commissionPercentage: number; // Pharmacy commission
   deliveryCommissionPercentage?: number;
   serviceFee?: number;
